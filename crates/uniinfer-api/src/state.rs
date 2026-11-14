@@ -4,10 +4,8 @@ use std::sync::atomic::AtomicUsize;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use uniinfer_core::{CancelToken, EngineError, ModelManifest, Result};
-use uniinfer_devices::DeviceInventory;
-use uniinfer_engine_onnx::OnnxEngine;
-use uniinfer_registry::{EngineRegistry, SessionLease};
+use uniinfer_core::{CancelToken, EngineError, Result};
+use uniinfer_service::{ModelSlot, Runtime};
 
 /// Server options.
 #[derive(Debug, Clone)]
@@ -26,18 +24,11 @@ impl ApiConfig {
     }
 }
 
-/// One loaded model, serialized by a single permit.
-pub struct ModelSlot {
-    pub manifest: ModelManifest,
-    pub session: Arc<SessionLease>,
-    pub permit: Arc<tokio::sync::Semaphore>,
-}
-
 /// Shared server state.
 #[derive(Clone)]
 pub struct AppState {
     pub(crate) slot: Arc<ModelSlot>,
-    pub(crate) registry: Arc<EngineRegistry>,
+    pub(crate) runtime: Arc<Runtime>,
     pub(crate) cancels: Arc<Mutex<HashMap<String, CancelToken>>>,
     pub(crate) active: Arc<AtomicUsize>,
     pub(crate) queue_timeout: Duration,
@@ -45,32 +36,12 @@ pub struct AppState {
 
 impl AppState {
     pub fn new(config: &ApiConfig) -> Result<Self> {
-        let engine = OnnxEngine::new()?;
-        let mut inventory = DeviceInventory::probe();
-        for device in engine.probe_devices() {
-            inventory.register(device);
-        }
-        let mut registry = EngineRegistry::new(inventory);
-        registry.register(Arc::new(engine));
-
-        let lease = registry.load(&config.manifest)?;
-        let manifest = lease.manifest().clone();
-        let tokenizer = manifest.tokenizer.as_deref().unwrap_or_default();
-        if tokenizer != "bytes" {
-            return Err(EngineError::UnsupportedEngine(format!(
-                "tokenizer {tokenizer:?}; M1 serves byte tokenizers"
-            )));
-        }
-
-        let slot = Arc::new(ModelSlot {
-            manifest,
-            session: Arc::new(lease),
-            permit: Arc::new(tokio::sync::Semaphore::new(1)),
-        });
+        let runtime = Arc::new(Runtime::new()?);
+        let slot = runtime.load(&config.manifest)?;
 
         Ok(Self {
             slot,
-            registry: Arc::new(registry),
+            runtime,
             cancels: Arc::new(Mutex::new(HashMap::new())),
             active: Arc::new(AtomicUsize::new(0)),
             queue_timeout: config.queue_timeout,
@@ -89,6 +60,47 @@ impl AppState {
     pub(crate) fn unregister(&self, id: &str) {
         if let Ok(mut guard) = self.cancels.lock() {
             guard.remove(id);
+        }
+    }
+}
+
+/// Cancels and unregisters a request when the handler is dropped.
+pub(crate) struct CancelGuard {
+    cancels: Arc<Mutex<HashMap<String, CancelToken>>>,
+    id: String,
+    token: CancelToken,
+    armed: bool,
+}
+
+impl CancelGuard {
+    pub(crate) fn new(state: &AppState, id: String, token: CancelToken) -> Result<Self> {
+        state.register(&id, token.clone())?;
+        Ok(Self {
+            cancels: Arc::clone(&state.cancels),
+            id,
+            token,
+            armed: true,
+        })
+    }
+
+    pub(crate) fn token(&self) -> CancelToken {
+        self.token.clone()
+    }
+
+    /// Hand cleanup to the generation task (streaming returns immediately).
+    pub(crate) fn disarm(&mut self) {
+        self.armed = false;
+    }
+}
+
+impl Drop for CancelGuard {
+    fn drop(&mut self) {
+        if !self.armed {
+            return;
+        }
+        self.token.cancel();
+        if let Ok(mut guard) = self.cancels.lock() {
+            guard.remove(&self.id);
         }
     }
 }

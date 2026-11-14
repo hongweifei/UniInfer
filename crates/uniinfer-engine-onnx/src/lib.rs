@@ -7,9 +7,8 @@ use ort::environment::Environment;
 use ort::session::Session;
 use ort::value::{DynValue, Outlet, Tensor as OrtTensor, TensorElementType, ValueType};
 use uniinfer_core::{
-    Device, DeviceClass, EngineCapabilities, EngineError, EngineLoadSpec, EngineSession,
-    InferenceEngine, Modality, ModelFormat, Quantization, Result, Tensor, TensorData, TensorDtype,
-    TensorSpec,
+    Device, DeviceClass, EngineError, EngineLoadSpec, EngineSession, InferenceEngine, Modality,
+    ModelFormat, Quantization, Result, Tensor, TensorData, TensorDtype, TensorSpec,
 };
 
 const FORMATS: &[ModelFormat] = &[ModelFormat::Onnx];
@@ -135,15 +134,6 @@ impl InferenceEngine for OnnxEngine {
 
     fn supported_devices(&self) -> &[DeviceClass] {
         &DEVICES
-    }
-
-    fn capabilities(&self) -> EngineCapabilities {
-        EngineCapabilities {
-            formats: FORMATS.to_vec(),
-            modalities: vec![(ModelFormat::Onnx, MODALITIES.to_vec())],
-            quantizations: vec![(ModelFormat::Onnx, QUANTIZATIONS.to_vec())],
-            devices: DEVICES.clone(),
-        }
     }
 
     fn load_session(&self, spec: EngineLoadSpec) -> Result<Box<dyn EngineSession>> {

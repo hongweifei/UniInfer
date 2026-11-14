@@ -12,14 +12,12 @@ use serde::Deserialize;
 use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
 use tokio::sync::mpsc;
-use tokio::time::timeout;
 use tokio_stream::StreamExt;
 use tokio_stream::wrappers::ReceiverStream;
-use uniinfer_backends::{GenerateOptions, generate_bytes_cancellable};
 use uniinfer_core::{CancelToken, EngineError};
 
 use crate::error::ApiError;
-use crate::state::{ActiveGuard, AppState};
+use crate::state::{ActiveGuard, AppState, CancelGuard};
 use crate::utf8::Utf8Decoder;
 
 /// Build the HTTP router.
@@ -80,13 +78,13 @@ async fn health() -> &'static str {
 async fn metrics(State(state): State<AppState>) -> Json<Value> {
     Json(json!({
         "active_requests": state.active.load(Ordering::SeqCst),
-        "loaded_sessions": state.registry.active_sessions(),
+        "loaded_sessions": state.runtime.active_sessions(),
     }))
 }
 
 async fn models(State(state): State<AppState>) -> Json<Value> {
-    let manifest = &state.slot.manifest;
-    let placement = state.slot.session.placement();
+    let manifest = state.slot.manifest();
+    let placement = state.slot.placement();
     Json(json!({
         "object": "list",
         "data": [{
@@ -122,7 +120,7 @@ async fn chat(
     State(state): State<AppState>,
     ApiJson(request): ApiJson<ChatRequest>,
 ) -> Result<Response, ApiError> {
-    let manifest = &state.slot.manifest;
+    let manifest = state.slot.manifest();
     if request.model != manifest.id {
         return Err(ApiError::not_found(
             "model_not_found",
@@ -151,47 +149,20 @@ async fn chat(
         ));
     }
 
-    let text = manifest.text.as_ref().ok_or_else(|| {
-        ApiError::bad_request("unsupported_model", "manifest has no [text] section")
-    })?;
-    let vocab = text.vocab_size;
-    let options = GenerateOptions {
-        max_tokens,
-        eos_token: text.eos_token,
-    };
-    let context_len = manifest.context_len;
-
     let session_id = next_session_id();
     let cancel = CancelToken::new();
-    let permit = match timeout(
-        state.queue_timeout,
-        state.slot.permit.clone().acquire_owned(),
-    )
-    .await
-    {
-        Ok(Ok(permit)) => permit,
-        Ok(Err(_)) => {
-            state.unregister(&session_id);
-            return Err(ApiError::internal("model semaphore closed"));
-        }
-        Err(_) => {
-            return Err(ApiError::busy("model queue timeout"));
-        }
-    };
-    state.register(&session_id, cancel.clone())?;
+    let permit = state
+        .slot
+        .acquire(state.queue_timeout)
+        .await
+        .map_err(ApiError::from)?;
+    let mut guard = CancelGuard::new(&state, session_id.clone(), cancel.clone())?;
 
     if request.stream {
-        stream_response(
-            state,
-            permit,
-            session_id,
-            prompt,
-            vocab,
-            context_len,
-            options,
-            cancel,
-        )
-        .await
+        let response =
+            stream_response(state, permit, session_id, prompt, max_tokens, guard.token()).await;
+        guard.disarm();
+        response
     } else {
         complete_response(
             state,
@@ -199,9 +170,7 @@ async fn chat(
             session_id,
             prompt,
             prompt_tokens,
-            vocab,
-            context_len,
-            options,
+            max_tokens,
             cancel,
         )
         .await
@@ -235,13 +204,11 @@ async fn stream_response(
     permit: tokio::sync::OwnedSemaphorePermit,
     session_id: String,
     prompt: String,
-    vocab: usize,
-    context_len: usize,
-    options: GenerateOptions,
+    max_tokens: usize,
     cancel: CancelToken,
 ) -> Result<Response, ApiError> {
     let (tx, rx) = mpsc::channel::<StreamEvent>(32);
-    let model = state.slot.manifest.id.clone();
+    let model = state.slot.manifest().id.clone();
     let created = unix_seconds();
     let task_state = state.clone();
     let task_session = session_id.clone();
@@ -250,18 +217,17 @@ async fn stream_response(
         let _permit = permit;
         let _active = ActiveGuard::new(task_state.active.clone());
         let mut decoder = Utf8Decoder::new();
-        let result = generate_bytes_cancellable(
-            task_state.slot.session.session(),
-            &prompt,
-            vocab,
-            context_len,
-            &options,
-            &cancel,
-            &mut |byte| match decoder.push(byte) {
-                Some(text) => tx.blocking_send(StreamEvent::Delta(text)).is_ok(),
-                None => true,
-            },
-        );
+        let result = task_state
+            .slot
+            .generate(
+                &prompt,
+                max_tokens,
+                &cancel,
+                &mut |byte| match decoder.push(byte) {
+                    Some(text) => tx.blocking_send(StreamEvent::Delta(text)).is_ok(),
+                    None => true,
+                },
+            );
         let tail = decoder.finish();
         if !tail.is_empty() {
             let _ = tx.blocking_send(StreamEvent::Delta(tail));
@@ -311,9 +277,7 @@ async fn complete_response(
     session_id: String,
     prompt: String,
     prompt_tokens: usize,
-    vocab: usize,
-    context_len: usize,
-    options: GenerateOptions,
+    max_tokens: usize,
     cancel: CancelToken,
 ) -> Result<Response, ApiError> {
     let task_state = state.clone();
@@ -322,18 +286,12 @@ async fn complete_response(
         let _permit = permit;
         let _active = ActiveGuard::new(task_state.active.clone());
         let mut bytes = Vec::new();
-        let result = generate_bytes_cancellable(
-            task_state.slot.session.session(),
-            &prompt,
-            vocab,
-            context_len,
-            &options,
-            &cancel,
-            &mut |byte| {
+        let result = task_state
+            .slot
+            .generate(&prompt, max_tokens, &cancel, &mut |byte| {
                 bytes.push(byte);
                 true
-            },
-        );
+            });
         task_state.unregister(&task_session);
         (result, bytes)
     })
@@ -350,7 +308,7 @@ async fn complete_response(
         "id": format!("chatcmpl-{session_id}"),
         "object": "chat.completion",
         "created": created,
-        "model": state.slot.manifest.id,
+        "model": state.slot.manifest().id,
         "choices": [{
             "index": 0,
             "message": {"role": "assistant", "content": content},

@@ -1,13 +1,10 @@
 use std::io::Write;
 use std::time::Duration;
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use uniinfer_api::ApiConfig;
-use uniinfer_backends::{GenerateOptions, generate_bytes};
-use uniinfer_devices::DeviceInventory;
-use uniinfer_engine_onnx::OnnxEngine;
-use uniinfer_registry::EngineRegistry;
+use uniinfer_service::{CancelToken, Runtime};
 
 #[derive(Debug, Parser)]
 #[command(name = "uniinfer", version, about = "UniInfer local inference runtime")]
@@ -80,16 +77,12 @@ async fn serve(
 }
 
 fn devices() -> Result<()> {
-    let mut inventory = DeviceInventory::probe();
-    let engine = OnnxEngine::new().context("initialize ONNX engine")?;
-    for device in engine.probe_devices() {
-        inventory.register(device);
-    }
+    let runtime = Runtime::new().context("initialize runtime")?;
     println!(
         "{:<10} {:<16} {:<10} {:>12}",
         "ID", "CLASS", "BACKEND", "MEMORY"
     );
-    for device in inventory.devices() {
+    for device in runtime.devices() {
         println!(
             "{:<10} {:<16} {:<10} {:>12}",
             device.id,
@@ -102,38 +95,15 @@ fn devices() -> Result<()> {
 }
 
 fn run(manifest_path: &std::path::Path, prompt: &str, max_tokens: usize) -> Result<()> {
-    let mut registry = EngineRegistry::new(DeviceInventory::probe());
-    registry.register(std::sync::Arc::new(
-        OnnxEngine::new().context("initialize ONNX engine")?,
-    ));
-
-    let lease = registry
+    let runtime = Runtime::new().context("initialize runtime")?;
+    let slot = runtime
         .load(manifest_path)
         .with_context(|| format!("load {}", manifest_path.display()))?;
 
-    let manifest = lease.manifest();
-    let tokenizer = manifest.tokenizer.as_deref().unwrap_or_default();
-    if tokenizer != "bytes" {
-        bail!("tokenizer {tokenizer:?} is not supported yet; use tokenizer = \"bytes\"");
-    }
-    let text = manifest
-        .text
-        .as_ref()
-        .context("manifest has no [text] section")?;
-
-    let options = GenerateOptions {
-        max_tokens,
-        eos_token: text.eos_token,
-    };
     let mut stdout = std::io::stdout().lock();
-    generate_bytes(
-        lease.session(),
-        prompt,
-        text.vocab_size,
-        manifest.context_len,
-        &options,
-        &mut |byte| stdout.write_all(&[byte]).is_ok() && stdout.flush().is_ok(),
-    )?;
+    slot.generate(prompt, max_tokens, &CancelToken::new(), &mut |byte| {
+        stdout.write_all(&[byte]).is_ok() && stdout.flush().is_ok()
+    })?;
     writeln!(stdout)?;
     Ok(())
 }

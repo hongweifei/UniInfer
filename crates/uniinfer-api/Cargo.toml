@@ -8,23 +8,20 @@ repository.workspace = true
 
 [features]
 default = []
-ep-cuda = ["uniinfer-engine-onnx/ep-cuda"]
-ep-tensorrt = ["uniinfer-engine-onnx/ep-tensorrt"]
-ep-coreml = ["uniinfer-engine-onnx/ep-coreml"]
-ep-directml = ["uniinfer-engine-onnx/ep-directml"]
-ep-nnapi = ["uniinfer-engine-onnx/ep-nnapi"]
-ep-qnn = ["uniinfer-engine-onnx/ep-qnn"]
-ep-openvino = ["uniinfer-engine-onnx/ep-openvino"]
-ep-rocm = ["uniinfer-engine-onnx/ep-rocm"]
-ep-vitis = ["uniinfer-engine-onnx/ep-vitis"]
-ep-cann = ["uniinfer-engine-onnx/ep-cann"]
+ep-cuda = ["uniinfer-service/ep-cuda"]
+ep-tensorrt = ["uniinfer-service/ep-tensorrt"]
+ep-coreml = ["uniinfer-service/ep-coreml"]
+ep-directml = ["uniinfer-service/ep-directml"]
+ep-nnapi = ["uniinfer-service/ep-nnapi"]
+ep-qnn = ["uniinfer-service/ep-qnn"]
+ep-openvino = ["uniinfer-service/ep-openvino"]
+ep-rocm = ["uniinfer-service/ep-rocm"]
+ep-vitis = ["uniinfer-service/ep-vitis"]
+ep-cann = ["uniinfer-service/ep-cann"]
 
 [dependencies]
 uniinfer-core.workspace = true
-uniinfer-devices.workspace = true
-uniinfer-registry.workspace = true
-uniinfer-backends.workspace = true
-uniinfer-engine-onnx.workspace = true
+uniinfer-service.workspace = true
 axum.workspace = true
 tokio.workspace = true
 tokio-stream.workspace = true

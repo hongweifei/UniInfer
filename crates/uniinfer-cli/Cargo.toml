@@ -8,24 +8,20 @@ repository.workspace = true
 
 [features]
 default = []
-ep-cuda = ["uniinfer-engine-onnx/ep-cuda", "uniinfer-api/ep-cuda"]
-ep-tensorrt = ["uniinfer-engine-onnx/ep-tensorrt", "uniinfer-api/ep-tensorrt"]
-ep-coreml = ["uniinfer-engine-onnx/ep-coreml", "uniinfer-api/ep-coreml"]
-ep-directml = ["uniinfer-engine-onnx/ep-directml", "uniinfer-api/ep-directml"]
-ep-nnapi = ["uniinfer-engine-onnx/ep-nnapi", "uniinfer-api/ep-nnapi"]
-ep-qnn = ["uniinfer-engine-onnx/ep-qnn", "uniinfer-api/ep-qnn"]
-ep-openvino = ["uniinfer-engine-onnx/ep-openvino", "uniinfer-api/ep-openvino"]
-ep-rocm = ["uniinfer-engine-onnx/ep-rocm", "uniinfer-api/ep-rocm"]
-ep-vitis = ["uniinfer-engine-onnx/ep-vitis", "uniinfer-api/ep-vitis"]
-ep-cann = ["uniinfer-engine-onnx/ep-cann", "uniinfer-api/ep-cann"]
+ep-cuda = ["uniinfer-api/ep-cuda"]
+ep-tensorrt = ["uniinfer-api/ep-tensorrt"]
+ep-coreml = ["uniinfer-api/ep-coreml"]
+ep-directml = ["uniinfer-api/ep-directml"]
+ep-nnapi = ["uniinfer-api/ep-nnapi"]
+ep-qnn = ["uniinfer-api/ep-qnn"]
+ep-openvino = ["uniinfer-api/ep-openvino"]
+ep-rocm = ["uniinfer-api/ep-rocm"]
+ep-vitis = ["uniinfer-api/ep-vitis"]
+ep-cann = ["uniinfer-api/ep-cann"]
 
 [dependencies]
-uniinfer-core.workspace = true
-uniinfer-devices.workspace = true
-uniinfer-registry.workspace = true
-uniinfer-engine-onnx.workspace = true
-uniinfer-backends.workspace = true
 uniinfer-api.workspace = true
+uniinfer-service.workspace = true
 tokio.workspace = true
 clap.workspace = true
 anyhow.workspace = true

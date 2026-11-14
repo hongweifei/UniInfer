@@ -86,12 +86,12 @@ pub fn generate_bytes_cancellable(
     } else {
         prompt.as_bytes()
     };
-    if prompt_bytes.len() + options.max_tokens > context_len {
-        return Err(EngineError::Other(format!(
-            "prompt ({} bytes) plus max_tokens ({}) exceeds context_len {context_len}",
-            prompt_bytes.len(),
-            options.max_tokens
-        )));
+    let required = prompt_bytes.len() + options.max_tokens;
+    if required > context_len {
+        return Err(EngineError::InputTooLong {
+            input: required,
+            limit: context_len,
+        });
     }
 
     let mut ids: Vec<i64> = prompt_bytes.iter().map(|byte| i64::from(*byte)).collect();
@@ -285,7 +285,7 @@ mod tests {
             &mut |_| true,
         )
         .expect_err("must fail");
-        assert!(error.to_string().contains("context_len"));
+        assert!(matches!(error, EngineError::InputTooLong { .. }));
     }
 }
 

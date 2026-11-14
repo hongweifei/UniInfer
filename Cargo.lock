@@ -1390,11 +1390,8 @@ dependencies = [
  "tokio",
  "tokio-stream",
  "tracing",
- "uniinfer-backends",
  "uniinfer-core",
- "uniinfer-devices",
- "uniinfer-engine-onnx",
- "uniinfer-registry",
+ "uniinfer-service",
 ]
 
 [[package]]
@@ -1413,11 +1410,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sysinfo",
- "uniinfer-backends",
- "uniinfer-core",
- "uniinfer-devices",
- "uniinfer-engine-onnx",
- "uniinfer-registry",
+ "uniinfer-service",
 ]
 
 [[package]]
@@ -1430,11 +1423,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "uniinfer-api",
- "uniinfer-backends",
- "uniinfer-core",
- "uniinfer-devices",
- "uniinfer-engine-onnx",
- "uniinfer-registry",
+ "uniinfer-service",
 ]
 
 [[package]]
@@ -1452,8 +1441,6 @@ dependencies = [
 name = "uniinfer-devices"
 version = "0.0.0"
 dependencies = [
- "serde",
- "thiserror",
  "uniinfer-core",
 ]
 
@@ -1473,10 +1460,22 @@ dependencies = [
 name = "uniinfer-registry"
 version = "0.0.0"
 dependencies = [
- "thiserror",
  "tracing",
  "uniinfer-core",
  "uniinfer-devices",
+]
+
+[[package]]
+name = "uniinfer-service"
+version = "0.0.0"
+dependencies = [
+ "tokio",
+ "tracing",
+ "uniinfer-backends",
+ "uniinfer-core",
+ "uniinfer-devices",
+ "uniinfer-engine-onnx",
+ "uniinfer-registry",
 ]
 
 [[package]]

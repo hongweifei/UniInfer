@@ -13,10 +13,11 @@ repository = "https://github.com/hongweifei/UniInfer"
 uniinfer-core = { path = "crates/uniinfer-core" }
 uniinfer-devices = { path = "crates/uniinfer-devices" }
 uniinfer-registry = { path = "crates/uniinfer-registry" }
+uniinfer-service = { path = "crates/uniinfer-service" }
 uniinfer-engine-onnx = { path = "crates/uniinfer-engine-onnx" }
 uniinfer-backends = { path = "crates/uniinfer-backends" }
 uniinfer-api = { path = "crates/uniinfer-api" }
-ort = "=2.0.0-rc.15"
+ort = { version = "=2.0.0-rc.15", default-features = false, features = ["std", "download-binaries", "api-31", "tracing", "tls-native", "copy-dylibs"] }
 serde = { version = "1.0.229", features = ["derive"] }
 toml = "1.2.1"
 thiserror = "2.0.21"

@@ -8,8 +8,6 @@ repository.workspace = true
 
 [dependencies]
 uniinfer-core.workspace = true
-serde.workspace = true
-thiserror.workspace = true
 
 [lints]
 workspace = true

@@ -347,6 +347,7 @@ crates/
   uniinfer-core          # 枚举、Manifest schema、EngineError、Trait
   uniinfer-devices       # DeviceInventory、代价模型、PlacementPlan
   uniinfer-registry      # 格式+模态路由、预检、SessionLease、显存预算
+  uniinfer-service       # Runtime、ModelSlot、生成入口与装配
   uniinfer-engine-onnx   # ort + onnx-genai；EP feature 门控
   uniinfer-engine-candle # candle-core/transformers；GGUF / Safetensors
   uniinfer-backends      # 四个模态 Backend，引擎无关

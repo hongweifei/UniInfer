@@ -1,6 +1,6 @@
 use thiserror::Error;
 
-use crate::manifest::{ModelFormat, Quantization};
+use crate::manifest::{Modality, ModelFormat, Quantization};
 
 /// Errors surfaced by engines and the registry.
 #[derive(Debug, Error)]
@@ -11,6 +11,13 @@ pub enum EngineError {
     UnsupportedQuantization(Quantization),
     #[error("unsupported engine: {0}")]
     UnsupportedEngine(String),
+    #[error("unsupported modality {modality:?} for format {format}")]
+    UnsupportedModality {
+        format: ModelFormat,
+        modality: Modality,
+    },
+    #[error("input too long: {input} exceeds limit {limit}")]
+    InputTooLong { input: usize, limit: usize },
     #[error("missing execution provider: {0}")]
     MissingEp(String),
     #[error("insufficient memory: required {required}, available {available}")]
@@ -39,6 +46,8 @@ impl EngineError {
             Self::UnsupportedFormat(_) => "unsupported_format",
             Self::UnsupportedQuantization(_) => "unsupported_quantization",
             Self::UnsupportedEngine(_) => "unsupported_engine",
+            Self::UnsupportedModality { .. } => "unsupported_modality",
+            Self::InputTooLong { .. } => "input_too_long",
             Self::MissingEp(_) => "missing_ep",
             Self::InsufficientVram { .. } => "insufficient_vram",
             Self::ManifestInvalid(_) => "manifest_invalid",

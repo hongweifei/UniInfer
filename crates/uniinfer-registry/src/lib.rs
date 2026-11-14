@@ -46,7 +46,6 @@ impl EngineRegistry {
     pub fn load(&self, manifest_path: &Path) -> Result<SessionLease> {
         let manifest = ModelManifest::load(manifest_path)?;
         let base_dir = ModelManifest::base_dir(manifest_path);
-        manifest.verify_files(&base_dir)?;
 
         let placement = self.inventory.plan(&manifest)?;
         let engine = self.resolve(&manifest, &placement)?;
@@ -80,6 +79,7 @@ impl EngineRegistry {
         let mut saw_format = false;
         let mut saw_quantization = false;
         let mut saw_device = false;
+        let mut saw_modality = false;
         let mut saw_engine = false;
 
         for engine in &self.engines {
@@ -99,11 +99,13 @@ impl EngineRegistry {
             saw_format = true;
 
             let modalities = engine.supported_modalities(manifest.format);
-            if !manifest
+            if let Some(missing) = manifest
                 .modalities
                 .iter()
-                .all(|modality| modalities.contains(modality))
+                .find(|modality| !modalities.contains(modality))
             {
+                saw_modality = true;
+                tracing::debug!(?missing, "engine does not support modality");
                 continue;
             }
 
@@ -138,6 +140,12 @@ impl EngineRegistry {
         }
         if saw_quantization {
             return Err(EngineError::UnsupportedQuantization(manifest.quantization));
+        }
+        if saw_modality {
+            return Err(EngineError::UnsupportedModality {
+                format: manifest.format,
+                modality: manifest.modalities[0],
+            });
         }
         if saw_device {
             return Err(EngineError::PlacementUnsatisfiable(format!(

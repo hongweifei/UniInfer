@@ -62,6 +62,18 @@ impl DeviceInventory {
         } else {
             manifest.supported_devices.clone()
         };
+        let policy = manifest.placement.policy;
+
+        if policy == PlacementPolicy::Strict {
+            let first = requested.first().ok_or_else(|| {
+                EngineError::PlacementUnsatisfiable("strict requires supported_devices".into())
+            })?;
+            if self.find(*first).is_none() {
+                return Err(EngineError::PlacementUnsatisfiable(format!(
+                    "strict requires {first}, which is unavailable"
+                )));
+            }
+        }
 
         let selected = requested
             .iter()
@@ -74,20 +86,49 @@ impl DeviceInventory {
 
         let mut stages = manifest.placement.stages.clone();
         if stages.is_empty() {
+            if policy == PlacementPolicy::Pinned {
+                return Err(EngineError::PlacementUnsatisfiable(
+                    "pinned policy requires placement.stages".into(),
+                ));
+            }
             stages.insert("default".into(), selected.class);
         }
 
-        let offload_layers = manifest
-            .placement
-            .offload_layers
-            .as_deref()
-            .and_then(|value| value.parse::<usize>().ok())
-            .unwrap_or(0);
+        for (stage, class) in &stages {
+            if !requested.contains(class) {
+                return Err(EngineError::PlacementUnsatisfiable(format!(
+                    "stage {stage} requests {class}, outside supported_devices"
+                )));
+            }
+            if self.find(*class).is_none() {
+                return Err(EngineError::PlacementUnsatisfiable(format!(
+                    "stage {stage} requests {class}, which is unavailable"
+                )));
+            }
+        }
+
+        let offload_layers = match manifest.placement.offload_layers.as_deref() {
+            None | Some("0") => 0,
+            Some(value) => {
+                return Err(EngineError::PlacementUnsatisfiable(format!(
+                    "offload_layers={value} is not implemented"
+                )));
+            }
+        };
+
+        let mut devices = vec![selected.clone()];
+        for class in stages.values() {
+            if let Some(device) = self.find(*class)
+                && !devices.iter().any(|known| known.id == device.id)
+            {
+                devices.push(device.clone());
+            }
+        }
 
         Ok(PlacementPlan {
-            policy: manifest.placement.policy,
+            policy,
             stages,
-            devices: vec![selected.clone()],
+            devices,
             offload_layers,
             kv_cache: manifest
                 .placement
@@ -100,17 +141,5 @@ impl DeviceInventory {
 impl From<Vec<Device>> for DeviceInventory {
     fn from(devices: Vec<Device>) -> Self {
         Self { devices }
-    }
-}
-
-/// Parse a placement policy name, used by tests and CLI flags.
-pub fn parse_policy(value: &str) -> Result<PlacementPolicy> {
-    match value {
-        "auto" => Ok(PlacementPolicy::Auto),
-        "pinned" => Ok(PlacementPolicy::Pinned),
-        "strict" => Ok(PlacementPolicy::Strict),
-        other => Err(EngineError::ManifestInvalid(format!(
-            "unknown placement policy {other}"
-        ))),
     }
 }

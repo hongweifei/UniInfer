@@ -7,12 +7,8 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
-uniinfer-core.workspace = true
-uniinfer-devices.workspace = true
-uniinfer-registry.workspace = true
-uniinfer-engine-onnx.workspace = true
-uniinfer-backends.workspace = true
 clap.workspace = true
+uniinfer-service.workspace = true
 anyhow.workspace = true
 serde.workspace = true
 serde_json.workspace = true

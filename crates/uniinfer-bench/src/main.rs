@@ -1,15 +1,10 @@
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result, bail};
 use clap::{Parser, Subcommand};
 use serde::{Deserialize, Serialize};
-use uniinfer_backends::{GenerateOptions, generate_bytes_cancellable};
-use uniinfer_core::CancelToken;
-use uniinfer_devices::DeviceInventory;
-use uniinfer_engine_onnx::OnnxEngine;
-use uniinfer_registry::EngineRegistry;
+use uniinfer_service::{CancelToken, Runtime};
 
 #[derive(Debug, Parser)]
 #[command(name = "uniinfer-bench", about = "Text scenario benchmarks")]
@@ -94,39 +89,12 @@ fn run(
         bail!("iterations must be at least 1");
     }
 
-    let engine = OnnxEngine::new()?;
-    let mut inventory = DeviceInventory::probe();
-    for device in engine.probe_devices() {
-        inventory.register(device);
-    }
-    let mut registry = EngineRegistry::new(inventory);
-    registry.register(Arc::new(engine));
-    let lease = registry.load(manifest_path)?;
-    let manifest = lease.manifest();
-    let tokenizer = manifest.tokenizer.as_deref().unwrap_or_default();
-    let text = manifest
-        .text
-        .as_ref()
-        .context("manifest has no [text] section")?;
-    if tokenizer != "bytes" {
-        bail!("bench supports byte tokenizers, found {tokenizer:?}");
-    }
-
-    let options = GenerateOptions {
-        max_tokens,
-        eos_token: text.eos_token,
-    };
+    let runtime = Runtime::new()?;
+    let slot = runtime.load(manifest_path)?;
+    let manifest = slot.manifest();
 
     // Warm up caches and the ONNX graph.
-    generate_bytes_cancellable(
-        lease.session(),
-        prompt,
-        text.vocab_size,
-        manifest.context_len,
-        &options,
-        &CancelToken::new(),
-        &mut |_| true,
-    )?;
+    slot.generate(prompt, max_tokens, &CancelToken::new(), &mut |_| true)?;
 
     let mut ttft_total = 0.0;
     let mut total_total = 0.0;
@@ -137,21 +105,13 @@ fn run(
         let start = Instant::now();
         let mut first_byte = None;
         let mut bytes = 0usize;
-        generate_bytes_cancellable(
-            lease.session(),
-            prompt,
-            text.vocab_size,
-            manifest.context_len,
-            &options,
-            &token,
-            &mut |_| {
-                if first_byte.is_none() {
-                    first_byte = Some(start.elapsed());
-                }
-                bytes += 1;
-                true
-            },
-        )?;
+        slot.generate(prompt, max_tokens, &token, &mut |_| {
+            if first_byte.is_none() {
+                first_byte = Some(start.elapsed());
+            }
+            bytes += 1;
+            true
+        })?;
         let elapsed = start.elapsed();
         ttft_total += first_byte.unwrap_or(elapsed).as_secs_f64() * 1000.0;
         total_total += elapsed.as_secs_f64() * 1000.0;
@@ -165,8 +125,8 @@ fn run(
         schema: 1,
         created_unix: unix_seconds(),
         model: manifest.id.clone(),
-        engine: lease.engine_name().to_owned(),
-        device: lease
+        engine: slot.engine_name().to_owned(),
+        device: slot
             .placement()
             .devices
             .first()

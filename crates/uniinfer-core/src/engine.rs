@@ -59,7 +59,23 @@ pub trait InferenceEngine: Send + Sync {
 
     fn supported_devices(&self) -> &[DeviceClass];
 
-    fn capabilities(&self) -> EngineCapabilities;
+    fn capabilities(&self) -> EngineCapabilities {
+        let formats = self.supported_formats().to_vec();
+        let modalities = formats
+            .iter()
+            .map(|format| (*format, self.supported_modalities(*format).to_vec()))
+            .collect();
+        let quantizations = formats
+            .iter()
+            .map(|format| (*format, self.supported_quantizations(*format).to_vec()))
+            .collect();
+        EngineCapabilities {
+            formats,
+            modalities,
+            quantizations,
+            devices: self.supported_devices().to_vec(),
+        }
+    }
 
     fn load_session(&self, spec: EngineLoadSpec) -> Result<Box<dyn EngineSession>>;
 }
