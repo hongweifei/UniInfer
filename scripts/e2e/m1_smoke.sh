@@ -50,6 +50,14 @@ status="$(curl -sS -o /dev/null -w '%{http_code}' -X POST \
   "http://127.0.0.1:${port}/v1/sessions/unknown/cancel")"
 [[ "$status" == "404" ]]
 
+bad="$(mktemp)"
+status="$(curl -sS -o "$bad" -w '%{http_code}' \
+  "http://127.0.0.1:${port}/v1/chat/completions" \
+  -H 'Content-Type: application/json' -d '{"model":')"
+[[ "$status" == "400" ]]
+"$py" -c 'import json,sys; body=json.load(open(sys.argv[1])); assert body["code"] == "invalid_json"' "$bad"
+rm -f "$bad"
+
 metrics="$(curl -fsS "http://127.0.0.1:${port}/metrics")"
 echo "$metrics" \
   | "$py" -c 'import json,sys; metrics=json.load(sys.stdin); assert metrics["active_requests"] == 0' 

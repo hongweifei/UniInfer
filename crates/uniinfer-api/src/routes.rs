@@ -2,13 +2,14 @@ use std::convert::Infallible;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use axum::extract::{Path, State};
+use axum::extract::{FromRequest, Path, Request, State};
 use axum::http::HeaderValue;
 use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use serde::Deserialize;
+use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
 use tokio::sync::mpsc;
 use tokio::time::timeout;
@@ -50,8 +51,26 @@ struct ChatMessage {
 
 enum StreamEvent {
     Delta(String),
+    Finish,
     Error(ApiError),
     Done,
+}
+
+struct ApiJson<T>(T);
+
+impl<T, S> FromRequest<S> for ApiJson<T>
+where
+    T: DeserializeOwned,
+    S: Send + Sync,
+{
+    type Rejection = ApiError;
+
+    async fn from_request(request: Request, state: &S) -> Result<Self, Self::Rejection> {
+        let Json(value) = Json::<T>::from_request(request, state)
+            .await
+            .map_err(|rejection| ApiError::bad_request("invalid_json", rejection.body_text()))?;
+        Ok(Self(value))
+    }
 }
 
 async fn health() -> &'static str {
@@ -101,7 +120,7 @@ async fn cancel(
 
 async fn chat(
     State(state): State<AppState>,
-    Json(request): Json<ChatRequest>,
+    ApiJson(request): ApiJson<ChatRequest>,
 ) -> Result<Response, ApiError> {
     let manifest = &state.slot.manifest;
     if request.model != manifest.id {
@@ -253,6 +272,7 @@ async fn stream_response(
                 let _ = tx.blocking_send(StreamEvent::Error(error.into()));
             }
         }
+        let _ = tx.blocking_send(StreamEvent::Finish);
         let _ = tx.blocking_send(StreamEvent::Done);
         task_state.unregister(&task_session);
     });
@@ -263,6 +283,9 @@ async fn stream_response(
         Ok(match event {
             StreamEvent::Delta(text) => {
                 Event::default().data(chunk_json(&stream_id, &stream_model, created, &text))
+            }
+            StreamEvent::Finish => {
+                Event::default().data(finish_json(&stream_id, &stream_model, created))
             }
             StreamEvent::Error(error) => Event::default()
                 .event("error")
@@ -340,6 +363,21 @@ async fn complete_response(
         }
     }))
     .into_response())
+}
+
+fn finish_json(id: &str, model: &str, created: u64) -> String {
+    json!({
+        "id": id,
+        "object": "chat.completion.chunk",
+        "created": created,
+        "model": model,
+        "choices": [{
+            "index": 0,
+            "delta": {},
+            "finish_reason": "stop"
+        }]
+    })
+    .to_string()
 }
 
 fn chunk_json(id: &str, model: &str, created: u64, text: &str) -> String {

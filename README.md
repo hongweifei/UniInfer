@@ -17,7 +17,7 @@
 
 ## 项目状态
 
-**M0 已交付，M1 已接通。** Trait、Manifest、Registry、ONNX CPU 引擎、字节级文本后端与 CLI 可运行；REST/SSE、会话取消、错误信封与 `/v1/models`、`/metrics` 已上线。基准与 EP 矩阵继续按 [ROADMAP](docs/ROADMAP.md) 补齐；未接入的能力仍属目标契约。
+**M0 已交付，M1 已接通。** Trait、Manifest、Registry、ONNX CPU 引擎、字节级文本后端与 CLI 可运行；REST/SSE、会话取消、错误信封与 `/v1/models`、`/metrics` 已上线；文本基线测量与冒烟已接入 CI。EP 矩阵继续按 [ROADMAP](docs/ROADMAP.md) 补齐；未接入的能力仍属目标契约。
 
 ## 目录
 
@@ -363,14 +363,19 @@ scripts/e2e/             # 里程碑出口脚本
 
 ## 性能与基线
 
-性能以「场景 × 模型 × 引擎 × 设备类别 × EP」矩阵测量，结果写入 `bench/baseline.json`（含设备与驱动信息），由 `bench compare` 做回归判定：+10% 报警，+25% 阻塞。
+M1 起按「场景 × 模型 × 引擎 × 设备类别 × EP」矩阵测量。`uniinfer-bench` 输出 JSON，`compare` 以 +10% 报警、+25% 失败判定回归：
 
 ```bash
-cargo run -p uniinfer-bench --release -- run --scenario text
-cargo run -p uniinfer-bench --release -- compare --baseline bench/baseline.json
+cargo run -p uniinfer-bench -- run \
+  --manifest models/tiny-onnx/manifest.toml \
+  --prompt ab --max-tokens 3 --iterations 5 \
+  --save bench/baseline.json
+
+cargo run -p uniinfer-bench -- compare \
+  --baseline bench/baseline.json --current bench/current.json
 ```
 
-指标覆盖 TTFT、tok/s、实时因子、首音频延迟、首帧预览延迟、每图/每片段耗时、峰值显存与跨设备迁移字节。
+当前指标：TTFT、总耗时、tok/s、生成字节数、峰值 RSS。实时因子、首音频/首帧延迟、峰值显存与跨设备迁移字节随 M3–M8 加入。
 
 ## 路线图
 
@@ -383,7 +388,7 @@ cargo run -p uniinfer-bench --release -- compare --baseline bench/baseline.json
 | 合并 | 预览帧与逐帧视频 | M9 |
 | 扩展 | 移动端、可选引擎与规模化 | M10–M11 |
 
-完整出口门禁、决策门与风险登记见 [ROADMAP](docs/ROADMAP.md)。当前进度：**M0 已交付；M1 HTTP/SSE 已接通**，bench 基线与 EP 矩阵待补。
+完整出口门禁、决策门与风险登记见 [ROADMAP](docs/ROADMAP.md)。当前进度：**M0 已交付；M1 HTTP/SSE 与文本基线已接通**，EP 矩阵待补。
 
 ## 文档
 
