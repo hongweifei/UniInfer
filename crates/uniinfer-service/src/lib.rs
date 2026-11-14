@@ -118,3 +118,43 @@ impl ModelSlot {
             .generate(self.session(), prompt, max_tokens, cancel, on_bytes)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::path::Path;
+    use std::time::Duration;
+
+    use super::*;
+
+    fn slot() -> (Runtime, Arc<ModelSlot>) {
+        let runtime = Runtime::new().expect("runtime");
+        let manifest =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../../models/tiny-onnx/manifest.toml");
+        let slot = runtime.load(&manifest).expect("slot");
+        (runtime, slot)
+    }
+
+    #[tokio::test]
+    async fn second_acquire_times_out_as_busy() {
+        let (_runtime, slot) = slot();
+        let first = slot
+            .acquire(Duration::from_millis(50))
+            .await
+            .expect("first");
+        let error = slot
+            .acquire(Duration::from_millis(10))
+            .await
+            .expect_err("must time out");
+        assert!(matches!(error, EngineError::Busy));
+        drop(first);
+    }
+
+    #[test]
+    fn generate_uses_manifest_context() {
+        let (_runtime, slot) = slot();
+        let bytes = slot
+            .generate("ab", 3, &CancelToken::new(), &mut |_| true)
+            .expect("generate");
+        assert_eq!(bytes, b"cde");
+    }
+}
