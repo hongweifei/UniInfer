@@ -1385,10 +1385,12 @@ name = "uniinfer-api"
 version = "0.0.0"
 dependencies = [
  "axum",
+ "http-body-util",
  "serde",
  "serde_json",
  "tokio",
  "tokio-stream",
+ "tower",
  "tracing",
  "uniinfer-core",
  "uniinfer-service",

@@ -120,3 +120,54 @@ impl Drop for ActiveGuard {
         self.0.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::path::Path;
+
+    use super::*;
+
+    fn state() -> AppState {
+        let manifest =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../../models/tiny-onnx/manifest.toml");
+        AppState::new(&ApiConfig::new(manifest)).expect("state")
+    }
+
+    #[test]
+    fn guard_cancels_and_unregisters_on_drop() {
+        let state = state();
+        let token = CancelToken::new();
+        {
+            let _guard =
+                CancelGuard::new(&state, "sess-test".into(), token.clone()).expect("guard");
+        }
+        assert!(token.is_cancelled());
+        assert!(
+            !state
+                .cancels
+                .lock()
+                .expect("lock")
+                .contains_key("sess-test")
+        );
+    }
+
+    #[test]
+    fn disarmed_guard_leaves_cleanup_to_task() {
+        let state = state();
+        let token = CancelToken::new();
+        {
+            let mut guard =
+                CancelGuard::new(&state, "sess-test".into(), token.clone()).expect("guard");
+            guard.disarm();
+        }
+        assert!(!token.is_cancelled());
+        assert!(
+            state
+                .cancels
+                .lock()
+                .expect("lock")
+                .contains_key("sess-test")
+        );
+        state.unregister("sess-test");
+    }
+}

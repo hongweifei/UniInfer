@@ -43,41 +43,51 @@ const MODALITIES: &[Modality] = &[
 const QUANTIZATIONS: &[Quantization] =
     &[Quantization::Fp32, Quantization::Fp16, Quantization::Int8];
 
-/// ONNX Runtime engine with the CPU execution provider.
+static ENVIRONMENT: LazyLock<std::result::Result<Environment, String>> =
+    LazyLock::new(build_environment);
+
+fn build_environment() -> std::result::Result<Environment, String> {
+    #[allow(unused_mut)]
+    let mut providers: Vec<ort::ep::ExecutionProviderDispatch> = Vec::new();
+    #[cfg(feature = "ep-tensorrt")]
+    providers.push(ort::ep::TensorRT::default().build());
+    #[cfg(feature = "ep-cuda")]
+    providers.push(ort::ep::CUDA::default().build());
+    #[cfg(feature = "ep-rocm")]
+    providers.push(ort::ep::ROCm::default().build());
+    #[cfg(feature = "ep-coreml")]
+    providers.push(ort::ep::CoreML::default().build());
+    #[cfg(feature = "ep-directml")]
+    providers.push(ort::ep::DirectML::default().build());
+    #[cfg(feature = "ep-qnn")]
+    providers.push(ort::ep::QNN::default().build());
+    #[cfg(feature = "ep-nnapi")]
+    providers.push(ort::ep::NNAPI::default().build());
+    #[cfg(feature = "ep-openvino")]
+    providers.push(ort::ep::OpenVINO::default().build());
+    #[cfg(feature = "ep-vitis")]
+    providers.push(ort::ep::Vitis::default().build());
+    #[cfg(feature = "ep-cann")]
+    providers.push(ort::ep::CANN::default().build());
+
+    ort::init()
+        .with_name("uniinfer")
+        .with_execution_providers(providers)
+        .build()
+        .map_err(|error| error.to_string())
+}
+
+/// ONNX Runtime engine with the configured execution providers.
 pub struct OnnxEngine {
     environment: Environment,
 }
 
 impl OnnxEngine {
     pub fn new() -> Result<Self> {
-        #[allow(unused_mut)]
-        let mut providers: Vec<ort::ep::ExecutionProviderDispatch> = Vec::new();
-        #[cfg(feature = "ep-tensorrt")]
-        providers.push(ort::ep::TensorRT::default().build());
-        #[cfg(feature = "ep-cuda")]
-        providers.push(ort::ep::CUDA::default().build());
-        #[cfg(feature = "ep-rocm")]
-        providers.push(ort::ep::ROCm::default().build());
-        #[cfg(feature = "ep-coreml")]
-        providers.push(ort::ep::CoreML::default().build());
-        #[cfg(feature = "ep-directml")]
-        providers.push(ort::ep::DirectML::default().build());
-        #[cfg(feature = "ep-qnn")]
-        providers.push(ort::ep::QNN::default().build());
-        #[cfg(feature = "ep-nnapi")]
-        providers.push(ort::ep::NNAPI::default().build());
-        #[cfg(feature = "ep-openvino")]
-        providers.push(ort::ep::OpenVINO::default().build());
-        #[cfg(feature = "ep-vitis")]
-        providers.push(ort::ep::Vitis::default().build());
-        #[cfg(feature = "ep-cann")]
-        providers.push(ort::ep::CANN::default().build());
-
-        let environment = ort::init()
-            .with_name("uniinfer")
-            .with_execution_providers(providers)
-            .build()
-            .map_err(|error| EngineError::LoadFailed(format!("ort environment: {error}")))?;
+        let environment = ENVIRONMENT
+            .as_ref()
+            .map_err(|error| EngineError::LoadFailed(format!("ort environment: {error}")))?
+            .clone();
         Ok(Self { environment })
     }
 
