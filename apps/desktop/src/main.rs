@@ -11,14 +11,21 @@ struct ApiInfo {
     token: String,
 }
 
+#[derive(Clone, Serialize)]
+struct DesktopStatus {
+    info: Option<ApiInfo>,
+    error: Option<String>,
+    manifest: String,
+}
+
 struct DesktopState {
-    info: ApiInfo,
-    _runtime: Arc<tokio::runtime::Runtime>,
+    status: DesktopStatus,
+    _runtime: Option<Arc<tokio::runtime::Runtime>>,
 }
 
 #[tauri::command]
-fn api_info(state: tauri::State<'_, DesktopState>) -> ApiInfo {
-    state.info.clone()
+fn api_info(state: tauri::State<'_, DesktopState>) -> DesktopStatus {
+    state.status.clone()
 }
 
 fn random_token() -> String {
@@ -27,9 +34,12 @@ fn random_token() -> String {
     hex::encode(bytes)
 }
 
+fn manifest_path() -> String {
+    std::env::var("UNIINFER_MANIFEST").unwrap_or_else(|_| "models/tiny-onnx/manifest.toml".into())
+}
+
 fn start_api() -> Result<(ApiInfo, Arc<tokio::runtime::Runtime>), Box<dyn std::error::Error>> {
-    let manifest = std::env::var("UNIINFER_MANIFEST")
-        .unwrap_or_else(|_| "models/tiny-onnx/manifest.toml".into());
+    let manifest = manifest_path();
     let token = random_token();
     let config = uniinfer_api::ApiConfig::new(manifest.into()).with_token(token.clone());
     let state = uniinfer_api::AppState::new(&config)?;
@@ -71,9 +81,16 @@ fn main() {
     tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![api_info])
         .setup(|app| {
-            let (info, runtime) = start_api()?;
+            let (info, runtime, error) = match start_api() {
+                Ok((info, runtime)) => (Some(info), Some(runtime), None),
+                Err(error) => (None, None, Some(error.to_string())),
+            };
             app.manage(DesktopState {
-                info,
+                status: DesktopStatus {
+                    info,
+                    error,
+                    manifest: manifest_path(),
+                },
                 _runtime: runtime,
             });
             Ok(())

@@ -132,12 +132,25 @@
       }
 
       async function boot() {
-        info = await invoke("api_info");
+        const desktop = await invoke("api_info");
+        if (!desktop.info) {
+          status.textContent = "模型加载失败";
+          sendButton.disabled = true;
+          const turn = addTurn(
+            "error",
+            `无法加载模型：${desktop.error ?? "unknown error"}\n清单：${desktop.manifest}\n` +
+              "请检查清单路径，或设置 UNIINFER_MANIFEST；固定件可用 models/fetch.sh 生成。"
+          );
+          turn.classList.add("error");
+          return;
+        }
+        info = desktop.info;
         const response = await fetch(`${info.base}/v1/models`, { headers: authHeaders() });
         if (!response.ok) throw new Error(`models: HTTP ${response.status}`);
         const body = await response.json();
         model = body.data[0]?.id ?? null;
         setBusy(false);
+        status.textContent = `${model} · ${desktop.manifest}`;
         input.focus();
       }
 
