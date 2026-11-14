@@ -10,9 +10,15 @@ pub mod utf8;
 
 use std::io;
 
+use axum::Router;
 use tokio::net::TcpListener;
 
 pub use state::{ApiConfig, AppState};
+
+/// Serve a prebuilt router on an existing listener.
+pub async fn serve_listener(listener: TcpListener, app: Router) -> io::Result<()> {
+    axum::serve(listener, app).await
+}
 
 /// Serve until Ctrl-C.
 pub async fn serve(config: ApiConfig, addr: std::net::SocketAddr) -> io::Result<()> {

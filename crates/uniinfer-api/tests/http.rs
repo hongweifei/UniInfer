@@ -9,9 +9,17 @@ use tower::ServiceExt;
 use uniinfer_api::{ApiConfig, AppState, routes};
 
 fn app() -> Router {
+    app_with_token(None)
+}
+
+fn app_with_token(token: Option<&str>) -> Router {
     let manifest =
         Path::new(env!("CARGO_MANIFEST_DIR")).join("../../models/tiny-onnx/manifest.toml");
-    let state = AppState::new(&ApiConfig::new(manifest)).expect("state");
+    let mut config = ApiConfig::new(manifest);
+    if let Some(token) = token {
+        config = config.with_token(token);
+    }
+    let state = AppState::new(&config).expect("state");
     routes::router(state)
 }
 
@@ -146,4 +154,28 @@ async fn context_overflow_is_rejected() {
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
     let body = body_json(response).await;
     assert_eq!(body["code"], "context_overflow");
+}
+
+#[tokio::test]
+async fn token_is_required_when_configured() {
+    let request = Request::builder()
+        .uri("/v1/models")
+        .body(Body::empty())
+        .expect("request");
+    let response = app_with_token(Some("secret"))
+        .oneshot(request)
+        .await
+        .expect("response");
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+
+    let request = Request::builder()
+        .uri("/v1/models")
+        .header("authorization", "Bearer secret")
+        .body(Body::empty())
+        .expect("request");
+    let response = app_with_token(Some("secret"))
+        .oneshot(request)
+        .await
+        .expect("response");
+    assert_eq!(response.status(), StatusCode::OK);
 }

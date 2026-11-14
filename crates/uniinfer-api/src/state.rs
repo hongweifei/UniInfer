@@ -12,6 +12,7 @@ use uniinfer_service::{ModelSlot, Runtime};
 pub struct ApiConfig {
     pub manifest: PathBuf,
     pub queue_timeout: Duration,
+    pub token: Option<String>,
 }
 
 impl ApiConfig {
@@ -20,7 +21,14 @@ impl ApiConfig {
         Self {
             manifest,
             queue_timeout: Duration::from_secs(30),
+            token: None,
         }
+    }
+
+    #[must_use]
+    pub fn with_token(mut self, token: impl Into<String>) -> Self {
+        self.token = Some(token.into());
+        self
     }
 }
 
@@ -32,6 +40,7 @@ pub struct AppState {
     pub(crate) cancels: Arc<Mutex<HashMap<String, CancelToken>>>,
     pub(crate) active: Arc<AtomicUsize>,
     pub(crate) queue_timeout: Duration,
+    pub(crate) token: Option<String>,
 }
 
 impl AppState {
@@ -45,6 +54,7 @@ impl AppState {
             cancels: Arc::new(Mutex::new(HashMap::new())),
             active: Arc::new(AtomicUsize::new(0)),
             queue_timeout: config.queue_timeout,
+            token: config.token.clone(),
         })
     }
 

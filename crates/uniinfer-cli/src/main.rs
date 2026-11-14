@@ -26,6 +26,9 @@ enum Command {
         addr: std::net::SocketAddr,
         #[arg(long, default_value_t = 30_000)]
         queue_timeout_ms: u64,
+        /// Require `Authorization: Bearer <token>` on API requests.
+        #[arg(long)]
+        token: Option<String>,
     },
     /// Run one-shot greedy text generation.
     Run {
@@ -55,7 +58,8 @@ async fn main() -> Result<()> {
             manifest,
             addr,
             queue_timeout_ms,
-        } => serve(manifest, addr, queue_timeout_ms).await,
+            token,
+        } => serve(manifest, addr, queue_timeout_ms, token).await,
         Command::Run {
             manifest,
             prompt,
@@ -68,9 +72,11 @@ async fn serve(
     manifest: std::path::PathBuf,
     addr: std::net::SocketAddr,
     queue_timeout_ms: u64,
+    token: Option<String>,
 ) -> Result<()> {
     let mut config = ApiConfig::new(manifest);
     config.queue_timeout = Duration::from_millis(queue_timeout_ms);
+    config.token = token;
     uniinfer_api::serve(config, addr)
         .await
         .context("serve HTTP API")
