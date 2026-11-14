@@ -131,7 +131,7 @@ pub trait InferenceEngine: Send + Sync {
 | 格式 | 模态 | 默认引擎 | 可选引擎 | 通道 |
 | :--- | :--- | :--- | :--- | :--- |
 | ONNX | 文本 / 嵌入 / 双工 / 图像 / 逐帧视频 | `OnnxEngine` | — | realtime + batch |
-| GGUF | 文本 / 视觉语言 / 双工 | `CandleEngine` | `frink` | realtime + batch |
+| GGUF | 文本（Qwen3 量化）/ 视觉语言 / 双工 | `CandleEngine` | `frink` | realtime + batch |
 | GGUF | 图像生成 | `CandleEngine`（plakat） | — | batch |
 | GGUF | 视频生成 | `CandleEngine`（candle-video / plakat） | — | batch |
 | Safetensors | 文本 / 视觉语言 / 双工 | `CandleEngine` | `mistral.rs` | realtime + batch |
@@ -188,6 +188,17 @@ models/pull.sh Qwen/Qwen2.5-0.5B-Instruct models/qwen2.5-0.5b
 
 脚本优先使用已安装的 `modelscope`，否则通过 `uvx --from modelscope modelscope` 运行；`local_dir` 会解析为绝对路径。固定件 `models/tiny-onnx` 由本地生成脚本产出，不依赖模型仓库。
 
+Qwen3-0.6B Q4_K_M 的固定获取脚本：
+
+```bash
+models/fetch-qwen3.sh
+cargo run -p uniinfer-cli -- run \
+  --manifest models/qwen3-0.6b/manifest.toml \
+  --prompt "你好" --max-tokens 32
+```
+
+权重来自 ModelScope `unsloth/Qwen3-0.6B-GGUF`，tokenizer 来自 `Qwen/Qwen3-0.6B`。Qwen3.5 的 `qwen3_5` 架构尚未被 Candle 0.11 覆盖，接入需要新增引擎实现。
+
 ### M0：CLI 与 ONNX CPU 路径
 
 设备探测：
@@ -227,6 +238,8 @@ cargo build --release -p uniinfer-cli --features ep-qnn       # Qualcomm NPU
 cargo build --release -p uniinfer-cli --features ep-openvino  # Intel GPU / NPU
 cargo build --release -p uniinfer-cli --features ep-rocm       # Linux AMD GPU
 cargo build --release -p uniinfer-cli --features ep-vitis      # AMD Ryzen AI NPU（需 SDK 的 ORT 构建）
+cargo build --release -p uniinfer-cli --features candle-cuda   # Candle CUDA 后端
+cargo build --release -p uniinfer-cli --features candle-metal  # Candle Metal 后端
 ```
 
 ### 启动服务
@@ -402,7 +415,7 @@ cargo run -p uniinfer-bench -- compare \
 | 合并 | 预览帧与逐帧视频 | M9 |
 | 扩展 | 移动端、可选引擎与规模化 | M10–M11 |
 
-完整出口门禁、决策门与风险登记见 [ROADMAP](docs/ROADMAP.md)。当前进度：**M0、M1 已交付；M2 桌面骨架可用；M3 文本实时通道已接通**。
+完整出口门禁、决策门与风险登记见 [ROADMAP](docs/ROADMAP.md)。当前进度：**M0、M1 已交付；M2 桌面骨架可用；M3 文本与 PCM VAD 通道已接通；GGUF 文本已通过 Candle 接入 Qwen3-0.6B Q4_K_M**。
 
 ## 文档
 

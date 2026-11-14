@@ -137,6 +137,12 @@ pub struct TextConfig {
     pub vocab_size: usize,
     #[serde(default)]
     pub eos_token: Option<u32>,
+    #[serde(default)]
+    pub family: Option<String>,
+    #[serde(default)]
+    pub config_file: Option<PathBuf>,
+    #[serde(default)]
+    pub tokenizer_file: Option<PathBuf>,
 }
 
 /// Placement directives copied from the manifest.

@@ -1,0 +1,23 @@
+schema_version = 1
+id = "qwen3-0.6b-q4_k_m"
+format = "gguf"
+quantization = "q4_k_m"
+modalities = ["text"]
+streaming_capable = false
+context_len = 2048
+tokenizer = "hf"
+min_vram = "1GiB"
+
+[placement]
+policy = "auto"
+prefer = ["npu", "gpu", "cpu"]
+allow_cpu_fallback = true
+
+[text]
+vocab_size = 151936
+family = "qwen3"
+tokenizer_file = "tokenizer.json"
+
+[[files]]
+path = "model.gguf"
+sha256 = "ac2d97712095a558e31573f62f466a3f9d93990898b0ec79d7c974c1780d524a"

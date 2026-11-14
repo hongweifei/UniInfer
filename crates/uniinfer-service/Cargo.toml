@@ -20,12 +20,15 @@ ep-openvino = ["uniinfer-engine-onnx/ep-openvino"]
 ep-rocm = ["uniinfer-engine-onnx/ep-rocm"]
 ep-vitis = ["uniinfer-engine-onnx/ep-vitis"]
 ep-cann = ["uniinfer-engine-onnx/ep-cann"]
+candle-cuda = ["uniinfer-engine-candle/cuda"]
+candle-metal = ["uniinfer-engine-candle/metal"]
 
 [dependencies]
 uniinfer-core.workspace = true
 uniinfer-devices.workspace = true
 uniinfer-registry.workspace = true
 uniinfer-engine-onnx.workspace = true
+uniinfer-engine-candle.workspace = true
 uniinfer-backends.workspace = true
 tokio.workspace = true
 tracing.workspace = true

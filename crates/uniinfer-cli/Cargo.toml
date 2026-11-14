@@ -20,6 +20,8 @@ ep-openvino = ["uniinfer-api/ep-openvino"]
 ep-rocm = ["uniinfer-api/ep-rocm"]
 ep-vitis = ["uniinfer-api/ep-vitis"]
 ep-cann = ["uniinfer-api/ep-cann"]
+candle-cuda = ["uniinfer-service/candle-cuda"]
+candle-metal = ["uniinfer-service/candle-metal"]
 
 [dependencies]
 uniinfer-api.workspace = true

@@ -5,9 +5,10 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
-use uniinfer_backends::{ByteTokenizer, TextGenerator};
+use uniinfer_backends::{ByteTokenizer, HuggingFaceTokenizer, TextGenerator, Tokenizer};
 use uniinfer_core::{Device, EngineError, EngineSession, ModelManifest, PlacementPlan, Result};
 use uniinfer_devices::DeviceInventory;
+use uniinfer_engine_candle::CandleEngine;
 use uniinfer_engine_onnx::OnnxEngine;
 use uniinfer_registry::{EngineRegistry, SessionLease};
 
@@ -21,13 +22,18 @@ pub struct Runtime {
 impl Runtime {
     /// Assemble the default engine set and probe its devices.
     pub fn new() -> Result<Self> {
-        let engine = OnnxEngine::new()?;
+        let onnx = OnnxEngine::new()?;
+        let candle = CandleEngine::new()?;
         let mut inventory = DeviceInventory::probe();
-        for device in engine.probe_devices() {
+        for device in onnx.probe_devices() {
+            inventory.register(device);
+        }
+        for device in candle.probe_devices() {
             inventory.register(device);
         }
         let mut registry = EngineRegistry::new(inventory);
-        registry.register(Arc::new(engine));
+        registry.register(Arc::new(onnx));
+        registry.register(Arc::new(candle));
         Ok(Self { registry })
     }
 
@@ -46,17 +52,31 @@ impl Runtime {
         let lease = Arc::new(self.registry.load(manifest_path)?);
         let manifest = lease.manifest();
         let tokenizer = manifest.tokenizer.as_deref().unwrap_or_default();
-        if tokenizer != "bytes" {
-            return Err(EngineError::UnsupportedEngine(format!(
-                "tokenizer {tokenizer:?}; byte tokenizer is required"
-            )));
-        }
         let text = manifest
             .text
             .as_ref()
             .ok_or_else(|| EngineError::ManifestInvalid("manifest has no [text] section".into()))?;
+        let tokenizer: Arc<dyn Tokenizer> = match tokenizer {
+            "bytes" => Arc::new(ByteTokenizer::new(text.vocab_size)?),
+            "hf" => {
+                let file = text.tokenizer_file.as_ref().ok_or_else(|| {
+                    EngineError::ManifestInvalid("text.tokenizer_file is required for hf".into())
+                })?;
+                let base = manifest_path.parent().map_or_else(
+                    || std::path::PathBuf::from("."),
+                    std::path::Path::to_path_buf,
+                );
+                Arc::new(HuggingFaceTokenizer::from_file(base.join(file))?)
+            }
+            other => {
+                return Err(EngineError::UnsupportedEngine(format!(
+                    "tokenizer {other:?}"
+                )));
+            }
+        };
         let generator = TextGenerator::new(
-            Arc::new(ByteTokenizer::new(text.vocab_size)?),
+            tokenizer,
+            text.vocab_size,
             manifest.context_len,
             text.eos_token,
         );

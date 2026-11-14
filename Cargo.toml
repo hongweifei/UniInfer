@@ -17,6 +17,7 @@ uniinfer-devices = { version = "0.0.0", path = "crates/uniinfer-devices" }
 uniinfer-registry = { version = "0.0.0", path = "crates/uniinfer-registry" }
 uniinfer-service = { version = "0.0.0", path = "crates/uniinfer-service" }
 uniinfer-engine-onnx = { version = "0.0.0", path = "crates/uniinfer-engine-onnx" }
+uniinfer-engine-candle = { version = "0.0.0", path = "crates/uniinfer-engine-candle" }
 uniinfer-backends = { version = "0.0.0", path = "crates/uniinfer-backends" }
 uniinfer-api = { version = "0.0.0", path = "crates/uniinfer-api" }
 ort = { version = "=2.0.0-rc.15", default-features = false, features = ["std", "download-binaries", "api-31", "tracing", "tls-native", "copy-dylibs"] }
@@ -31,6 +32,10 @@ tokio = { version = "1.54.1", features = ["rt-multi-thread", "macros", "net", "s
 tokio-stream = { version = "0.1", features = ["sync"] }
 futures-util = "0.3"
 tower-http = { version = "0.6", features = ["cors"] }
+candle-core = "0.11.1"
+candle-nn = "0.11.1"
+candle-transformers = "0.11.1"
+tokenizers = { version = "0.23.2", default-features = false }
 serde_json = "1"
 sysinfo = "0.40.3"
 tracing = "0.1.44"

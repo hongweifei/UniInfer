@@ -7,3 +7,6 @@ models/cache
 
 /apps/desktop/gen
 /apps/desktop/target
+
+# downloaded model artifacts
+/models/qwen3-0.6b/*.json

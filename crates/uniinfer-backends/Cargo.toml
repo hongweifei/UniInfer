@@ -10,6 +10,7 @@ description = "Tokenizer and text generation backends"
 
 [dependencies]
 uniinfer-core.workspace = true
+tokenizers.workspace = true
 
 [lints]
 workspace = true

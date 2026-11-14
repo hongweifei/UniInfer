@@ -60,15 +60,22 @@ impl Tokenizer for ByteTokenizer {
 /// Greedy text generator bound to one tokenizer and context size.
 pub struct TextGenerator {
     tokenizer: Arc<dyn Tokenizer>,
+    vocab_size: usize,
     context_len: usize,
     eos_token: Option<u32>,
 }
 
 impl TextGenerator {
     #[must_use]
-    pub fn new(tokenizer: Arc<dyn Tokenizer>, context_len: usize, eos_token: Option<u32>) -> Self {
+    pub fn new(
+        tokenizer: Arc<dyn Tokenizer>,
+        vocab_size: usize,
+        context_len: usize,
+        eos_token: Option<u32>,
+    ) -> Self {
         Self {
             tokenizer,
+            vocab_size,
             context_len,
             eos_token,
         }
@@ -149,7 +156,7 @@ impl TextGenerator {
                 .ok_or_else(|| {
                     EngineError::Other(format!("missing output {}", logits_spec.name))
                 })?;
-            let next = argmax(logits, self.tokenizer.vocab_size())?;
+            let next = argmax(logits, self.vocab_size, self.tokenizer.vocab_size())?;
             let bytes = self.tokenizer.decode(next)?;
 
             generated.extend_from_slice(&bytes);
@@ -195,7 +202,7 @@ fn find_logits(session: &dyn EngineSession) -> Option<TensorSpec> {
         .cloned()
 }
 
-fn argmax(tensor: &Tensor, vocab_size: usize) -> Result<u32> {
+fn argmax(tensor: &Tensor, vocab_size: usize, tokenizer_vocab: usize) -> Result<u32> {
     let values = match &tensor.data {
         TensorData::F32(values) => values,
         other => {
@@ -214,7 +221,7 @@ fn argmax(tensor: &Tensor, vocab_size: usize) -> Result<u32> {
             )));
         }
     };
-    let row = &values[offset..offset + vocab];
+    let row = &values[offset..offset + vocab.min(tokenizer_vocab)];
     let mut best = 0usize;
     let mut best_value = f32::NEG_INFINITY;
     for (index, value) in row.iter().enumerate() {
@@ -224,6 +231,38 @@ fn argmax(tensor: &Tensor, vocab_size: usize) -> Result<u32> {
         }
     }
     u32::try_from(best).map_err(|_| EngineError::Other("token id overflow".into()))
+}
+
+pub struct HuggingFaceTokenizer {
+    inner: tokenizers::Tokenizer,
+}
+
+impl HuggingFaceTokenizer {
+    pub fn from_file(path: impl AsRef<std::path::Path>) -> Result<Self> {
+        let inner = tokenizers::Tokenizer::from_file(path)
+            .map_err(|error| EngineError::ManifestInvalid(format!("tokenizer file: {error}")))?;
+        Ok(Self { inner })
+    }
+}
+
+impl Tokenizer for HuggingFaceTokenizer {
+    fn encode(&self, text: &str) -> Result<Vec<u32>> {
+        self.inner
+            .encode(text, true)
+            .map(|encoding| encoding.get_ids().to_vec())
+            .map_err(|error| EngineError::Other(format!("tokenize: {error}")))
+    }
+
+    fn decode(&self, token: u32) -> Result<Vec<u8>> {
+        self.inner
+            .decode(&[token], false)
+            .map(String::into_bytes)
+            .map_err(|error| EngineError::Other(format!("detokenize: {error}")))
+    }
+
+    fn vocab_size(&self) -> usize {
+        self.inner.get_vocab_size(true)
+    }
 }
 
 #[cfg(test)]
@@ -290,6 +329,7 @@ mod tests {
     fn generator() -> TextGenerator {
         TextGenerator::new(
             Arc::new(ByteTokenizer::new(256).expect("tokenizer")),
+            256,
             64,
             None,
         )
@@ -319,6 +359,7 @@ mod tests {
         let session = Scripted::new();
         let generator = TextGenerator::new(
             Arc::new(ByteTokenizer::new(256).expect("tokenizer")),
+            256,
             8,
             None,
         );
