@@ -324,7 +324,7 @@ sha256 = "9f8e6c1d0a4b7e2f5c8d1a3b6e9f0c2d4a7b1e8f3c6d9a2b5e0f4c7d1a8b3e6f"  # �
 | `/v1/images/edits` | POST | img2img / inpaint / outpaint |
 | `/v1/videos/generations` | POST | 视频生成任务 |
 | `/v1/videos/generations/{id}` | GET | 任务查询 |
-| `/v1/realtime` | WS | 四通道实时会话 |
+| `/v1/realtime` | WS | 实时会话，当前提供 text 通道 |
 | `/v1/models` | GET | 清单、能力矩阵与放置计划 |
 | `/v1/sessions/{id}/cancel` | POST | 取消生成 |
 
@@ -336,7 +336,7 @@ sha256 = "9f8e6c1d0a4b7e2f5c8d1a3b6e9f0c2d4a7b1e8f3c6d9a2b5e0f4c7d1a8b3e6f"  # �
 {"type": "response.create"}
 ```
 
-服务端事件覆盖 `output.text.delta`、`output.audio.delta`、`output.audio.clear`、`output.image.preview`、`output.video.frame` 与 `response.done`。
+当前实现 text 通道：客户端发送 `session.start`、`input.text`、`response.create`、`response.cancel`，服务端返回 `session.started`、`input.text.accepted`、`output.text.delta`、`response.done`。`audio`、`image`、`video` 通道返回 `unsupported_channel`，待 M3 音频后端接入后启用。
 
 ## 项目结构
 
@@ -392,7 +392,7 @@ cargo run -p uniinfer-bench -- compare \
 | 合并 | 预览帧与逐帧视频 | M9 |
 | 扩展 | 移动端、可选引擎与规模化 | M10–M11 |
 
-完整出口门禁、决策门与风险登记见 [ROADMAP](docs/ROADMAP.md)。当前进度：**M0、M1 已交付**；下一步 M2 桌面端。
+完整出口门禁、决策门与风险登记见 [ROADMAP](docs/ROADMAP.md)。当前进度：**M0、M1 已交付；M2 桌面骨架可用；M3 文本实时通道已接通**。
 
 ## 文档
 

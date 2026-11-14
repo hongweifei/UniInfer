@@ -11,7 +11,8 @@ pub(crate) async fn authorize(
     request: Request,
     next: Next,
 ) -> Result<Response, ApiError> {
-    if request.method() == Method::OPTIONS || request.uri().path() == "/health" {
+    let path = request.uri().path();
+    if request.method() == Method::OPTIONS || path == "/health" || path == "/v1/realtime" {
         return Ok(next.run(request).await);
     }
     if let Some(expected) = &state.token {

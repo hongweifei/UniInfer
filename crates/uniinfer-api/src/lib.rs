@@ -4,6 +4,7 @@ mod auth;
 pub mod chat;
 pub mod error;
 pub mod extract;
+pub mod realtime;
 pub mod routes;
 pub mod sse;
 pub mod state;

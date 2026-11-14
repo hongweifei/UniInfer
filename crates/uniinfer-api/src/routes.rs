@@ -8,6 +8,7 @@ use serde_json::{Value, json};
 
 use crate::chat::chat;
 use crate::error::ApiError;
+use crate::realtime::realtime;
 use crate::state::AppState;
 
 /// Build the HTTP router.
@@ -17,6 +18,7 @@ pub fn router(state: AppState) -> Router {
         .route("/metrics", get(metrics))
         .route("/v1/models", get(models))
         .route("/v1/chat/completions", post(chat))
+        .route("/v1/realtime", get(realtime))
         .route("/v1/sessions/{id}/cancel", post(cancel))
         .layer(middleware::from_fn_with_state(
             state.clone(),

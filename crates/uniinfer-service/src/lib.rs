@@ -106,6 +106,12 @@ impl ModelSlot {
         }
     }
 
+    /// Try to acquire the generation permit without waiting.
+    #[must_use]
+    pub fn try_acquire(&self) -> Option<OwnedSemaphorePermit> {
+        Arc::clone(&self.permit).try_acquire_owned().ok()
+    }
+
     /// Run one greedy byte generation pass.
     pub fn generate(
         &self,

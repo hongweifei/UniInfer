@@ -27,6 +27,7 @@ uniinfer-service.workspace = true
 axum.workspace = true
 tokio.workspace = true
 tokio-stream.workspace = true
+futures-util.workspace = true
 tower-http.workspace = true
 serde.workspace = true
 serde_json.workspace = true
@@ -38,3 +39,4 @@ workspace = true
 [dev-dependencies]
 tower = { version = "0.5", features = ["util"] }
 http-body-util = "0.1"
+tokio-tungstenite = "0.29"
