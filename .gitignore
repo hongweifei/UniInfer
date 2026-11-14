@@ -11,3 +11,9 @@ models/cache
 # downloaded model artifacts
 /models/qwen3-0.6b/*.json
 /models/qwen3-0.6b-safetensors/*.json
+
+# ONNX Qwen3 weights/tokenizer; fetch via models/fetch-qwen3-onnx.sh
+/models/qwen3-0.6b-onnx/*.onnx
+/models/qwen3-0.6b-onnx/*.json
+/models/qwen3-0.6b-onnx/onnxruntime/
+!/models/qwen3-0.6b-onnx/genai_config.json

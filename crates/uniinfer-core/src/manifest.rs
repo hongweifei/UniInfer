@@ -45,6 +45,8 @@ pub enum Quantization {
     Fp16,
     #[serde(rename = "bf16")]
     Bf16,
+    #[serde(rename = "int4")]
+    Int4,
     #[serde(rename = "int8")]
     Int8,
     #[serde(rename = "fp8")]
@@ -68,6 +70,7 @@ impl Quantization {
             Self::Fp32 => "fp32",
             Self::Fp16 => "fp16",
             Self::Bf16 => "bf16",
+            Self::Int4 => "int4",
             Self::Int8 => "int8",
             Self::Fp8 => "fp8",
             Self::Q4_0 => "q4_0",

@@ -13,6 +13,9 @@ uniinfer-core.workspace = true
 ort.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+half = "2"
 
 [features]
 default = []

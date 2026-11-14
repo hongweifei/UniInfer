@@ -193,13 +193,24 @@ Qwen3-0.6B 的固定获取脚本：
 ```bash
 models/fetch-qwen3.sh                 # GGUF Q4_K_M
 models/fetch-qwen3-safetensors.sh     # Safetensors BF16
+models/fetch-qwen3-onnx.sh            # ONNX int4 GenAI bundle
 
 cargo run -p uniinfer-cli -- run \
   --manifest models/qwen3-0.6b/manifest.toml \
   --prompt "你好" --max-tokens 32
 ```
 
-GGUF 权重来自 ModelScope `unsloth/Qwen3-0.6B-GGUF`，Safetensors 与 tokenizer 来自 `Qwen/Qwen3-0.6B`。Qwen3.5 的 `qwen3_5` 架构尚未被 Candle 0.11 覆盖，接入需要新增引擎实现。
+GGUF 权重来自 ModelScope `unsloth/Qwen3-0.6B-GGUF`，Safetensors 与 tokenizer 来自 `Qwen/Qwen3-0.6B`，ONNX 权重来自 `onnx-community/Qwen3-0.6B-ONNX`。Qwen3.5 的 `qwen3_5` 架构尚未被 Candle 0.11 覆盖，接入需要新增引擎实现。
+
+ONNX 路径使用 GenAI bundle 的 `genai_config.json` 自动识别 KV cache，无需额外清单字段：
+
+```bash
+cargo run -p uniinfer-cli -- run \
+  --manifest models/qwen3-0.6b-onnx/manifest.toml \
+  --prompt "你好" --max-tokens 32
+```
+
+Windows 上 AMD GPU 可用 `--features ep-directml` 走 DirectML；CPU 构建直接运行。
 
 ### 可选：llama.cpp 内置引擎（GGUF）
 
