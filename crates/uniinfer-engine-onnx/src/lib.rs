@@ -6,7 +6,7 @@ use std::sync::{LazyLock, Mutex};
 
 use half::f16;
 use ort::environment::Environment;
-use ort::session::{Session, SessionInputValue};
+use ort::session::{NoSelectedOutputs, RunOptions, Session, SessionInputValue};
 use ort::value::{DynValue, Outlet, Tensor as OrtTensor, TensorElementType, ValueType};
 use serde::Deserialize;
 use uniinfer_core::{
@@ -238,6 +238,7 @@ impl InferenceEngine for OnnxEngine {
             inputs,
             outputs,
             cancelled: AtomicBool::new(false),
+            active: Mutex::new(None),
         }))
     }
 }
@@ -485,6 +486,41 @@ struct OnnxSession {
     inputs: Vec<TensorSpec>,
     outputs: Vec<TensorSpec>,
     cancelled: AtomicBool,
+    active: Mutex<Option<std::sync::Arc<RunOptions<NoSelectedOutputs>>>>,
+}
+
+struct ActiveRun<'a> {
+    slot: &'a Mutex<Option<std::sync::Arc<RunOptions<NoSelectedOutputs>>>>,
+    options: std::sync::Arc<RunOptions<NoSelectedOutputs>>,
+}
+
+impl Drop for ActiveRun<'_> {
+    fn drop(&mut self) {
+        if let Ok(mut slot) = self.slot.lock() {
+            *slot = None;
+        }
+    }
+}
+
+impl OnnxSession {
+    fn begin_run(&self) -> Result<ActiveRun<'_>> {
+        if self.cancelled.load(Ordering::SeqCst) {
+            return Err(EngineError::Cancelled);
+        }
+        let options = std::sync::Arc::new(
+            RunOptions::new()
+                .map_err(|error| EngineError::Other(format!("onnx run options: {error}")))?,
+        );
+        *self
+            .active
+            .lock()
+            .map_err(|_| EngineError::Other("run options lock poisoned".into()))? =
+            Some(std::sync::Arc::clone(&options));
+        Ok(ActiveRun {
+            slot: &self.active,
+            options,
+        })
+    }
 }
 
 impl EngineSession for OnnxSession {
@@ -497,16 +533,14 @@ impl EngineSession for OnnxSession {
     }
 
     fn run(&self, inputs: Vec<Tensor>) -> Result<Vec<Tensor>> {
-        if self.cancelled.load(Ordering::SeqCst) {
-            return Err(EngineError::Cancelled);
-        }
+        let active = self.begin_run()?;
 
         let mut state = self
             .state
             .lock()
             .map_err(|_| EngineError::Other("session lock poisoned".into()))?;
         if state.genai.is_some() {
-            return run_genai(&mut state, &inputs);
+            return run_genai(&mut state, &inputs, &active.options, &self.cancelled);
         }
 
         let mut values: Vec<(String, DynValue)> = Vec::with_capacity(inputs.len());
@@ -531,8 +565,14 @@ impl EngineSession for OnnxSession {
 
         let OnnxState { session, .. } = &mut *state;
         let outputs = session
-            .run(values)
-            .map_err(|error| EngineError::Other(format!("onnx run: {error}")))?;
+            .run_with_options(values, &active.options)
+            .map_err(|error| {
+                if self.cancelled.load(Ordering::SeqCst) {
+                    EngineError::Cancelled
+                } else {
+                    EngineError::Other(format!("onnx run: {error}"))
+                }
+            })?;
 
         let mut result = Vec::with_capacity(self.outputs.len());
         for spec in &self.outputs {
@@ -544,21 +584,37 @@ impl EngineSession for OnnxSession {
 
     fn cancel(&self) {
         self.cancelled.store(true, Ordering::SeqCst);
+        if let Ok(slot) = self.active.lock()
+            && let Some(options) = slot.as_ref()
+        {
+            let _ = options.terminate();
+        }
     }
 }
 
-fn run_genai(state: &mut OnnxState, inputs: &[Tensor]) -> Result<Vec<Tensor>> {
+fn run_genai(
+    state: &mut OnnxState,
+    inputs: &[Tensor],
+    options: &RunOptions<NoSelectedOutputs>,
+    cancelled: &AtomicBool,
+) -> Result<Vec<Tensor>> {
     let mut genai = state
         .genai
         .take()
         .ok_or_else(|| EngineError::Other("genai state missing".into()))?;
-    let result = genai.forward(&mut state.session, inputs);
+    let result = genai.forward(&mut state.session, inputs, options, cancelled);
     state.genai = Some(genai);
     result
 }
 
 impl GenaiState {
-    fn forward(&mut self, session: &mut Session, inputs: &[Tensor]) -> Result<Vec<Tensor>> {
+    fn forward(
+        &mut self,
+        session: &mut Session,
+        inputs: &[Tensor],
+        options: &RunOptions<NoSelectedOutputs>,
+        cancelled: &AtomicBool,
+    ) -> Result<Vec<Tensor>> {
         let ids = inputs
             .iter()
             .find(|tensor| tensor.name == self.spec.input_ids)
@@ -620,9 +676,13 @@ impl GenaiState {
             values.push((name.clone(), SessionInputValue::from(value)));
         }
 
-        let mut outputs = session
-            .run(values)
-            .map_err(|error| EngineError::Other(format!("onnx genai run: {error}")))?;
+        let mut outputs = session.run_with_options(values, options).map_err(|error| {
+            if cancelled.load(Ordering::SeqCst) {
+                EngineError::Cancelled
+            } else {
+                EngineError::Other(format!("onnx genai run: {error}"))
+            }
+        })?;
         let logits = from_ort(
             &TensorSpec {
                 name: self.spec.logits.clone(),
