@@ -4,3 +4,6 @@
 models/cache
 *.gguf
 *.safetensors
+
+/apps/desktop/gen
+/apps/desktop/target

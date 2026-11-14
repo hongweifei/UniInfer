@@ -276,11 +276,10 @@ curl http://127.0.0.1:8080/v1/videos/generations/job_7f3c
 ### 桌面端
 
 ```bash
-cd apps/desktop
-cargo tauri dev
+cargo run -p uniinfer-desktop
 ```
 
-应用启动时拉起 loopback API，退出时回收进程树；麦克风与音频播放由 Tauri 插件提供。
+应用在进程内启动 loopback API（随机端口 + 一次性 bearer token），窗口通过 Tauri command 获取地址与 token。默认加载 `models/tiny-onnx/manifest.toml`，可设置 `UNIINFER_MANIFEST` 指向其他清单。使用 WebView2，Windows 11 已内置。
 
 ## 模型清单
 

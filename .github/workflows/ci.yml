@@ -29,6 +29,14 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: cargo check -p uniinfer-cli --features ${{ matrix.feature }}
 
+  desktop:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo check --manifest-path apps/desktop/Cargo.toml
+
   audit:
     runs-on: ubuntu-latest
     steps:

@@ -1,0 +1,22 @@
+[workspace]
+
+[package]
+name = "uniinfer-desktop"
+version = "0.0.0"
+edition = "2024"
+rust-version = "1.85"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/hongweifei/UniInfer"
+publish = false
+description = "UniInfer desktop shell"
+
+[build-dependencies]
+tauri-build = { version = "2.7.4" }
+
+[dependencies]
+uniinfer-api = { path = "../../crates/uniinfer-api" }
+tauri = { version = "2.12.5" }
+tokio = { version = "1.54.1", features = ["rt-multi-thread"] }
+serde = { version = "1.0.229", features = ["derive"] }
+hex = "0.4.3"
+getrandom = "0.4.3"

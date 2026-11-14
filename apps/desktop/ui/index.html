@@ -1,0 +1,240 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>UniInfer</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #0b0d10;
+        --panel: #12161c;
+        --border: #232a34;
+        --text: #e6edf3;
+        --muted: #8b98a9;
+        --accent: #4f8cff;
+        --error: #ff6b6b;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--text);
+        font: 14px/1.55 ui-sans-serif, system-ui, "Segoe UI", sans-serif;
+        height: 100vh;
+        display: flex;
+        flex-direction: column;
+      }
+      header {
+        padding: 12px 18px;
+        border-bottom: 1px solid var(--border);
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+      }
+      header strong { font-size: 15px; letter-spacing: .2px; }
+      #status { color: var(--muted); font-size: 12px; }
+      #messages {
+        flex: 1;
+        overflow-y: auto;
+        padding: 18px;
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+      }
+      .turn {
+        max-width: 760px;
+        padding: 10px 13px;
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        white-space: pre-wrap;
+        word-break: break-word;
+      }
+      .turn.user { align-self: flex-end; background: #182336; }
+      .turn.assistant { align-self: flex-start; background: var(--panel); }
+      .turn.error { border-color: var(--error); color: var(--error); }
+      form {
+        border-top: 1px solid var(--border);
+        padding: 12px 16px;
+        display: flex;
+        gap: 10px;
+        align-items: flex-end;
+      }
+      textarea {
+        flex: 1;
+        resize: none;
+        min-height: 44px;
+        max-height: 180px;
+        padding: 10px 12px;
+        color: var(--text);
+        background: var(--panel);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        font: inherit;
+        outline: none;
+      }
+      textarea:focus { border-color: var(--accent); }
+      button {
+        border: 1px solid var(--border);
+        background: var(--accent);
+        color: white;
+        padding: 10px 16px;
+        border-radius: 8px;
+        font: inherit;
+        cursor: pointer;
+      }
+      button.secondary { background: transparent; color: var(--text); }
+      button:disabled { opacity: .45; cursor: default; }
+    </style>
+  </head>
+  <body>
+    <header>
+      <strong>UniInfer</strong>
+      <span id="status">正在连接本地运行时…</span>
+    </header>
+    <main id="messages"></main>
+    <form id="composer">
+      <textarea id="input" rows="2" placeholder="输入消息，Enter 发送，Shift+Enter 换行"></textarea>
+      <button id="send" type="submit">发送</button>
+      <button id="stop" class="secondary" type="button" disabled>停止</button>
+    </form>
+    <script>
+      const { invoke } = window.__TAURI__.core;
+      const messages = document.getElementById("messages");
+      const status = document.getElementById("status");
+      const form = document.getElementById("composer");
+      const input = document.getElementById("input");
+      const sendButton = document.getElementById("send");
+      const stopButton = document.getElementById("stop");
+
+      let info = null;
+      let model = null;
+      let controller = null;
+
+      function authHeaders() {
+        return { Authorization: `Bearer ${info.token}`, "Content-Type": "application/json" };
+      }
+
+      function addTurn(role, text = "") {
+        const node = document.createElement("div");
+        node.className = `turn ${role}`;
+        node.textContent = text;
+        messages.appendChild(node);
+        messages.scrollTop = messages.scrollHeight;
+        return node;
+      }
+
+      function setBusy(busy) {
+        sendButton.disabled = busy;
+        stopButton.disabled = !busy;
+        status.textContent = busy ? "生成中…" : `${model ?? "未加载模型"}`;
+      }
+
+      async function boot() {
+        info = await invoke("api_info");
+        const response = await fetch(`${info.base}/v1/models`, { headers: authHeaders() });
+        if (!response.ok) throw new Error(`models: HTTP ${response.status}`);
+        const body = await response.json();
+        model = body.data[0]?.id ?? null;
+        setBusy(false);
+        input.focus();
+      }
+
+      function parseFrame(frame) {
+        for (const line of frame.split("\n")) {
+          if (!line.startsWith("data: ")) continue;
+          const payload = line.slice(6);
+          if (payload === "[DONE]") continue;
+          try {
+            const event = JSON.parse(payload);
+            if (event.error) throw new Error(event.error.message ?? "server error");
+            const delta = event.choices?.[0]?.delta?.content;
+            if (delta) return delta;
+          } catch (error) {
+            if (error instanceof SyntaxError) continue;
+            throw error;
+          }
+        }
+        return null;
+      }
+
+      async function send(text) {
+        const userTurn = addTurn("user", text);
+        const assistantTurn = addTurn("assistant", "");
+        controller = new AbortController();
+        setBusy(true);
+        let buffer = "";
+        try {
+          const response = await fetch(`${info.base}/v1/chat/completions`, {
+            method: "POST",
+            headers: authHeaders(),
+            body: JSON.stringify({
+              model,
+              messages: [{ role: "user", content: text }],
+              stream: true,
+              max_tokens: 64,
+            }),
+            signal: controller.signal,
+          });
+          if (!response.ok) {
+            const body = await response.json().catch(() => ({}));
+            throw new Error(body.message ?? `HTTP ${response.status}`);
+          }
+          const reader = response.body.getReader();
+          const decoder = new TextDecoder();
+          while (true) {
+            const { value, done } = await reader.read();
+            if (done) break;
+            buffer += decoder.decode(value, { stream: true });
+            let index;
+            while ((index = buffer.indexOf("\n\n")) >= 0) {
+              const frame = buffer.slice(0, index);
+              buffer = buffer.slice(index + 2);
+              const delta = parseFrame(frame);
+              if (delta) {
+                assistantTurn.textContent += delta;
+                messages.scrollTop = messages.scrollHeight;
+              }
+            }
+          }
+        } catch (error) {
+          if (error.name === "AbortError") {
+            assistantTurn.textContent += "\n[已停止]";
+          } else {
+            assistantTurn.classList.add("error");
+            assistantTurn.textContent = error.message ?? String(error);
+          }
+        } finally {
+          controller = null;
+          setBusy(false);
+          input.focus();
+        }
+        return userTurn;
+      }
+
+      form.addEventListener("submit", (event) => {
+        event.preventDefault();
+        const text = input.value.trim();
+        if (!text || controller) return;
+        input.value = "";
+        void send(text);
+      });
+
+      input.addEventListener("keydown", (event) => {
+        if (event.key === "Enter" && !event.shiftKey) {
+          event.preventDefault();
+          form.requestSubmit();
+        }
+      });
+
+      stopButton.addEventListener("click", () => controller?.abort());
+
+      boot().catch((error) => {
+        status.textContent = "启动失败";
+        const turn = addTurn("error", error.message ?? String(error));
+        turn.classList.add("error");
+      });
+    </script>
+  </body>
+</html>
