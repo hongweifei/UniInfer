@@ -12,7 +12,7 @@
 
 **原则四：实时双工覆盖四条输入通道与四条输出通道。** 输入侧 `input.text`、`input.audio`、`input.image`、`input.video`；输出侧 `output.text`、`output.audio`、`output.image`、`output.video`。
 
-**原则五：GUI 层使用 Tauri 2.0，音频 I/O 通过专用插件覆盖桌面与移动端。**
+**原则五：GUI 层使用 Tauri 2.x，音频 I/O 通过专用插件覆盖桌面与移动端。**
 
 **原则六：CPU、GPU、NPU 是地位对等的设备类别，混合推理是一等执行形态。** `DeviceInventory` 在启动时探测设备类别、可用 EP、内存与带宽；`PlacementPlan` 把算子、层、阶段与模态分配到单设备或跨设备组合。单引擎内支持 EP 分区与层卸载，跨引擎支持阶段级异构流水，所有回退与组合写入 `fallback_reason` 与会话指标。
 
@@ -61,7 +61,7 @@ flowchart TB
         E4["可选 Safetensors 引擎<br/>mistral.rs"]
     end
 
-    subgraph GUI["GUI 层 · Tauri 2.0"]
+    subgraph GUI["GUI 层 · Tauri 2.x"]
         G1["tauri-plugin-microphone<br/>PCM 流"]
         G2["tauri-plugin-native-audio<br/>移动端播放"]
     end
@@ -177,7 +177,7 @@ CPU、GPU、NPU 是地位对等的设备类别。`DeviceInventory` 在启动时�
 
 ### 9.1 设备类别与 EP 归属
 
-`ort` 的 EP 在 **2.0.0-rc.13** 中改为**编译时门控**，不兼容的 EP 组合在链接时抛出错误。运行期算子回退由放置计划显式声明，并记录 `fallback_reason`。构建流水线为每个目标平台使用精确的 EP feature 组合，并在 CI 中验证链接产物。
+`ort` 的 EP 在当前基线 **2.0.0-rc.15** 中为**编译时门控**，不兼容的 EP 组合在链接时抛出错误。运行期算子回退由放置计划显式声明，并记录 `fallback_reason`。构建流水线为每个目标平台使用精确的 EP feature 组合，并在 CI 中验证链接产物。
 
 | 设备类别 | 平台 | `OnnxEngine` EP | `CandleEngine` 后端 | 放置角色 |
 | :--- | :--- | :--- | :--- | :--- |
@@ -229,7 +229,7 @@ kv_cache = "auto"
 
 ## 10. GUI、移动端与音频 I/O
 
-GUI 层使用 **Tauri 2.0**，桌面端和移动端共享 Web UI。音频输入通过 `tauri-plugin-microphone-kessdev` 提供跨平台的 **`startAudioStream` 原始 PCM 帧回调**。音频输出移动端对接原生播放器，桌面端由 Rust 侧管理。
+GUI 层使用 **Tauri 2.x**（基线 2.12.5），桌面端和移动端共享 Web UI。音频输入通过 `tauri-plugin-microphone-kessdev` 提供跨平台的 **`startAudioStream` 原始 PCM 帧回调**。音频输出移动端对接原生播放器，桌面端由 Rust 侧管理。
 
 **WebSocket 实时通道**通过 `axum` 或 `tokio-tungstenite` 承载四通道事件流。图像和视频的输出事件通过同一连接推送，Router 以任务标识管理异步生成的完成通知。
 
@@ -246,3 +246,34 @@ GUI 层使用 **Tauri 2.0**，桌面端和移动端共享 Web UI。音频输入�
 | **Phase 4** | **`plakat` 接入 GGUF/Safetensors 图像生成（batch）**；`mistral.rs` 作为 Safetensors 可选引擎对照评估 | **`plakat` 的 FLUX GGUF 在 16GB 显存上可运行**；mistral.rs 的吞吐对比有明确结论 |
 | **Phase 5** | **`candle-video`（LTX-Video）和 `plakat`（AnimateDiff）接入视频生成（batch）**；实时图像渐进预览帧 + RAVE 逐帧视频管道；Tauri 移动端编排式双工基线 | **`candle-video` 的 LTX-Video 在 CUDA 上端到端可运行**；首帧预览延迟可量化；移动端 PCM 音频 I/O 可用 |
 | **Phase 6** | `frink` 作为 GGUF 可选引擎接入；原生双工在移动端 NPU/GPU 上的逐机型验证；`mistral.rs` 是否提升为 Safetensors 默认可选引擎的决策 | frink 的 OpenAI 兼容服务层与 Router 事件流对齐；至少一个原生模型在移动端设备上达到可用实时性 |
+
+
+## 12. 依赖与版本策略
+
+**基线取上游最新稳定版；上游仅提供 RC 时取最新 RC。** 下表为文档更新时（2026-11-14）可用的最新版本，实际构建版本以 `Cargo.lock` 为准，升级后同步刷新此表。
+
+| 依赖 | 基线版本 | 角色与约束 |
+| :--- | :--- | :--- |
+| Rust | 最新 stable | `rust-toolchain.toml` 固定 stable 通道；CI 使用同一版本 |
+| `ort` | 2.0.0-rc.15 | ONNX Runtime；上游当前仅发布 RC |
+| `onnx-genai` | 0.1.0 | ONNX 生成循环 |
+| `candle-core` | 0.11.1 | GGUF/Safetensors 张量与模型 |
+| `plakat` | 7.21.0 | 图像生成 |
+| `candle-video` | 0.1.0 | LTX-Video 视频生成 |
+| `frink-server` | 0.63.0 | 可选 GGUF 引擎 |
+| `mistralrs` | 0.8.1 | 可选 Safetensors 引擎 |
+| `tauri` | 2.12.5 | 桌面与移动外壳（2.x 最新稳定） |
+| `tauri-plugin-native-audio` | 1.0.5 | 移动端音频输出 |
+| `tauri-plugin-microphone-kessdev` | 0.1.1-beta.0 | PCM 输入；上游 beta，按风险跟踪 |
+| `axum` | 0.8.9 | HTTP 与 WebSocket |
+| `tokio` | 1.54.1 | 异步运行时 |
+
+升级规则：
+
+1. 每个里程碑启动时运行 `cargo update`、`cargo outdated`、`cargo deny check`，把可升级依赖推进到最新稳定版。
+2. `Cargo.lock` 随仓库提交；服务、CLI 与发布包按锁定版本构建，并输出 SBOM 与版本清单。
+3. 引擎与生成库升级时重跑契约测试、数值容差测试与 `bench compare`：图像按固定种子回归，视频记录时长与峰值显存。
+4. 主版本升级附 ADR，记录 API 变更、回退方案与实测差异；升级作为独立 PR 合入。
+5. EP 与驱动跟随 `ort` 支持的最新 SDK 组合（CUDA、TensorRT、CoreML、ROCm、QNN、OpenVINO、CANN），并在 CI 重新验证链接与运行矩阵。
+6. 上游只提供 RC/beta 的依赖在能力清单标注通道（`rc` / `beta`），由启动探测决定路由，降级写入 `fallback_reason`。
+

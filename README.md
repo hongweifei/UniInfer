@@ -29,6 +29,7 @@
 - [模型清单](#模型清单)
 - [API 一览](#api-一览)
 - [项目结构](#项目结构)
+- [依赖策略](#依赖策略)
 - [性能与基线](#性能与基线)
 - [路线图](#路线图)
 - [文档](#文档)
@@ -171,7 +172,7 @@ pub trait InferenceEngine: Send + Sync {
 
 ### 前置条件
 
-- Rust stable 工具链
+- Rust 最新 stable 工具链
 - 一个受支持的模型文件（GGUF、Safetensors 或 ONNX）及其清单
 - CPU、GPU 或 NPU 之一；EP 以编译期 feature 选择，混合推理由放置计划编排
 
@@ -339,6 +340,10 @@ scripts/e2e/             # 里程碑出口脚本
 ```
 
 依赖方向由 `cargo metadata` 在 CI 断言：`uniinfer-devices` 位于 core 与 registry 之间，`uniinfer-backends` 的依赖闭包限定在 core 与 registry，`engine-*` 之间互不依赖。
+
+## 依赖策略
+
+依赖跟踪上游最新稳定版；`ort` 这类仅发布 RC 的项目使用最新 RC。当前基线版本见 [DESIGN §12](docs/DESIGN.md)。`Cargo.lock` 随仓库提交，升级 PR 重跑契约测试、数值容差与基线对比，主版本升级附 ADR。
 
 ## 性能与基线
 

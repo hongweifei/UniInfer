@@ -114,6 +114,7 @@ M0–M3 建立请求生命周期（租约、取消、帧、打断），M4–M8 �
 - `EngineError` 分类：`UnsupportedFormat`、`UnsupportedQuantization`、`UnsupportedEngine`、`MissingEp`、`InsufficientVram`、`ManifestInvalid`、`LoadFailed`、`Cancelled`、`Busy`、`PlacementUnsatisfiable`。
 - `ModelManifest` schema v0：`id`、`format`、`quantization`、`modalities`、`streaming_capable`、`supported_engines`、`supported_eps`、`supported_devices`、`min_vram`、`files[]`（含 sha256）、`context_len`、`tokenizer`、`placement`。
 - `DeviceInventory` 最小实现：枚举 CPU/GPU/NPU 的 EP 编译与运行可用性、内存；本里程碑走 CPU 路径。
+- 依赖基线：`rust-toolchain.toml` 指向最新 stable，`Cargo.lock` 入库，`cargo deny` / `cargo outdated` 进入 CI；版本表见 DESIGN §12。
 - `models/fetch.sh` 拉取极小 ONNX 文本模型（GPT-2 级）并校验摘要。
 - 契约测试 `tests/engine_contract.rs` 按已注册引擎参数化。
 
@@ -259,7 +260,7 @@ M0–M3 建立请求生命周期（租约、取消、帧、打断），M4–M8 �
 **范围**：`ImageGenerationBackend` + `/v1/images/generations`、`/v1/images/edits`。按风险从低到高推进：SD1.5 Safetensors → SDXL → FLUX.1-dev GGUF Q5_K_M。
 
 **交付**
-- plakat 适配层（固定版本，隔离其内部 API 变动）；manifest 增加 `family`、`resolution`、`steps` 默认值。
+- plakat 适配层（锁定最新发布版本，隔离其内部 API 变动）；manifest 增加 `family`、`resolution`、`steps` 默认值。
 - 参数：`prompt`、`negative_prompt`、`size`、`steps`、`guidance`、`seed`；输出 PNG/WebP。
 - 进度：任务事件（step/total），通过 job 轮询或 WS 推送；OOM 映射为 `InsufficientVram`，驱逐后重试一次。
 - 峰值显存测量写入基线。
@@ -357,6 +358,7 @@ M0–M3 建立请求生命周期（租约、取消、帧、打断），M4–M8 �
 | Manifest 与供应链 | M0 | schema 版本、sha256、许可证字段、设备与放置字段、fetch 脚本 | 清单按 schema 校验，缺字段返回 `ManifestInvalid` |
 | 构建与 EP 矩阵 | M1 | CPU 默认；`ep-cuda/ep-tensorrt/ep-coreml/ep-directml/ep-nnapi` 组合编译检查；M6 起加入 `ep-qnn/ep-openvino/ep-cann` | PR 执行编译检查；具备硬件的 runner 运行对应用例 |
 | 设备与放置 | M6 | `DeviceInventory`、`PlacementPlan`、代价模型、设备×EP 矩阵回归 | 每个新增 EP 附带探测与数值一致性用例 |
+| 依赖与工具链 | M0 | 最新 stable；`cargo update` / `outdated` / `deny`；锁文件、SBOM 与版本清单 | 每次升级跑契约测试与基线；主版本附 ADR |
 | 契约测试 | M0 | 所有引擎参数化跑同一组断言（能力、设备、取消、流式、错误码、放置计划） | 新引擎通过契约测试后合入 |
 | 可观测性 | M1 | 分层 span、延迟直方图、会话/队列计量 | 每条新增路径带 span |
 | 性能预算 | M1 | `bench/baseline.json` + `bench compare` | 回归 +10% 报警，+25% 阻塞 |
@@ -384,7 +386,7 @@ M0–M3 建立请求生命周期（租约、取消、帧、打断），M4–M8 �
 
 | 风险 | 触发信号 | 应对 |
 | :--- | :--- | :--- |
-| plakat API 漂移 | 升级后编译失败 | 固定版本 + 适配层封装；升级作为独立 PR 并跑图像契约 |
+| plakat API 漂移 | 升级后编译失败 | 锁定最新稳定版本 + 适配层封装；升级作为独立 PR 并跑图像契约 |
 | 流式扩散回调缺失 | P1 结论为否 | 走 G1 分支：batch 生成 + 进度合成预览帧，语义保持完整 |
 | RAVE 模型缺失 | 无满足帧预算的 ONNX 模型 | 走 G2 分支：实时视频收窄为逐帧滤镜，DESIGN §5 同步修订 |
 | GGUF FLUX 显存超标 | 实测峰值显存超过 16GB | 预检按实测值拒绝；FLUX NF4 或更高量化作为可选组合 |
@@ -410,6 +412,7 @@ M0–M3 建立请求生命周期（租约、取消、帧、打断），M4–M8 �
 4. 基线与预算写入 `bench/baseline.json`（含设备与驱动信息）。
 5. 用户可见文档、`fallback_reason` 枚举、已知限制同批更新。
 6. 每条新增路径带测试、基线、接线完成的开关。
+7. 依赖处于最新稳定版；`cargo outdated` 中的可升级项已处理或附 ADR 说明。
 
 **推进顺序**：主干开发；功能以编译期 feature + 运行时 Registry 双门控。里程碑完成后打 `v0.x` 标签，附演示脚本与基线报告。里程碑内部按"接口 → 单路径实现 → 错误/取消 → 指标"四步推进，四步齐备后进入下一条路径。
 
