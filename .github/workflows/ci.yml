@@ -59,7 +59,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      - uses: taiki-e/install-action@cargo-outdated
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-outdated
       - run: cargo outdated --workspace
 
   test:
