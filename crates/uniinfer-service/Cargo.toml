@@ -10,31 +10,28 @@ description = "Runtime assembly and model slots"
 
 [features]
 default = []
-ep-cuda = ["uniinfer-engine-onnx/ep-cuda"]
-ep-tensorrt = ["uniinfer-engine-onnx/ep-tensorrt"]
-ep-coreml = ["uniinfer-engine-onnx/ep-coreml"]
-ep-directml = ["uniinfer-engine-onnx/ep-directml"]
-ep-nnapi = ["uniinfer-engine-onnx/ep-nnapi"]
-ep-qnn = ["uniinfer-engine-onnx/ep-qnn"]
-ep-openvino = ["uniinfer-engine-onnx/ep-openvino"]
-ep-rocm = ["uniinfer-engine-onnx/ep-rocm"]
-ep-vitis = ["uniinfer-engine-onnx/ep-vitis"]
-ep-cann = ["uniinfer-engine-onnx/ep-cann"]
-candle-cuda = ["uniinfer-engine-candle/cuda"]
-candle-metal = ["uniinfer-engine-candle/metal"]
-llama = ["dep:uniinfer-engine-llama", "uniinfer-engine-llama/llama"]
-llama-vulkan = ["llama", "uniinfer-engine-llama/vulkan"]
-llama-cuda = ["llama", "uniinfer-engine-llama/cuda"]
-llama-rocm = ["llama", "uniinfer-engine-llama/rocm"]
-llama-metal = ["llama", "uniinfer-engine-llama/metal"]
+ep-cuda = ["uniinfer-engine-set/ep-cuda"]
+ep-tensorrt = ["uniinfer-engine-set/ep-tensorrt"]
+ep-coreml = ["uniinfer-engine-set/ep-coreml"]
+ep-directml = ["uniinfer-engine-set/ep-directml"]
+ep-nnapi = ["uniinfer-engine-set/ep-nnapi"]
+ep-qnn = ["uniinfer-engine-set/ep-qnn"]
+ep-openvino = ["uniinfer-engine-set/ep-openvino"]
+ep-rocm = ["uniinfer-engine-set/ep-rocm"]
+ep-vitis = ["uniinfer-engine-set/ep-vitis"]
+ep-cann = ["uniinfer-engine-set/ep-cann"]
+candle-cuda = ["uniinfer-engine-set/candle-cuda"]
+candle-metal = ["uniinfer-engine-set/candle-metal"]
+llama = ["uniinfer-engine-set/llama"]
+llama-vulkan = ["uniinfer-engine-set/llama-vulkan"]
+llama-cuda = ["uniinfer-engine-set/llama-cuda"]
+llama-rocm = ["uniinfer-engine-set/llama-rocm"]
+llama-metal = ["uniinfer-engine-set/llama-metal"]
 
 [dependencies]
 uniinfer-core.workspace = true
-uniinfer-devices.workspace = true
 uniinfer-registry.workspace = true
-uniinfer-engine-onnx.workspace = true
-uniinfer-engine-candle.workspace = true
-uniinfer-engine-llama = { workspace = true, optional = true }
+uniinfer-engine-set.workspace = true
 uniinfer-backends.workspace = true
 tokio.workspace = true
 tracing.workspace = true

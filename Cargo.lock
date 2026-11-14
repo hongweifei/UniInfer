@@ -2854,6 +2854,7 @@ dependencies = [
  "tower",
  "tower-http",
  "tracing",
+ "uniinfer-backends",
  "uniinfer-core",
  "uniinfer-service",
 ]
@@ -2948,6 +2949,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "uniinfer-engine-set"
+version = "0.0.0"
+dependencies = [
+ "uniinfer-core",
+ "uniinfer-devices",
+ "uniinfer-engine-candle",
+ "uniinfer-engine-llama",
+ "uniinfer-engine-onnx",
+ "uniinfer-registry",
+]
+
+[[package]]
 name = "uniinfer-registry"
 version = "0.0.0"
 dependencies = [
@@ -2968,10 +2981,7 @@ dependencies = [
  "tracing",
  "uniinfer-backends",
  "uniinfer-core",
- "uniinfer-devices",
- "uniinfer-engine-candle",
- "uniinfer-engine-llama",
- "uniinfer-engine-onnx",
+ "uniinfer-engine-set",
  "uniinfer-registry",
 ]
 

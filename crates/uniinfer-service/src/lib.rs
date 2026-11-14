@@ -7,11 +7,7 @@ use std::time::Duration;
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use uniinfer_backends::{ByteTokenizer, HuggingFaceTokenizer, TextGenerator, Tokenizer};
 use uniinfer_core::{Device, EngineError, EngineSession, ModelManifest, PlacementPlan, Result};
-use uniinfer_devices::DeviceInventory;
-use uniinfer_engine_candle::CandleEngine;
-#[cfg(feature = "llama")]
-use uniinfer_engine_llama::LlamaEngine;
-use uniinfer_engine_onnx::OnnxEngine;
+use uniinfer_engine_set;
 use uniinfer_registry::{EngineRegistry, SessionLease};
 
 pub use uniinfer_core::CancelToken;
@@ -24,27 +20,9 @@ pub struct Runtime {
 impl Runtime {
     /// Assemble the default engine set and probe its devices.
     pub fn new() -> Result<Self> {
-        let onnx = OnnxEngine::new()?;
-        let candle = CandleEngine::new()?;
-        #[cfg(feature = "llama")]
-        let llama = LlamaEngine::new()?;
-        let mut inventory = DeviceInventory::probe();
-        for device in onnx.probe_devices() {
-            inventory.register(device);
-        }
-        for device in candle.probe_devices() {
-            inventory.register(device);
-        }
-        #[cfg(feature = "llama")]
-        for device in llama.probe_devices() {
-            inventory.register(device);
-        }
-        let mut registry = EngineRegistry::new(inventory);
-        registry.register(Arc::new(onnx));
-        #[cfg(feature = "llama")]
-        registry.register(Arc::new(llama));
-        registry.register(Arc::new(candle));
-        Ok(Self { registry })
+        Ok(Self {
+            registry: uniinfer_engine_set::build()?,
+        })
     }
 
     #[must_use]
@@ -59,13 +37,17 @@ impl Runtime {
 
     /// Load one model and validate the text-generation contract.
     pub fn load(&self, manifest_path: &Path) -> Result<Arc<ModelSlot>> {
+        // Backend dispatch is still text-only. Check before loading a session
+        // so non-text manifests fail without allocating model weights.
+        let manifest = ModelManifest::load(manifest_path)?;
+        let text = manifest.text.as_ref().ok_or_else(|| {
+            EngineError::ManifestInvalid(
+                "runtime currently supports text models; manifest has no [text] section".into(),
+            )
+        })?;
         let lease = Arc::new(self.registry.load(manifest_path)?);
         let manifest = lease.manifest();
         let tokenizer = manifest.tokenizer.as_deref().unwrap_or_default();
-        let text = manifest
-            .text
-            .as_ref()
-            .ok_or_else(|| EngineError::ManifestInvalid("manifest has no [text] section".into()))?;
         let tokenizer: Arc<dyn Tokenizer> = match tokenizer {
             "bytes" => Arc::new(ByteTokenizer::new(text.vocab_size)?),
             "hf" => {
@@ -140,6 +122,11 @@ impl ModelSlot {
     #[must_use]
     pub fn try_acquire(&self) -> Option<OwnedSemaphorePermit> {
         Arc::clone(&self.permit).try_acquire_owned().ok()
+    }
+
+    /// Count prompt tokens with the slot's tokenizer.
+    pub fn count_tokens(&self, prompt: &str) -> Result<usize> {
+        self.generator.count_tokens(prompt)
     }
 
     /// Run one greedy byte generation pass.
