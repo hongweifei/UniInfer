@@ -773,3 +773,45 @@ fn from_ort(spec: &TensorSpec, value: &DynValue) -> Result<Tensor> {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_genai_config_from_model_dir() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        std::fs::write(
+            dir.path().join("genai_config.json"),
+            r#"{
+                "model": {
+                    "vocab_size": 151936,
+                    "eos_token_id": 151645,
+                    "decoder": {
+                        "inputs": {
+                            "input_ids": "input_ids",
+                            "attention_mask": "attention_mask",
+                            "past_key_names": "past_key_values.%d.key",
+                            "past_value_names": "past_key_values.%d.value"
+                        },
+                        "outputs": {
+                            "logits": "logits",
+                            "present_key_names": "present.%d.key",
+                            "present_value_names": "present.%d.value"
+                        },
+                        "num_hidden_layers": 28,
+                        "num_key_value_heads": 8,
+                        "head_size": 128
+                    }
+                }
+            }"#,
+        )
+        .expect("write config");
+        let config = load_genai_config(dir.path())
+            .expect("parse config")
+            .expect("config present");
+        assert_eq!(config.model.decoder.num_hidden_layers, 28);
+        assert_eq!(config.model.decoder.num_key_value_heads, 8);
+        assert_eq!(config.model.decoder.head_size, 128);
+    }
+}
