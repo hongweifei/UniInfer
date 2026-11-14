@@ -17,7 +17,7 @@
 
 ## 项目状态
 
-**M0 已交付，M1 已接通。** Trait、Manifest、Registry、ONNX CPU 引擎、字节级文本后端与 CLI 可运行；REST/SSE、会话取消、错误信封与 `/v1/models`、`/metrics` 已上线；文本基线测量与冒烟已接入 CI。EP 矩阵继续按 [ROADMAP](docs/ROADMAP.md) 补齐；未接入的能力仍属目标契约。
+**M0 已交付，M1 已接通。** Trait、Manifest、Registry、ONNX CPU 引擎、字节级文本后端与 CLI 可运行；REST/SSE、会话取消、错误信封、`/v1/models`、`/metrics`、文本基线测量与 EP 编译矩阵均已接通。未接入的能力仍属目标契约。
 
 ## 目录
 
@@ -208,11 +208,11 @@ cargo build --release
 按目标平台选择 EP feature（随 M1/M6 接入）：
 
 ```bash
-cargo build --release --features ep-cuda      # NVIDIA GPU
-cargo build --release --features ep-coreml    # Apple GPU / ANE
-cargo build --release --features ep-directml  # Windows GPU
-cargo build --release --features ep-qnn       # Qualcomm NPU
-cargo build --release --features ep-openvino  # Intel GPU / NPU
+cargo build --release -p uniinfer-cli --features ep-cuda      # NVIDIA GPU
+cargo build --release -p uniinfer-cli --features ep-coreml    # Apple GPU / ANE
+cargo build --release -p uniinfer-cli --features ep-directml  # Windows GPU
+cargo build --release -p uniinfer-cli --features ep-qnn       # Qualcomm NPU
+cargo build --release -p uniinfer-cli --features ep-openvino  # Intel GPU / NPU
 ```
 
 ### 启动服务
@@ -388,7 +388,7 @@ cargo run -p uniinfer-bench -- compare \
 | 合并 | 预览帧与逐帧视频 | M9 |
 | 扩展 | 移动端、可选引擎与规模化 | M10–M11 |
 
-完整出口门禁、决策门与风险登记见 [ROADMAP](docs/ROADMAP.md)。当前进度：**M0 已交付；M1 HTTP/SSE 与文本基线已接通**，EP 矩阵待补。
+完整出口门禁、决策门与风险登记见 [ROADMAP](docs/ROADMAP.md)。当前进度：**M0、M1 已交付**；下一步 M2 桌面端。
 
 ## 文档
 

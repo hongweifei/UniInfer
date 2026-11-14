@@ -1,7 +1,7 @@
 //! ONNX Runtime engine.
 
-use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{LazyLock, Mutex};
 
 use ort::environment::Environment;
 use ort::session::Session;
@@ -12,7 +12,26 @@ use uniinfer_core::{
 };
 
 const FORMATS: &[ModelFormat] = &[ModelFormat::Onnx];
-const DEVICES: &[DeviceClass] = &[DeviceClass::Cpu];
+static DEVICES: LazyLock<Vec<DeviceClass>> = LazyLock::new(|| {
+    let mut devices = vec![DeviceClass::Cpu];
+    if cfg!(any(
+        feature = "ep-cuda",
+        feature = "ep-tensorrt",
+        feature = "ep-coreml",
+        feature = "ep-directml"
+    )) {
+        devices.push(DeviceClass::Gpu);
+    }
+    if cfg!(any(
+        feature = "ep-nnapi",
+        feature = "ep-qnn",
+        feature = "ep-openvino",
+        feature = "ep-cann"
+    )) {
+        devices.push(DeviceClass::Npu);
+    }
+    devices
+});
 const MODALITIES: &[Modality] = &[
     Modality::Text,
     Modality::Audio,
@@ -29,8 +48,28 @@ pub struct OnnxEngine {
 
 impl OnnxEngine {
     pub fn new() -> Result<Self> {
+        #[allow(unused_mut)]
+        let mut providers: Vec<ort::ep::ExecutionProviderDispatch> = Vec::new();
+        #[cfg(feature = "ep-tensorrt")]
+        providers.push(ort::ep::TensorRT::default().build());
+        #[cfg(feature = "ep-cuda")]
+        providers.push(ort::ep::CUDA::default().build());
+        #[cfg(feature = "ep-coreml")]
+        providers.push(ort::ep::CoreML::default().build());
+        #[cfg(feature = "ep-directml")]
+        providers.push(ort::ep::DirectML::default().build());
+        #[cfg(feature = "ep-qnn")]
+        providers.push(ort::ep::QNN::default().build());
+        #[cfg(feature = "ep-nnapi")]
+        providers.push(ort::ep::NNAPI::default().build());
+        #[cfg(feature = "ep-openvino")]
+        providers.push(ort::ep::OpenVINO::default().build());
+        #[cfg(feature = "ep-cann")]
+        providers.push(ort::ep::CANN::default().build());
+
         let environment = ort::init()
             .with_name("uniinfer")
+            .with_execution_providers(providers)
             .build()
             .map_err(|error| EngineError::LoadFailed(format!("ort environment: {error}")))?;
         Ok(Self { environment })
@@ -61,7 +100,7 @@ impl InferenceEngine for OnnxEngine {
     }
 
     fn supported_devices(&self) -> &[DeviceClass] {
-        DEVICES
+        &DEVICES
     }
 
     fn capabilities(&self) -> EngineCapabilities {
@@ -69,7 +108,7 @@ impl InferenceEngine for OnnxEngine {
             formats: FORMATS.to_vec(),
             modalities: vec![(ModelFormat::Onnx, MODALITIES.to_vec())],
             quantizations: vec![(ModelFormat::Onnx, QUANTIZATIONS.to_vec())],
-            devices: DEVICES.to_vec(),
+            devices: DEVICES.clone(),
         }
     }
 

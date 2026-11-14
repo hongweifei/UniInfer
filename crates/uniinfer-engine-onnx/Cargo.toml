@@ -12,6 +12,17 @@ ort.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
 
+[features]
+default = []
+ep-cuda = ["ort/cuda"]
+ep-tensorrt = ["ort/tensorrt"]
+ep-coreml = ["ort/coreml"]
+ep-directml = ["ort/directml"]
+ep-nnapi = ["ort/nnapi"]
+ep-qnn = ["ort/qnn"]
+ep-openvino = ["ort/openvino"]
+ep-cann = ["ort/cann"]
+
 [dev-dependencies]
 uniinfer-devices.workspace = true
 tempfile.workspace = true

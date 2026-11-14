@@ -6,6 +6,26 @@ on:
   pull_request:
 
 jobs:
+  features:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-latest, feature: ep-cuda }
+          - { os: ubuntu-latest, feature: ep-tensorrt }
+          - { os: ubuntu-latest, feature: ep-qnn }
+          - { os: ubuntu-latest, feature: ep-openvino }
+          - { os: ubuntu-latest, feature: ep-cann }
+          - { os: windows-latest, feature: ep-directml }
+          - { os: windows-latest, feature: ep-nnapi }
+          - { os: macos-latest, feature: ep-coreml }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo check -p uniinfer-cli --features ${{ matrix.feature }}
+
   test:
     runs-on: ubuntu-latest
     steps:
