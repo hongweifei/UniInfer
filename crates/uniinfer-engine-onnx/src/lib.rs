@@ -174,6 +174,12 @@ impl InferenceEngine for OnnxEngine {
                 spec.placement.devices
             )));
         }
+        let class = spec
+            .placement
+            .devices
+            .first()
+            .map(|device| device.class)
+            .ok_or_else(|| EngineError::PlacementUnsatisfiable("empty placement".into()))?;
         spec.manifest.verify_files(&spec.base_dir)?;
 
         let model_file = spec
@@ -183,12 +189,22 @@ impl InferenceEngine for OnnxEngine {
             .ok_or_else(|| EngineError::ManifestInvalid("files is empty".into()))?;
         let model_path = spec.base_dir.join(&model_file.path);
 
-        let session = Session::builder(&self.environment)
-            .map_err(|error| EngineError::LoadFailed(format!("session builder: {error}")))?
-            .commit_from_file(&model_path)
-            .map_err(|error| {
-                EngineError::LoadFailed(format!("cannot load {}: {error}", model_path.display()))
-            })?;
+        let builder = Session::builder(&self.environment)
+            .map_err(|error| EngineError::LoadFailed(format!("session builder: {error}")))?;
+        // Honor a CPU placement even when GPU EPs are registered in the
+        // process-wide ORT environment.
+        let mut builder = if class == DeviceClass::Cpu {
+            builder
+                .with_no_environment_execution_providers()
+                .map_err(|error| {
+                    EngineError::LoadFailed(format!("cpu-only session options: {error}"))
+                })?
+        } else {
+            builder
+        };
+        let session = builder.commit_from_file(&model_path).map_err(|error| {
+            EngineError::LoadFailed(format!("cannot load {}: {error}", model_path.display()))
+        })?;
 
         let genai_config = load_genai_config(&spec.base_dir)?;
         let (inputs, outputs, genai) = match genai_config {
