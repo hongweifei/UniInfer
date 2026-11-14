@@ -178,6 +178,16 @@ pub trait InferenceEngine: Send + Sync {
 - M0 自带 `models/tiny-onnx` 固定件；GGUF、Safetensors 与 GPU/NPU 路径随里程碑接入
 - CPU 为 M0 的默认设备；EP 由编译期 feature 选择，混合推理由放置计划编排
 
+### 模型获取（ModelScope）
+
+模型默认从 ModelScope 下载，`models/pull.sh` 封装了 `modelscope download`：
+
+```bash
+models/pull.sh Qwen/Qwen2.5-0.5B-Instruct models/qwen2.5-0.5b
+```
+
+脚本优先使用已安装的 `modelscope`，否则通过 `uvx --from modelscope modelscope` 运行；`local_dir` 会解析为绝对路径。固定件 `models/tiny-onnx` 由本地生成脚本产出，不依赖模型仓库。
+
 ### M0：CLI 与 ONNX CPU 路径
 
 设备探测：
