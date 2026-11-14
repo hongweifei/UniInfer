@@ -140,7 +140,7 @@ pub trait InferenceEngine: Send + Sync {
 | ONNX | 实时预览帧 | `OnnxEngine` | — | realtime |
 | ONNX | 实时逐帧视频 | `OnnxEngine` + RAVE | — | realtime |
 
-**量化**：GGUF 覆盖 Q2_K–Q8_0、Q4_0、Q8_0；FP8 在加载期返回 `UnsupportedQuantization` 并给出替代建议；IQ/MXFP4 由 `frink` 可选引擎覆盖。Safetensors 以 FP16/BF16 mmap 加载，FP8 的 ISQ 路径在 M11 评估。
+**量化**：ONNX 支持 FP32、FP16、INT8 与 INT4（如 Qwen3 ONNX int4 GenAI bundle）；GGUF 覆盖 Q2_K–Q8_0、Q4_0、Q8_0；FP8 在加载期返回 `UnsupportedQuantization` 并给出替代建议；IQ/MXFP4 由 `frink` 可选引擎覆盖。Safetensors 以 FP16/BF16 mmap 加载，FP8 的 ISQ 路径在 M11 评估。
 
 **设备类别与 EP**：
 

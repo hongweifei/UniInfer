@@ -12,7 +12,7 @@ for file in model.onnx genai_config.json tokenizer.json tokenizer_config.json co
     echo "skip $file"
   else
     echo "fetch $file"
-    curl -fSL --ssl-no-revoke "$base$file" -o "$dest/$file"
+    curl -fSL --retry 3 "$base$file" -o "$dest/$file"
   fi
 done
 sha256sum "$dest/model.onnx"
