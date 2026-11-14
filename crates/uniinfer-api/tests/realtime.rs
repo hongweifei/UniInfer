@@ -88,14 +88,14 @@ async fn streams_text_and_finishes() {
 }
 
 #[tokio::test]
-async fn rejects_non_text_channel() {
+async fn rejects_unsupported_channel() {
     let (url, server) = start().await;
     let (mut socket, _) = tokio_tungstenite::connect_async(url)
         .await
         .expect("connect");
     socket
         .send(Message::Text(
-            json!({"type": "session.start", "model": "tiny-byte-onnx", "channels": ["audio"]})
+            json!({"type": "session.start", "model": "tiny-byte-onnx", "channels": ["image"]})
                 .to_string()
                 .into(),
         ))
@@ -104,5 +104,44 @@ async fn rejects_non_text_channel() {
     let error = next_json(&mut socket).await;
     assert_eq!(error["type"], "error");
     assert_eq!(error["code"], "unsupported_channel");
+    server.abort();
+}
+
+fn pcm_frame(value: i16) -> Vec<u8> {
+    value.to_le_bytes().repeat(320)
+}
+
+#[tokio::test]
+async fn audio_frames_emit_vad_events() {
+    let (url, server) = start().await;
+    let (mut socket, _) = tokio_tungstenite::connect_async(url)
+        .await
+        .expect("connect");
+    socket
+        .send(Message::Text(
+            json!({"type": "session.start", "model": "tiny-byte-onnx", "channels": ["text", "audio"]})
+                .to_string()
+                .into(),
+        ))
+        .await
+        .expect("start");
+    let started = next_json(&mut socket).await;
+    assert_eq!(started["channels"], json!(["text", "audio"]));
+
+    socket
+        .send(Message::Binary(pcm_frame(2_000).into()))
+        .await
+        .expect("speech");
+    let speech = next_json(&mut socket).await;
+    assert_eq!(speech["type"], "input.speech.started");
+
+    for _ in 0..10 {
+        socket
+            .send(Message::Binary(pcm_frame(0).into()))
+            .await
+            .expect("silence");
+    }
+    let stopped = next_json(&mut socket).await;
+    assert_eq!(stopped["type"], "input.speech.stopped");
     server.abort();
 }

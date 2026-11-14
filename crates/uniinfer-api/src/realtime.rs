@@ -13,6 +13,7 @@ use tokio::sync::mpsc;
 use uniinfer_core::{CancelToken, EngineError};
 use uniinfer_service::ModelSlot;
 
+use crate::audio::{EnergyVad, FRAME_BYTES, VadEvent};
 use crate::state::{ActiveGuard, AppState};
 use crate::utf8::Utf8Decoder;
 
@@ -50,41 +51,52 @@ enum ClientEvent {
     ResponseCancel,
 }
 
+struct SessionState {
+    id: String,
+    prompt: Option<String>,
+    slot: Option<Arc<ModelSlot>>,
+    active: Option<CancelToken>,
+    audio_enabled: bool,
+    vad: EnergyVad,
+}
+
+impl Default for SessionState {
+    fn default() -> Self {
+        Self {
+            id: String::new(),
+            prompt: None,
+            slot: None,
+            active: None,
+            audio_enabled: false,
+            vad: EnergyVad::new(500.0),
+        }
+    }
+}
+
 static NEXT_SESSION: AtomicU64 = AtomicU64::new(1);
 static NEXT_RESPONSE: AtomicU64 = AtomicU64::new(1);
 
 async fn session(socket: WebSocket, state: AppState) {
     let (mut sink, mut incoming) = socket.split();
     let (tx, mut rx) = mpsc::channel::<String>(32);
-    let mut session_id = String::new();
-    let mut prompt: Option<String> = None;
-    let mut slot: Option<Arc<ModelSlot>> = None;
-    let mut active: Option<CancelToken> = None;
+    let mut session = SessionState::default();
 
     loop {
         tokio::select! {
             message = incoming.next() => {
                 match message {
                     Some(Ok(Message::Text(text))) => {
-                        match handle_client(
-                            &state,
-                            &tx,
-                            &mut session_id,
-                            &mut prompt,
-                            &mut slot,
-                            &mut active,
-                            &text,
-                        )
-                        .await
-                        {
-                            Ok(()) => {}
-                            Err(error) => {
-                                let _ = tx.send(error_json(&error)).await;
-                            }
+                        if let Err(error) = handle_client(&state, &tx, &mut session, &text).await {
+                            let _ = tx.send(error_json(&error)).await;
+                        }
+                    }
+                    Some(Ok(Message::Binary(frame))) => {
+                        if let Err(error) = handle_audio(&tx, &mut session, &frame).await {
+                            let _ = tx.send(error_json(&error)).await;
                         }
                     }
                     Some(Ok(Message::Close(_))) | None => {
-                        if let Some(token) = active.take() {
+                        if let Some(token) = session.active.take() {
                             token.cancel();
                         }
                         break;
@@ -96,7 +108,7 @@ async fn session(socket: WebSocket, state: AppState) {
             event = rx.recv() => {
                 let Some(event) = event else { break };
                 if event.contains("\"response.done\"") {
-                    active = None;
+                    session.active = None;
                 }
                 if sink.send(Message::Text(event.into())).await.is_err() {
                     break;
@@ -106,13 +118,55 @@ async fn session(socket: WebSocket, state: AppState) {
     }
 }
 
+async fn handle_audio(
+    tx: &mpsc::Sender<String>,
+    session: &mut SessionState,
+    frame: &[u8],
+) -> Result<(), String> {
+    if !session.audio_enabled {
+        return tx
+            .send(error_event(
+                "unsupported_channel",
+                "session.start did not enable audio",
+            ))
+            .await
+            .map_err(|_| "channel closed".to_string());
+    }
+    if frame.len() != FRAME_BYTES {
+        return tx
+            .send(error_event(
+                "invalid_audio_frame",
+                &format!("expected {FRAME_BYTES} bytes of 16 kHz PCM16"),
+            ))
+            .await
+            .map_err(|_| "channel closed".to_string());
+    }
+
+    match session.vad.push(frame) {
+        Some(VadEvent::SpeechStarted) => {
+            tx.send(json!({"type": "input.speech.started"}).to_string())
+                .await
+                .map_err(|_| "channel closed".to_string())?;
+            if let Some(token) = session.active.take() {
+                token.cancel();
+                tx.send(json!({"type": "response.cancelled", "reason": "barge_in"}).to_string())
+                    .await
+                    .map_err(|_| "channel closed".to_string())?;
+            }
+            Ok(())
+        }
+        Some(VadEvent::SpeechStopped) => tx
+            .send(json!({"type": "input.speech.stopped"}).to_string())
+            .await
+            .map_err(|_| "channel closed".to_string()),
+        None => Ok(()),
+    }
+}
+
 async fn handle_client(
     state: &AppState,
     tx: &mpsc::Sender<String>,
-    session_id: &mut String,
-    prompt: &mut Option<String>,
-    slot: &mut Option<Arc<ModelSlot>>,
-    active: &mut Option<CancelToken>,
+    session: &mut SessionState,
     text: &str,
 ) -> Result<(), String> {
     let event: ClientEvent = serde_json::from_str(text).map_err(|error| error.to_string())?;
@@ -128,7 +182,10 @@ async fn handle_client(
                     .map_err(|_| "channel closed".to_string());
             };
             let model_id = selected.manifest().id.clone();
-            if let Some(channel) = channels.iter().find(|channel| channel.as_str() != "text") {
+            if let Some(channel) = channels
+                .iter()
+                .find(|channel| !matches!(channel.as_str(), "text" | "audio"))
+            {
                 return tx
                     .send(error_event(
                         "unsupported_channel",
@@ -137,28 +194,31 @@ async fn handle_client(
                     .await
                     .map_err(|_| "channel closed".to_string());
             }
-            *session_id = new_session_id();
-            *prompt = None;
-            *slot = Some(selected);
+            let audio = channels.iter().any(|channel| channel == "audio");
+            session.id = new_session_id();
+            session.prompt = None;
+            session.slot = Some(selected);
+            session.audio_enabled = audio;
+            session.vad = EnergyVad::new(500.0);
             let payload = json!({
                 "type": "session.started",
-                "session_id": session_id.clone(),
+                "session_id": session.id,
                 "model": model_id,
-                "channels": ["text"],
+                "channels": if audio { vec!["text", "audio"] } else { vec!["text"] },
             });
             tx.send(payload.to_string())
                 .await
                 .map_err(|_| "channel closed".to_string())
         }
         ClientEvent::InputText { text } => {
-            *prompt = Some(text.clone());
+            session.prompt = Some(text.clone());
             let payload = json!({"type": "input.text.accepted", "bytes": text.len()});
             tx.send(payload.to_string())
                 .await
                 .map_err(|_| "channel closed".to_string())
         }
         ClientEvent::ResponseCreate { max_tokens } => {
-            if session_id.is_empty() {
+            if session.id.is_empty() {
                 return tx
                     .send(error_event(
                         "session_not_started",
@@ -167,13 +227,13 @@ async fn handle_client(
                     .await
                     .map_err(|_| "channel closed".to_string());
             }
-            if active.is_some() {
+            if session.active.is_some() {
                 return tx
                     .send(error_event("busy", "a response is already running"))
                     .await
                     .map_err(|_| "channel closed".to_string());
             }
-            let Some(selected) = slot.clone() else {
+            let Some(selected) = session.slot.clone() else {
                 return tx
                     .send(error_event(
                         "session_not_started",
@@ -182,7 +242,7 @@ async fn handle_client(
                     .await
                     .map_err(|_| "channel closed".to_string());
             };
-            let Some(prompt) = prompt.clone() else {
+            let Some(prompt) = session.prompt.clone() else {
                 return tx
                     .send(error_event("invalid_request", "send input.text first"))
                     .await
@@ -195,7 +255,7 @@ async fn handle_client(
                     .map_err(|_| "channel closed".to_string());
             };
             let token = CancelToken::new();
-            *active = Some(token.clone());
+            session.active = Some(token.clone());
             spawn_response(
                 selected,
                 tx.clone(),
@@ -208,10 +268,9 @@ async fn handle_client(
             Ok(())
         }
         ClientEvent::ResponseCancel => {
-            if let Some(token) = active.take() {
+            if let Some(token) = session.active.take() {
                 token.cancel();
-                let payload = json!({"type": "response.cancelled"});
-                tx.send(payload.to_string())
+                tx.send(json!({"type": "response.cancelled"}).to_string())
                     .await
                     .map_err(|_| "channel closed".to_string())?;
             }

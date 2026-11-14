@@ -1,5 +1,6 @@
 //! HTTP surface for the text service.
 
+mod audio;
 mod auth;
 pub mod chat;
 pub mod error;
