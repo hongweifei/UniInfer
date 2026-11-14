@@ -10,7 +10,7 @@ use uniinfer_service::{ModelSlot, Runtime};
 /// Server options.
 #[derive(Debug, Clone)]
 pub struct ApiConfig {
-    pub manifest: PathBuf,
+    pub manifests: Vec<PathBuf>,
     pub queue_timeout: Duration,
     pub token: Option<String>,
 }
@@ -19,10 +19,16 @@ impl ApiConfig {
     #[must_use]
     pub fn new(manifest: PathBuf) -> Self {
         Self {
-            manifest,
+            manifests: vec![manifest],
             queue_timeout: Duration::from_secs(30),
             token: None,
         }
+    }
+
+    #[must_use]
+    pub fn with_manifests(mut self, manifests: Vec<PathBuf>) -> Self {
+        self.manifests = manifests;
+        self
     }
 
     #[must_use]
@@ -35,7 +41,7 @@ impl ApiConfig {
 /// Shared server state.
 #[derive(Clone)]
 pub struct AppState {
-    pub(crate) slot: Arc<ModelSlot>,
+    pub(crate) slots: Arc<HashMap<String, Arc<ModelSlot>>>,
     pub(crate) runtime: Arc<Runtime>,
     pub(crate) cancels: Arc<Mutex<HashMap<String, CancelToken>>>,
     pub(crate) active: Arc<AtomicUsize>,
@@ -45,11 +51,25 @@ pub struct AppState {
 
 impl AppState {
     pub fn new(config: &ApiConfig) -> Result<Self> {
+        if config.manifests.is_empty() {
+            return Err(EngineError::ManifestInvalid(
+                "no manifests configured".into(),
+            ));
+        }
         let runtime = Arc::new(Runtime::new()?);
-        let slot = runtime.load(&config.manifest)?;
+        let mut slots = HashMap::new();
+        for manifest in &config.manifests {
+            let slot = runtime.load(manifest)?;
+            let id = slot.manifest().id.clone();
+            if slots.insert(id.clone(), slot).is_some() {
+                return Err(EngineError::ManifestInvalid(format!(
+                    "duplicate model id {id}"
+                )));
+            }
+        }
 
         Ok(Self {
-            slot,
+            slots: Arc::new(slots),
             runtime,
             cancels: Arc::new(Mutex::new(HashMap::new())),
             active: Arc::new(AtomicUsize::new(0)),

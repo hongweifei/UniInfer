@@ -31,7 +31,7 @@ fn main() {
                 status: DesktopStatus {
                     info: startup.info,
                     error: startup.error,
-                    manifest: api_server::manifest_path(),
+                    manifest: api_server::manifest_display(),
                 },
                 _runtime: startup.runtime,
             });

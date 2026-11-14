@@ -14,8 +14,31 @@ pub(crate) struct ApiStartup {
     pub(crate) error: Option<String>,
 }
 
-pub(crate) fn manifest_path() -> String {
-    std::env::var("UNIINFER_MANIFEST").unwrap_or_else(|_| "models/tiny-onnx/manifest.toml".into())
+pub(crate) fn manifest_paths() -> Vec<std::path::PathBuf> {
+    if let Ok(list) = std::env::var("UNIINFER_MANIFESTS") {
+        let paths = list
+            .split(';')
+            .map(str::trim)
+            .filter(|path| !path.is_empty())
+            .map(std::path::PathBuf::from)
+            .collect::<Vec<_>>();
+        if !paths.is_empty() {
+            return paths;
+        }
+    }
+    vec![
+        std::env::var("UNIINFER_MANIFEST")
+            .unwrap_or_else(|_| "models/tiny-onnx/manifest.toml".into())
+            .into(),
+    ]
+}
+
+pub(crate) fn manifest_display() -> String {
+    manifest_paths()
+        .iter()
+        .map(|path| path.display().to_string())
+        .collect::<Vec<_>>()
+        .join("; ")
 }
 
 pub(crate) fn start() -> ApiStartup {
@@ -35,7 +58,10 @@ pub(crate) fn start() -> ApiStartup {
 
 fn start_inner() -> Result<(ApiInfo, Arc<tokio::runtime::Runtime>), Box<dyn std::error::Error>> {
     let token = random_token();
-    let config = uniinfer_api::ApiConfig::new(manifest_path().into()).with_token(token.clone());
+    let manifests = manifest_paths();
+    let config = uniinfer_api::ApiConfig::new(manifests[0].clone())
+        .with_manifests(manifests)
+        .with_token(token.clone());
     let state = uniinfer_api::AppState::new(&config)?;
     let app = uniinfer_api::routes::router(state);
 

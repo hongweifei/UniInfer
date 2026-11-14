@@ -222,7 +222,10 @@ cargo build --release -p uniinfer-cli --features ep-vitis      # AMD Ryzen AI NP
 ### 启动服务
 
 ```bash
-cargo run -p uniinfer-cli --release -- serve --addr 127.0.0.1:8080
+cargo run -p uniinfer-cli --release -- serve \
+  --manifest models/tiny-onnx/manifest.toml \
+  --manifest models/tiny-onnx/manifest-2.toml \
+  --addr 127.0.0.1:8080
 ```
 
 GGUF 一次性推理（M4 目标路径）：
@@ -279,7 +282,7 @@ curl http://127.0.0.1:8080/v1/videos/generations/job_7f3c
 cargo run -p uniinfer-desktop
 ```
 
-应用在进程内启动 loopback API（随机端口 + 一次性 bearer token），窗口通过 Tauri command 获取地址与 token。默认加载 `models/tiny-onnx/manifest.toml`，可设置 `UNIINFER_MANIFEST` 指向其他清单。使用 WebView2，Windows 11 已内置。
+应用在进程内启动 loopback API（随机端口 + 一次性 bearer token），窗口通过 Tauri command 获取地址与 token。默认加载 `models/tiny-onnx/manifest.toml`；`UNIINFER_MANIFEST` 指定单个清单，`UNIINFER_MANIFESTS`（分号分隔）加载多个模型并在标题栏切换。使用 WebView2，Windows 11 已内置。
 
 ## 模型清单
 
@@ -325,7 +328,7 @@ sha256 = "9f8e6c1d0a4b7e2f5c8d1a3b6e9f0c2d4a7b1e8f3c6d9a2b5e0f4c7d1a8b3e6f"  # �
 | `/v1/videos/generations` | POST | 视频生成任务 |
 | `/v1/videos/generations/{id}` | GET | 任务查询 |
 | `/v1/realtime` | WS | 实时会话，当前提供 text 通道 |
-| `/v1/models` | GET | 清单、能力矩阵与放置计划 |
+| `/v1/models` | GET | 已加载模型、能力矩阵与放置计划 |
 | `/v1/sessions/{id}/cancel` | POST | 取消生成 |
 
 实时会话以 JSON 文本帧承载控制事件，以 20ms PCM16 二进制帧承载音频：

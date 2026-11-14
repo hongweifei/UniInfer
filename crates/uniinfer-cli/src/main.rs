@@ -19,9 +19,9 @@ enum Command {
     Devices,
     /// Serve the OpenAI-compatible HTTP API.
     Serve {
-        /// Path to the model manifest.
-        #[arg(long)]
-        manifest: std::path::PathBuf,
+        /// Model manifest paths; repeat to serve multiple models.
+        #[arg(long = "manifest", required = true)]
+        manifests: Vec<std::path::PathBuf>,
         #[arg(long, default_value = "127.0.0.1:8080")]
         addr: std::net::SocketAddr,
         #[arg(long, default_value_t = 30_000)]
@@ -55,11 +55,11 @@ async fn main() -> Result<()> {
     match Cli::parse().command {
         Command::Devices => devices(),
         Command::Serve {
-            manifest,
+            manifests,
             addr,
             queue_timeout_ms,
             token,
-        } => serve(manifest, addr, queue_timeout_ms, token).await,
+        } => serve(manifests, addr, queue_timeout_ms, token).await,
         Command::Run {
             manifest,
             prompt,
@@ -69,12 +69,12 @@ async fn main() -> Result<()> {
 }
 
 async fn serve(
-    manifest: std::path::PathBuf,
+    manifests: Vec<std::path::PathBuf>,
     addr: std::net::SocketAddr,
     queue_timeout_ms: u64,
     token: Option<String>,
 ) -> Result<()> {
-    let mut config = ApiConfig::new(manifest);
+    let mut config = ApiConfig::new(manifests[0].clone()).with_manifests(manifests);
     config.queue_timeout = Duration::from_millis(queue_timeout_ms);
     config.token = token;
     uniinfer_api::serve(config, addr)

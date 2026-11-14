@@ -27,7 +27,16 @@
         gap: 12px;
       }
       header strong { font-size: 15px; letter-spacing: .2px; }
-      #status { color: var(--muted); font-size: 12px; }
+      #status { color: var(--muted); font-size: 12px; margin-left: auto; }
+      #model {
+        background: var(--panel);
+        color: var(--text);
+        border: 1px solid var(--border);
+        border-radius: 7px;
+        padding: 6px 9px;
+        font: inherit;
+        max-width: 320px;
+      }
       #messages {
         flex: 1;
         overflow-y: auto;

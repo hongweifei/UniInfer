@@ -1,6 +1,7 @@
 const { invoke } = window.__TAURI__.core;
       const messages = document.getElementById("messages");
       const status = document.getElementById("status");
+      const modelSelect = document.getElementById("model");
       const form = document.getElementById("composer");
       const input = document.getElementById("input");
       const sendButton = document.getElementById("send");
@@ -46,7 +47,21 @@ const { invoke } = window.__TAURI__.core;
         const response = await fetch(`${info.base}/v1/models`, { headers: authHeaders() });
         if (!response.ok) throw new Error(`models: HTTP ${response.status}`);
         const body = await response.json();
+        modelSelect.replaceChildren(
+          ...body.data.map((entry) => {
+            const option = document.createElement("option");
+            option.value = entry.id;
+            option.textContent = entry.id;
+            return option;
+          })
+        );
         model = body.data[0]?.id ?? null;
+        modelSelect.value = model ?? "";
+        modelSelect.disabled = body.data.length < 2;
+        modelSelect.addEventListener("change", () => {
+          model = modelSelect.value;
+          status.textContent = model;
+        });
         setBusy(false);
         status.textContent = `${model} · ${desktop.manifest}`;
         input.focus();

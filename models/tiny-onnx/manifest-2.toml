@@ -1,0 +1,24 @@
+schema_version = 1
+id = "tiny-byte-onnx-2"
+format = "onnx"
+quantization = "fp32"
+modalities = ["text"]
+streaming_capable = false
+context_len = 64
+tokenizer = "bytes"
+min_vram = "0GiB"
+supported_engines = ["onnx"]
+supported_eps = ["cpu"]
+supported_devices = ["cpu"]
+
+[placement]
+policy = "auto"
+allow_cpu_fallback = true
+stages.llm = "cpu"
+
+[text]
+vocab_size = 256
+
+[[files]]
+path = "model.onnx"
+sha256 = "d85d585cb7b3f4cbd2732e09c0186a7bac5baea3bfcb755efefe67b0e3290a6d"

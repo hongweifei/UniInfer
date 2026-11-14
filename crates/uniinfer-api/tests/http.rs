@@ -179,3 +179,41 @@ async fn token_is_required_when_configured() {
         .expect("response");
     assert_eq!(response.status(), StatusCode::OK);
 }
+
+#[tokio::test]
+async fn lists_and_routes_multiple_models() {
+    let fixture = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../models/tiny-onnx");
+    let config = ApiConfig::new(fixture.join("manifest.toml")).with_manifests(vec![
+        fixture.join("manifest.toml"),
+        fixture.join("manifest-2.toml"),
+    ]);
+    let state = AppState::new(&config).expect("state");
+    let app = routes::router(state);
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/v1/models")
+                .body(Body::empty())
+                .expect("request"),
+        )
+        .await
+        .expect("response");
+    let body = body_json(response).await;
+    assert_eq!(body["data"].as_array().expect("array").len(), 2);
+
+    let request = json!({
+        "model": "tiny-byte-onnx-2",
+        "messages": [{"role": "user", "content": "ab"}],
+        "max_tokens": 3
+    })
+    .to_string();
+    let response = app
+        .oneshot(post("/v1/chat/completions", &request))
+        .await
+        .expect("response");
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = body_json(response).await;
+    assert_eq!(body["choices"][0]["message"]["content"], "cde");
+}

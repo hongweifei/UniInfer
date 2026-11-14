@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
@@ -10,6 +11,7 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 use tokio::sync::mpsc;
 use uniinfer_core::{CancelToken, EngineError};
+use uniinfer_service::ModelSlot;
 
 use crate::state::{ActiveGuard, AppState};
 use crate::utf8::Utf8Decoder;
@@ -56,6 +58,7 @@ async fn session(socket: WebSocket, state: AppState) {
     let (tx, mut rx) = mpsc::channel::<String>(32);
     let mut session_id = String::new();
     let mut prompt: Option<String> = None;
+    let mut slot: Option<Arc<ModelSlot>> = None;
     let mut active: Option<CancelToken> = None;
 
     loop {
@@ -68,6 +71,7 @@ async fn session(socket: WebSocket, state: AppState) {
                             &tx,
                             &mut session_id,
                             &mut prompt,
+                            &mut slot,
                             &mut active,
                             &text,
                         )
@@ -107,14 +111,14 @@ async fn handle_client(
     tx: &mpsc::Sender<String>,
     session_id: &mut String,
     prompt: &mut Option<String>,
+    slot: &mut Option<Arc<ModelSlot>>,
     active: &mut Option<CancelToken>,
     text: &str,
 ) -> Result<(), String> {
     let event: ClientEvent = serde_json::from_str(text).map_err(|error| error.to_string())?;
     match event {
         ClientEvent::SessionStart { model, channels } => {
-            let manifest = state.slot.manifest();
-            if model != manifest.id {
+            let Some(selected) = state.slots.get(&model).cloned() else {
                 return tx
                     .send(error_event(
                         "model_not_found",
@@ -122,7 +126,8 @@ async fn handle_client(
                     ))
                     .await
                     .map_err(|_| "channel closed".to_string());
-            }
+            };
+            let model_id = selected.manifest().id.clone();
             if let Some(channel) = channels.iter().find(|channel| channel.as_str() != "text") {
                 return tx
                     .send(error_event(
@@ -134,10 +139,11 @@ async fn handle_client(
             }
             *session_id = new_session_id();
             *prompt = None;
+            *slot = Some(selected);
             let payload = json!({
                 "type": "session.started",
                 "session_id": session_id.clone(),
-                "model": manifest.id,
+                "model": model_id,
                 "channels": ["text"],
             });
             tx.send(payload.to_string())
@@ -167,13 +173,22 @@ async fn handle_client(
                     .await
                     .map_err(|_| "channel closed".to_string());
             }
+            let Some(selected) = slot.clone() else {
+                return tx
+                    .send(error_event(
+                        "session_not_started",
+                        "send session.start first",
+                    ))
+                    .await
+                    .map_err(|_| "channel closed".to_string());
+            };
             let Some(prompt) = prompt.clone() else {
                 return tx
                     .send(error_event("invalid_request", "send input.text first"))
                     .await
                     .map_err(|_| "channel closed".to_string());
             };
-            let Some(permit) = state.slot.try_acquire() else {
+            let Some(permit) = selected.try_acquire() else {
                 return tx
                     .send(error_event("busy", "model is serving another request"))
                     .await
@@ -181,7 +196,15 @@ async fn handle_client(
             };
             let token = CancelToken::new();
             *active = Some(token.clone());
-            spawn_response(state.clone(), tx.clone(), permit, token, prompt, max_tokens);
+            spawn_response(
+                selected,
+                tx.clone(),
+                permit,
+                token,
+                prompt,
+                max_tokens,
+                state.active.clone(),
+            );
             Ok(())
         }
         ClientEvent::ResponseCancel => {
@@ -198,37 +221,36 @@ async fn handle_client(
 }
 
 fn spawn_response(
-    state: AppState,
+    slot: Arc<ModelSlot>,
     tx: mpsc::Sender<String>,
     permit: tokio::sync::OwnedSemaphorePermit,
     cancel: CancelToken,
     prompt: String,
     max_tokens: Option<usize>,
+    active: Arc<std::sync::atomic::AtomicUsize>,
 ) {
     let response_id = format!("resp-{:x}", NEXT_RESPONSE.fetch_add(1, Ordering::Relaxed));
     let max_tokens = max_tokens.unwrap_or(16);
     tokio::task::spawn_blocking(move || {
         let _permit = permit;
-        let _active = ActiveGuard::new(state.active.clone());
+        let _active = ActiveGuard::new(active);
         let mut decoder = Utf8Decoder::new();
         let send = |event: Value| -> bool { tx.blocking_send(event.to_string()).is_ok() };
-        let result = state
-            .slot
-            .generate(&prompt, max_tokens, &cancel, &mut |chunk| {
-                for &byte in chunk {
-                    if let Some(delta) = decoder.push(byte) {
-                        let event = json!({
-                            "type": "output.text.delta",
-                            "response_id": response_id,
-                            "delta": delta,
-                        });
-                        if !send(event) {
-                            return false;
-                        }
+        let result = slot.generate(&prompt, max_tokens, &cancel, &mut |chunk| {
+            for &byte in chunk {
+                if let Some(delta) = decoder.push(byte) {
+                    let event = json!({
+                        "type": "output.text.delta",
+                        "response_id": response_id,
+                        "delta": delta,
+                    });
+                    if !send(event) {
+                        return false;
                     }
                 }
-                true
-            });
+            }
+            true
+        });
         let tail = decoder.finish();
         if !tail.is_empty() {
             let _ = send(json!({

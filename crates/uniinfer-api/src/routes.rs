@@ -40,23 +40,26 @@ async fn metrics(State(state): State<AppState>) -> Json<Value> {
 }
 
 async fn models(State(state): State<AppState>) -> Json<Value> {
-    let manifest = state.slot.manifest();
-    let placement = state.slot.placement();
-    Json(json!({
-        "object": "list",
-        "data": [{
-            "id": manifest.id,
-            "object": "model",
-            "owned_by": "uniinfer",
-            "format": manifest.format,
-            "quantization": manifest.quantization,
-            "modalities": manifest.modalities,
-            "context_len": manifest.context_len,
-            "streaming_capable": manifest.streaming_capable,
-            "devices": manifest.supported_devices,
-            "placement": placement,
-        }]
-    }))
+    let data = state
+        .slots
+        .values()
+        .map(|slot| {
+            let manifest = slot.manifest();
+            json!({
+                "id": manifest.id,
+                "object": "model",
+                "owned_by": "uniinfer",
+                "format": manifest.format,
+                "quantization": manifest.quantization,
+                "modalities": manifest.modalities,
+                "context_len": manifest.context_len,
+                "streaming_capable": manifest.streaming_capable,
+                "devices": manifest.supported_devices,
+                "placement": slot.placement(),
+            })
+        })
+        .collect::<Vec<_>>();
+    Json(json!({"object": "list", "data": data}))
 }
 
 async fn cancel(

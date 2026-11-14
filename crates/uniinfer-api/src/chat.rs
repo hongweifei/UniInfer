@@ -1,3 +1,4 @@
+use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -9,6 +10,7 @@ use axum::response::{IntoResponse, Response};
 use serde::Deserialize;
 use tokio::sync::mpsc;
 use uniinfer_core::{CancelToken, EngineError};
+use uniinfer_service::ModelSlot;
 
 use crate::error::ApiError;
 use crate::extract::ApiJson;
@@ -32,17 +34,28 @@ pub(crate) struct ChatMessage {
     content: String,
 }
 
+struct Generation {
+    state: AppState,
+    slot: Arc<ModelSlot>,
+    permit: tokio::sync::OwnedSemaphorePermit,
+    session_id: String,
+    prompt: String,
+    prompt_tokens: usize,
+    max_tokens: usize,
+    cancel: CancelToken,
+}
+
 pub(crate) async fn chat(
     State(state): State<AppState>,
     ApiJson(request): ApiJson<ChatRequest>,
 ) -> Result<Response, ApiError> {
-    let manifest = state.slot.manifest();
-    if request.model != manifest.id {
-        return Err(ApiError::not_found(
+    let slot = state.slots.get(&request.model).cloned().ok_or_else(|| {
+        ApiError::not_found(
             "model_not_found",
             format!("model {} is not loaded", request.model),
-        ));
-    }
+        )
+    })?;
+    let manifest = slot.manifest();
 
     let prompt = extract_prompt(&request.messages)?;
     let prompt_tokens = prompt.len();
@@ -67,29 +80,31 @@ pub(crate) async fn chat(
 
     let session_id = next_session_id();
     let cancel = CancelToken::new();
-    let permit = state
-        .slot
+    let permit = slot
         .acquire(state.queue_timeout)
         .await
         .map_err(ApiError::from)?;
     let mut guard = CancelGuard::new(&state, session_id.clone(), cancel.clone())?;
 
+    let generation = Generation {
+        state,
+        slot,
+        permit,
+        session_id,
+        prompt,
+        prompt_tokens,
+        max_tokens,
+        cancel,
+    };
+
     if request.stream {
-        let response =
-            stream_response(state, permit, session_id, prompt, max_tokens, guard.token()).await;
+        let mut generation = generation;
+        generation.cancel = guard.token();
+        let response = stream_response(generation).await;
         guard.disarm();
         response
     } else {
-        complete_response(
-            state,
-            permit,
-            session_id,
-            prompt,
-            prompt_tokens,
-            max_tokens,
-            cancel,
-        )
-        .await
+        complete_response(generation).await
     }
 }
 
@@ -114,36 +129,38 @@ fn extract_prompt(messages: &[ChatMessage]) -> Result<String, ApiError> {
     Ok(message.content.clone())
 }
 
-async fn stream_response(
-    state: AppState,
-    permit: tokio::sync::OwnedSemaphorePermit,
-    session_id: String,
-    prompt: String,
-    max_tokens: usize,
-    cancel: CancelToken,
-) -> Result<Response, ApiError> {
+async fn stream_response(generation: Generation) -> Result<Response, ApiError> {
+    let Generation {
+        state,
+        slot,
+        permit,
+        session_id,
+        prompt,
+        max_tokens,
+        cancel,
+        ..
+    } = generation;
     let (tx, rx) = mpsc::channel::<StreamEvent>(32);
-    let model = state.slot.manifest().id.clone();
+    let model = slot.manifest().id.clone();
     let created = unix_seconds();
     let task_state = state.clone();
     let task_session = session_id.clone();
+    let task_slot = Arc::clone(&slot);
 
     tokio::task::spawn_blocking(move || {
         let _permit = permit;
         let _active = ActiveGuard::new(task_state.active.clone());
         let mut decoder = Utf8Decoder::new();
-        let result = task_state
-            .slot
-            .generate(&prompt, max_tokens, &cancel, &mut |chunk| {
-                for &byte in chunk {
-                    if let Some(text) = decoder.push(byte)
-                        && tx.blocking_send(StreamEvent::Delta(text)).is_err()
-                    {
-                        return false;
-                    }
+        let result = task_slot.generate(&prompt, max_tokens, &cancel, &mut |chunk| {
+            for &byte in chunk {
+                if let Some(text) = decoder.push(byte)
+                    && tx.blocking_send(StreamEvent::Delta(text)).is_err()
+                {
+                    return false;
                 }
-                true
-            });
+            }
+            true
+        });
         let tail = decoder.finish();
         if !tail.is_empty() {
             let _ = tx.blocking_send(StreamEvent::Delta(tail));
@@ -170,27 +187,28 @@ async fn stream_response(
     Ok(response)
 }
 
-async fn complete_response(
-    state: AppState,
-    permit: tokio::sync::OwnedSemaphorePermit,
-    session_id: String,
-    prompt: String,
-    prompt_tokens: usize,
-    max_tokens: usize,
-    cancel: CancelToken,
-) -> Result<Response, ApiError> {
+async fn complete_response(generation: Generation) -> Result<Response, ApiError> {
+    let Generation {
+        state,
+        slot,
+        permit,
+        session_id,
+        prompt,
+        prompt_tokens,
+        max_tokens,
+        cancel,
+    } = generation;
     let task_state = state.clone();
     let task_session = session_id.clone();
+    let model = slot.manifest().id.clone();
     let (result, bytes) = tokio::task::spawn_blocking(move || {
         let _permit = permit;
         let _active = ActiveGuard::new(task_state.active.clone());
         let mut bytes = Vec::new();
-        let result = task_state
-            .slot
-            .generate(&prompt, max_tokens, &cancel, &mut |chunk| {
-                bytes.extend_from_slice(chunk);
-                true
-            });
+        let result = slot.generate(&prompt, max_tokens, &cancel, &mut |chunk| {
+            bytes.extend_from_slice(chunk);
+            true
+        });
         task_state.unregister(&task_session);
         (result, bytes)
     })
@@ -206,7 +224,7 @@ async fn complete_response(
         "id": format!("chatcmpl-{session_id}"),
         "object": "chat.completion",
         "created": unix_seconds(),
-        "model": state.slot.manifest().id,
+        "model": model,
         "choices": [{
             "index": 0,
             "message": {"role": "assistant", "content": content},
