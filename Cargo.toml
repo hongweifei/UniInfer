@@ -15,6 +15,7 @@ uniinfer-devices = { path = "crates/uniinfer-devices" }
 uniinfer-registry = { path = "crates/uniinfer-registry" }
 uniinfer-engine-onnx = { path = "crates/uniinfer-engine-onnx" }
 uniinfer-backends = { path = "crates/uniinfer-backends" }
+uniinfer-api = { path = "crates/uniinfer-api" }
 ort = "=2.0.0-rc.15"
 serde = { version = "1.0.229", features = ["derive"] }
 toml = "1.2.1"
@@ -22,6 +23,10 @@ thiserror = "2.0.21"
 sha2 = "0.11.1"
 hex = "0.4.3"
 clap = { version = "4.5", features = ["derive"] }
+axum = "0.8.9"
+tokio = { version = "1.54.1", features = ["rt-multi-thread", "macros", "net", "signal", "sync", "time"] }
+tokio-stream = { version = "0.1", features = ["sync"] }
+serde_json = "1"
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
 anyhow = "1"

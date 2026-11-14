@@ -17,7 +17,7 @@
 
 ## 项目状态
 
-**M0 已交付。** Trait、Manifest、Registry、ONNX CPU 引擎、字节级文本后端与 CLI 已可运行；契约测试覆盖加载、推理、取消与校验和。后续里程碑按 [ROADMAP](docs/ROADMAP.md) 推进。下文的能力与 REST 接口是目标契约，v0.1 发布前保持演进。
+**M0 已交付，M1 已接通。** Trait、Manifest、Registry、ONNX CPU 引擎、字节级文本后端与 CLI 可运行；REST/SSE、会话取消、错误信封与 `/v1/models`、`/metrics` 已上线。基准与 EP 矩阵继续按 [ROADMAP](docs/ROADMAP.md) 补齐；未接入的能力仍属目标契约。
 
 ## 目录
 
@@ -215,7 +215,7 @@ cargo build --release --features ep-qnn       # Qualcomm NPU
 cargo build --release --features ep-openvino  # Intel GPU / NPU
 ```
 
-### 启动服务（M1 目标接口）
+### 启动服务
 
 ```bash
 cargo run -p uniinfer-cli --release -- serve --addr 127.0.0.1:8080
@@ -383,7 +383,7 @@ cargo run -p uniinfer-bench --release -- compare --baseline bench/baseline.json
 | 合并 | 预览帧与逐帧视频 | M9 |
 | 扩展 | 移动端、可选引擎与规模化 | M10–M11 |
 
-完整出口门禁、决策门与风险登记见 [ROADMAP](docs/ROADMAP.md)。当前进度：**M0 已交付**，下一步 M1 文本服务面。
+完整出口门禁、决策门与风险登记见 [ROADMAP](docs/ROADMAP.md)。当前进度：**M0 已交付；M1 HTTP/SSE 已接通**，bench 基线与 EP 矩阵待补。
 
 ## 文档
 

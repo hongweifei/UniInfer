@@ -1,6 +1,8 @@
 //! Modality backends. M0 provides byte-level text generation over any engine.
 
-use uniinfer_core::{EngineError, EngineSession, Result, Tensor, TensorData, TensorDtype};
+use uniinfer_core::{
+    CancelToken, EngineError, EngineSession, Result, Tensor, TensorData, TensorDtype,
+};
 
 /// Greedy decoding parameters.
 #[derive(Debug, Clone, Copy)]
@@ -22,6 +24,32 @@ pub fn generate_bytes(
     options: &GenerateOptions,
     on_byte: &mut dyn FnMut(u8) -> bool,
 ) -> Result<Vec<u8>> {
+    generate_bytes_cancellable(
+        session,
+        prompt,
+        vocab_size,
+        context_len,
+        options,
+        &CancelToken::new(),
+        on_byte,
+    )
+}
+
+/// Same as [`generate_bytes`] with a cooperative cancellation flag checked
+/// between model steps.
+#[allow(clippy::too_many_arguments)]
+pub fn generate_bytes_cancellable(
+    session: &dyn EngineSession,
+    prompt: &str,
+    vocab_size: usize,
+    context_len: usize,
+    options: &GenerateOptions,
+    cancel: &CancelToken,
+    on_byte: &mut dyn FnMut(u8) -> bool,
+) -> Result<Vec<u8>> {
+    if cancel.is_cancelled() {
+        return Err(EngineError::Cancelled);
+    }
     let inputs = session.inputs();
     let id_spec = inputs
         .iter()
@@ -84,7 +112,13 @@ pub fn generate_bytes(
             )?);
         }
 
+        if cancel.is_cancelled() {
+            return Err(EngineError::Cancelled);
+        }
         let outputs = session.run(tensors)?;
+        if cancel.is_cancelled() {
+            return Err(EngineError::Cancelled);
+        }
         let logits = outputs
             .iter()
             .find(|tensor| tensor.name == logits_spec.name)
@@ -252,5 +286,48 @@ mod tests {
         )
         .expect_err("must fail");
         assert!(error.to_string().contains("context_len"));
+    }
+}
+
+#[cfg(test)]
+mod cancel_tests {
+    use super::*;
+
+    struct Noop;
+
+    impl EngineSession for Noop {
+        fn inputs(&self) -> &[uniinfer_core::TensorSpec] {
+            &[]
+        }
+
+        fn outputs(&self) -> &[uniinfer_core::TensorSpec] {
+            &[]
+        }
+
+        fn run(&self, _inputs: Vec<Tensor>) -> Result<Vec<Tensor>> {
+            panic!("must not run after cancellation");
+        }
+
+        fn cancel(&self) {}
+    }
+
+    #[test]
+    fn pre_cancelled_generation_returns_cancelled() {
+        let token = CancelToken::new();
+        token.cancel();
+        let error = generate_bytes_cancellable(
+            &Noop,
+            "ab",
+            256,
+            16,
+            &GenerateOptions {
+                max_tokens: 3,
+                eos_token: None,
+            },
+            &token,
+            &mut |_| true,
+        )
+        .expect_err("must be cancelled");
+        assert!(matches!(error, EngineError::Cancelled));
     }
 }

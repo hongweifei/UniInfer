@@ -1,0 +1,23 @@
+[package]
+name = "uniinfer-api"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+uniinfer-core.workspace = true
+uniinfer-devices.workspace = true
+uniinfer-registry.workspace = true
+uniinfer-backends.workspace = true
+uniinfer-engine-onnx.workspace = true
+axum.workspace = true
+tokio.workspace = true
+tokio-stream.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+
+[lints]
+workspace = true

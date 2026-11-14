@@ -12,10 +12,16 @@ uniinfer-devices.workspace = true
 uniinfer-registry.workspace = true
 uniinfer-engine-onnx.workspace = true
 uniinfer-backends.workspace = true
+uniinfer-api.workspace = true
+tokio.workspace = true
 clap.workspace = true
 anyhow.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
+
+[[bin]]
+name = "uniinfer"
+path = "src/main.rs"
 
 [lints]
 workspace = true

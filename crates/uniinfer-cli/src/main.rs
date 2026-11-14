@@ -1,7 +1,9 @@
 use std::io::Write;
+use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
 use clap::{Parser, Subcommand};
+use uniinfer_api::ApiConfig;
 use uniinfer_backends::{GenerateOptions, generate_bytes};
 use uniinfer_devices::DeviceInventory;
 use uniinfer_engine_onnx::OnnxEngine;
@@ -18,6 +20,16 @@ struct Cli {
 enum Command {
     /// List discovered devices and execution backends.
     Devices,
+    /// Serve the OpenAI-compatible HTTP API.
+    Serve {
+        /// Path to the model manifest.
+        #[arg(long)]
+        manifest: std::path::PathBuf,
+        #[arg(long, default_value = "127.0.0.1:8080")]
+        addr: std::net::SocketAddr,
+        #[arg(long, default_value_t = 30_000)]
+        queue_timeout_ms: u64,
+    },
     /// Run one-shot greedy text generation.
     Run {
         /// Path to the model manifest.
@@ -30,7 +42,8 @@ enum Command {
     },
 }
 
-fn main() -> Result<()> {
+#[tokio::main]
+async fn main() -> Result<()> {
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
@@ -41,12 +54,29 @@ fn main() -> Result<()> {
 
     match Cli::parse().command {
         Command::Devices => devices(),
+        Command::Serve {
+            manifest,
+            addr,
+            queue_timeout_ms,
+        } => serve(manifest, addr, queue_timeout_ms).await,
         Command::Run {
             manifest,
             prompt,
             max_tokens,
         } => run(&manifest, &prompt, max_tokens),
     }
+}
+
+async fn serve(
+    manifest: std::path::PathBuf,
+    addr: std::net::SocketAddr,
+    queue_timeout_ms: u64,
+) -> Result<()> {
+    let mut config = ApiConfig::new(manifest);
+    config.queue_timeout = Duration::from_millis(queue_timeout_ms);
+    uniinfer_api::serve(config, addr)
+        .await
+        .context("serve HTTP API")
 }
 
 fn devices() -> Result<()> {
