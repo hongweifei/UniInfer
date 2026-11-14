@@ -201,6 +201,26 @@ cargo run -p uniinfer-cli -- run \
 
 GGUF 权重来自 ModelScope `unsloth/Qwen3-0.6B-GGUF`，Safetensors 与 tokenizer 来自 `Qwen/Qwen3-0.6B`。Qwen3.5 的 `qwen3_5` 架构尚未被 Candle 0.11 覆盖，接入需要新增引擎实现。
 
+### 可选：llama.cpp 内置引擎（GGUF）
+
+`uniinfer-engine-llama` 把 llama.cpp 作为内置依赖编译，GGUF 路由优先于 Candle。默认不启用，避免给纯 ONNX/Candle 构建引入 C++ 工具链：
+
+```bash
+cargo run -p uniinfer-cli --features llama -- run \
+  --manifest models/qwen3-0.6b/manifest.toml \
+  --prompt "你好" --max-tokens 32
+```
+
+构建前置条件：CMake、C++ 编译器（Windows 用 MSVC）和 `libclang`（bindgen 需要）。Windows 示例：
+
+```powershell
+$env:PATH = "C:\path\to\cmake\bin;$env:PATH"
+$env:LIBCLANG_PATH = "C:\path\to\llvm\bin"
+cargo build -p uniinfer-cli --features llama
+```
+
+AMD GPU 使用 Vulkan 后端，需要 Vulkan SDK（`glslc`）后启用 `llama-vulkan`；NVIDIA 用 `llama-cuda`。未启用 GPU feature 时引擎只报告 CPU，放置计划自然回退。
+
 ### M0：CLI 与 ONNX CPU 路径
 
 设备探测：

@@ -18,6 +18,7 @@ uniinfer-registry = { version = "0.0.0", path = "crates/uniinfer-registry" }
 uniinfer-service = { version = "0.0.0", path = "crates/uniinfer-service" }
 uniinfer-engine-onnx = { version = "0.0.0", path = "crates/uniinfer-engine-onnx" }
 uniinfer-engine-candle = { version = "0.0.0", path = "crates/uniinfer-engine-candle" }
+uniinfer-engine-llama = { version = "0.0.0", path = "crates/uniinfer-engine-llama" }
 uniinfer-backends = { version = "0.0.0", path = "crates/uniinfer-backends" }
 uniinfer-api = { version = "0.0.0", path = "crates/uniinfer-api" }
 ort = { version = "=2.0.0-rc.15", default-features = false, features = ["std", "download-binaries", "api-31", "tracing", "tls-native", "copy-dylibs"] }

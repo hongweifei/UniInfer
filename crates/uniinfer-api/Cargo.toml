@@ -20,6 +20,10 @@ ep-openvino = ["uniinfer-service/ep-openvino"]
 ep-rocm = ["uniinfer-service/ep-rocm"]
 ep-vitis = ["uniinfer-service/ep-vitis"]
 ep-cann = ["uniinfer-service/ep-cann"]
+llama = ["uniinfer-service/llama"]
+llama-vulkan = ["uniinfer-service/llama-vulkan"]
+llama-cuda = ["uniinfer-service/llama-cuda"]
+llama-rocm = ["uniinfer-service/llama-rocm"]
 
 [dependencies]
 uniinfer-core.workspace = true

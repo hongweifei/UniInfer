@@ -22,6 +22,10 @@ ep-vitis = ["uniinfer-api/ep-vitis"]
 ep-cann = ["uniinfer-api/ep-cann"]
 candle-cuda = ["uniinfer-service/candle-cuda"]
 candle-metal = ["uniinfer-service/candle-metal"]
+llama = ["uniinfer-api/llama"]
+llama-vulkan = ["uniinfer-api/llama-vulkan"]
+llama-cuda = ["uniinfer-api/llama-cuda"]
+llama-rocm = ["uniinfer-api/llama-rocm"]
 
 [dependencies]
 uniinfer-api.workspace = true

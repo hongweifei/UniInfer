@@ -22,6 +22,11 @@ ep-vitis = ["uniinfer-engine-onnx/ep-vitis"]
 ep-cann = ["uniinfer-engine-onnx/ep-cann"]
 candle-cuda = ["uniinfer-engine-candle/cuda"]
 candle-metal = ["uniinfer-engine-candle/metal"]
+llama = ["dep:uniinfer-engine-llama", "uniinfer-engine-llama/llama"]
+llama-vulkan = ["llama", "uniinfer-engine-llama/vulkan"]
+llama-cuda = ["llama", "uniinfer-engine-llama/cuda"]
+llama-rocm = ["llama", "uniinfer-engine-llama/rocm"]
+llama-metal = ["llama", "uniinfer-engine-llama/metal"]
 
 [dependencies]
 uniinfer-core.workspace = true
@@ -29,6 +34,7 @@ uniinfer-devices.workspace = true
 uniinfer-registry.workspace = true
 uniinfer-engine-onnx.workspace = true
 uniinfer-engine-candle.workspace = true
+uniinfer-engine-llama = { workspace = true, optional = true }
 uniinfer-backends.workspace = true
 tokio.workspace = true
 tracing.workspace = true

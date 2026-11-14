@@ -9,6 +9,8 @@ use uniinfer_backends::{ByteTokenizer, HuggingFaceTokenizer, TextGenerator, Toke
 use uniinfer_core::{Device, EngineError, EngineSession, ModelManifest, PlacementPlan, Result};
 use uniinfer_devices::DeviceInventory;
 use uniinfer_engine_candle::CandleEngine;
+#[cfg(feature = "llama")]
+use uniinfer_engine_llama::LlamaEngine;
 use uniinfer_engine_onnx::OnnxEngine;
 use uniinfer_registry::{EngineRegistry, SessionLease};
 
@@ -24,6 +26,8 @@ impl Runtime {
     pub fn new() -> Result<Self> {
         let onnx = OnnxEngine::new()?;
         let candle = CandleEngine::new()?;
+        #[cfg(feature = "llama")]
+        let llama = LlamaEngine::new()?;
         let mut inventory = DeviceInventory::probe();
         for device in onnx.probe_devices() {
             inventory.register(device);
@@ -31,8 +35,14 @@ impl Runtime {
         for device in candle.probe_devices() {
             inventory.register(device);
         }
+        #[cfg(feature = "llama")]
+        for device in llama.probe_devices() {
+            inventory.register(device);
+        }
         let mut registry = EngineRegistry::new(inventory);
         registry.register(Arc::new(onnx));
+        #[cfg(feature = "llama")]
+        registry.register(Arc::new(llama));
         registry.register(Arc::new(candle));
         Ok(Self { registry })
     }
