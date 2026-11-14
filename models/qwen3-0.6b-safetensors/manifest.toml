@@ -1,0 +1,24 @@
+schema_version = 1
+id = "qwen3-0.6b-bf16"
+format = "safetensors"
+quantization = "bf16"
+modalities = ["text"]
+streaming_capable = false
+context_len = 2048
+tokenizer = "hf"
+min_vram = "2GiB"
+
+[placement]
+policy = "auto"
+prefer = ["npu", "gpu", "cpu"]
+allow_cpu_fallback = true
+
+[text]
+vocab_size = 151936
+family = "qwen3"
+config_file = "config.json"
+tokenizer_file = "tokenizer.json"
+
+[[files]]
+path = "model.safetensors"
+sha256 = "f47f71177f32bcd101b7573ec9171e6a57f4f4d31148d38e382306f42996874b"

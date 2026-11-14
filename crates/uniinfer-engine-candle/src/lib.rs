@@ -1,25 +1,29 @@
-//! Candle engine for quantized Qwen3 GGUF models.
+//! Candle engine for quantized Qwen3 GGUF and Safetensors models.
+#![allow(unsafe_code)] // mmap of trusted local weight files is the only unsafe boundary.
 
 use std::sync::{LazyLock, Mutex};
 
 use candle_core::quantized::gguf_file;
 use candle_core::{DType, Device, Tensor};
 use candle_transformers::models::quantized_qwen3::ModelWeights;
+use candle_transformers::models::qwen3::{Config as Qwen3Config, ModelForCausalLM};
 use uniinfer_core::{
     Device as CoreDevice, DeviceClass, EngineError, EngineLoadSpec, EngineSession, InferenceEngine,
     Modality, ModelFormat, Quantization, Result, Tensor as CoreTensor, TensorData, TensorDtype,
     TensorSpec,
 };
 
-const FORMATS: &[ModelFormat] = &[ModelFormat::Gguf];
+const FORMATS: &[ModelFormat] = &[ModelFormat::Gguf, ModelFormat::Safetensors];
 const MODALITIES: &[Modality] = &[Modality::Text];
-const QUANTIZATIONS: &[Quantization] = &[
+const GGUF_QUANTIZATIONS: &[Quantization] = &[
     Quantization::Q4KM,
     Quantization::Q4_0,
     Quantization::Q5KM,
     Quantization::Q6K,
     Quantization::Q8_0,
 ];
+const SAFETENSORS_QUANTIZATIONS: &[Quantization] =
+    &[Quantization::Bf16, Quantization::Fp16, Quantization::Fp32];
 
 static DEVICES: LazyLock<Vec<DeviceClass>> = LazyLock::new(|| {
     let mut devices = vec![DeviceClass::Cpu];
@@ -79,14 +83,15 @@ impl InferenceEngine for CandleEngine {
 
     fn supported_modalities(&self, format: ModelFormat) -> &[Modality] {
         match format {
-            ModelFormat::Gguf => MODALITIES,
+            ModelFormat::Gguf | ModelFormat::Safetensors => MODALITIES,
             _ => &[],
         }
     }
 
     fn supported_quantizations(&self, format: ModelFormat) -> &[Quantization] {
         match format {
-            ModelFormat::Gguf => QUANTIZATIONS,
+            ModelFormat::Gguf => GGUF_QUANTIZATIONS,
+            ModelFormat::Safetensors => SAFETENSORS_QUANTIZATIONS,
             _ => &[],
         }
     }
@@ -99,10 +104,12 @@ impl InferenceEngine for CandleEngine {
         if !FORMATS.contains(&spec.manifest.format) {
             return Err(EngineError::UnsupportedFormat(spec.manifest.format));
         }
-        if spec.manifest.format != ModelFormat::Gguf {
-            return Err(EngineError::UnsupportedFormat(spec.manifest.format));
-        }
-        if !QUANTIZATIONS.contains(&spec.manifest.quantization) {
+        let supported_quantizations = match spec.manifest.format {
+            ModelFormat::Gguf => GGUF_QUANTIZATIONS,
+            ModelFormat::Safetensors => SAFETENSORS_QUANTIZATIONS,
+            _ => &[],
+        };
+        if !supported_quantizations.contains(&spec.manifest.quantization) {
             return Err(EngineError::UnsupportedQuantization(
                 spec.manifest.quantization,
             ));
@@ -126,19 +133,55 @@ impl InferenceEngine for CandleEngine {
             .first()
             .ok_or_else(|| EngineError::ManifestInvalid("files is empty".into()))?;
         let path = spec.base_dir.join(&model_file.path);
-        let mut file = std::fs::File::open(&path).map_err(|error| {
-            EngineError::LoadFailed(format!("open {}: {error}", path.display()))
-        })?;
-        let content = gguf_file::Content::read(&mut file)
-            .map_err(|error| EngineError::LoadFailed(format!("gguf metadata: {error}")))?;
-        let model = ModelWeights::from_gguf(content, &mut file, &self.device)
-            .map_err(|error| EngineError::LoadFailed(format!("gguf weights: {error}")))?;
-
-        let vocab = spec
+        let text = spec
             .manifest
             .text
             .as_ref()
-            .map_or(0, |text| text.vocab_size);
+            .ok_or_else(|| EngineError::ManifestInvalid("text config required".into()))?;
+
+        let model = match spec.manifest.format {
+            ModelFormat::Gguf => {
+                let mut file = std::fs::File::open(&path).map_err(|error| {
+                    EngineError::LoadFailed(format!("open {}: {error}", path.display()))
+                })?;
+                let content = gguf_file::Content::read(&mut file)
+                    .map_err(|error| EngineError::LoadFailed(format!("gguf metadata: {error}")))?;
+                CandleModel::Quantized(
+                    ModelWeights::from_gguf(content, &mut file, &self.device).map_err(|error| {
+                        EngineError::LoadFailed(format!("gguf weights: {error}"))
+                    })?,
+                )
+            }
+            ModelFormat::Safetensors => {
+                let config_file = text.config_file.as_ref().ok_or_else(|| {
+                    EngineError::ManifestInvalid("text.config_file is required".into())
+                })?;
+                let raw = std::fs::read_to_string(spec.base_dir.join(config_file))
+                    .map_err(|error| EngineError::LoadFailed(format!("config: {error}")))?;
+                let config: Qwen3Config = serde_json::from_str(&raw)
+                    .map_err(|error| EngineError::LoadFailed(format!("config json: {error}")))?;
+                let dtype = match spec.manifest.quantization {
+                    Quantization::Bf16 => DType::BF16,
+                    Quantization::Fp16 => DType::F16,
+                    _ => DType::F32,
+                };
+                let vb = unsafe {
+                    candle_nn::VarBuilder::from_mmaped_safetensors(
+                        &[path.as_path()],
+                        dtype,
+                        &self.device,
+                    )
+                }
+                .map_err(|error| EngineError::LoadFailed(format!("safetensors: {error}")))?;
+                CandleModel::Dense(
+                    ModelForCausalLM::new(&config, vb)
+                        .map_err(|error| EngineError::LoadFailed(format!("qwen3: {error}")))?,
+                )
+            }
+            _ => unreachable!(),
+        };
+
+        let vocab = text.vocab_size;
         if vocab == 0 {
             return Err(EngineError::ManifestInvalid(
                 "text.vocab_size is required".into(),
@@ -162,8 +205,28 @@ impl InferenceEngine for CandleEngine {
     }
 }
 
+enum CandleModel {
+    Quantized(ModelWeights),
+    Dense(ModelForCausalLM),
+}
+
+impl CandleModel {
+    fn forward(&mut self, input: &Tensor, offset: usize) -> candle_core::Result<Tensor> {
+        match self {
+            Self::Quantized(model) => {
+                model.clear_kv_cache();
+                model.forward(input, offset)
+            }
+            Self::Dense(model) => {
+                model.clear_kv_cache();
+                model.forward(input, offset)
+            }
+        }
+    }
+}
+
 struct CandleSession {
-    model: Mutex<ModelWeights>,
+    model: Mutex<CandleModel>,
     device: Device,
     inputs: Vec<TensorSpec>,
     outputs: Vec<TensorSpec>,
@@ -201,7 +264,6 @@ impl EngineSession for CandleSession {
             .model
             .lock()
             .map_err(|_| EngineError::Other("candle model lock poisoned".into()))?;
-        model.clear_kv_cache();
         let logits = model
             .forward(&input, 0)
             .map_err(|error| EngineError::Other(format!("candle forward: {error}")))?;

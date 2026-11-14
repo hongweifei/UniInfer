@@ -168,7 +168,7 @@ pub trait InferenceEngine: Send + Sync {
 | T3 阶段级 | 编码器、骨干、解码器、VAE 分置 | `plakat`、`candle-video`、编排式双工 | ASR 在 NPU、LLM 在 GPU、TTS 在 CPU |
 | T4 引擎级 | Router 按模态或阶段分配引擎 | `OnnxEngine` + `CandleEngine` | NPU 语音前端 + GPU 文本生成 |
 
-放置策略为 `auto`、`pinned`、`strict`；`auto` 默认按 **NPU → GPU → CPU** 选择，目标设备不可用或引擎不支持时回退，并把原因写入 `PlacementPlan.fallback_reason`。`PlacementPlan` 记录阶段→设备、卸载层数、KV cache 位置与回退清单，经 `/v1/models` 与会话 span 可查。NPU 与 AMD GPU 路径由 `OnnxEngine` 的 EP 承载，`CandleEngine` 负责 CPU、CUDA、Metal；GGUF 的 AMD GPU 原生路径由 `frink` Vulkan 在 M11 接入。Vitis AI EP 需要 AMD 提供的 ONNX Runtime 构建（Ryzen AI SDK）；标准预编译包在链接期缺 Vitis 符号，`ep-vitis` 的 CI 只做 feature 编译检查。
+放置策略为 `auto`、`pinned`、`strict`；`auto` 默认按 **NPU → GPU → CPU** 选择，目标设备不可用或引擎不支持时回退，并把原因写入 `PlacementPlan.fallback_reason`。`PlacementPlan` 记录阶段→设备、卸载层数、KV cache 位置与回退清单，经 `/v1/models` 与会话 span 可查。NPU 与 AMD GPU 路径由 `OnnxEngine` 的 EP 承载，`CandleEngine` 负责 GGUF/Safetensors 的 CPU、CUDA、Metal。放置顺序对三种格式一致：NPU → GPU → CPU；Candle 暂未提供 NPU 后端，因此 GGUF/Safetensors 会回退 GPU/CPU 并记录 `engine_no_npu`。Vitis AI EP 需要 AMD 提供的 ONNX Runtime 构建（Ryzen AI SDK）；标准预编译包在链接期缺 Vitis 符号，`ep-vitis` 的 CI 只做 feature 编译检查。
 
 ## 快速开始
 
@@ -188,16 +188,18 @@ models/pull.sh Qwen/Qwen2.5-0.5B-Instruct models/qwen2.5-0.5b
 
 脚本优先使用已安装的 `modelscope`，否则通过 `uvx --from modelscope modelscope` 运行；`local_dir` 会解析为绝对路径。固定件 `models/tiny-onnx` 由本地生成脚本产出，不依赖模型仓库。
 
-Qwen3-0.6B Q4_K_M 的固定获取脚本：
+Qwen3-0.6B 的固定获取脚本：
 
 ```bash
-models/fetch-qwen3.sh
+models/fetch-qwen3.sh                 # GGUF Q4_K_M
+models/fetch-qwen3-safetensors.sh     # Safetensors BF16
+
 cargo run -p uniinfer-cli -- run \
   --manifest models/qwen3-0.6b/manifest.toml \
   --prompt "你好" --max-tokens 32
 ```
 
-权重来自 ModelScope `unsloth/Qwen3-0.6B-GGUF`，tokenizer 来自 `Qwen/Qwen3-0.6B`。Qwen3.5 的 `qwen3_5` 架构尚未被 Candle 0.11 覆盖，接入需要新增引擎实现。
+GGUF 权重来自 ModelScope `unsloth/Qwen3-0.6B-GGUF`，Safetensors 与 tokenizer 来自 `Qwen/Qwen3-0.6B`。Qwen3.5 的 `qwen3_5` 架构尚未被 Candle 0.11 覆盖，接入需要新增引擎实现。
 
 ### M0：CLI 与 ONNX CPU 路径
 

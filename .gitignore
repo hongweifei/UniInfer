@@ -10,3 +10,4 @@ models/cache
 
 # downloaded model artifacts
 /models/qwen3-0.6b/*.json
+/models/qwen3-0.6b-safetensors/*.json
