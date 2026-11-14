@@ -49,26 +49,27 @@ static ENVIRONMENT: LazyLock<std::result::Result<Environment, String>> =
 fn build_environment() -> std::result::Result<Environment, String> {
     #[allow(unused_mut)]
     let mut providers: Vec<ort::ep::ExecutionProviderDispatch> = Vec::new();
+    // NPU providers are registered first so ORT prefers them when available.
+    #[cfg(feature = "ep-qnn")]
+    providers.push(ort::ep::QNN::default().build());
+    #[cfg(feature = "ep-vitis")]
+    providers.push(ort::ep::Vitis::default().build());
+    #[cfg(feature = "ep-nnapi")]
+    providers.push(ort::ep::NNAPI::default().build());
+    #[cfg(feature = "ep-cann")]
+    providers.push(ort::ep::CANN::default().build());
+    #[cfg(feature = "ep-coreml")]
+    providers.push(ort::ep::CoreML::default().build());
+    #[cfg(feature = "ep-openvino")]
+    providers.push(ort::ep::OpenVINO::default().build());
     #[cfg(feature = "ep-tensorrt")]
     providers.push(ort::ep::TensorRT::default().build());
     #[cfg(feature = "ep-cuda")]
     providers.push(ort::ep::CUDA::default().build());
     #[cfg(feature = "ep-rocm")]
     providers.push(ort::ep::ROCm::default().build());
-    #[cfg(feature = "ep-coreml")]
-    providers.push(ort::ep::CoreML::default().build());
     #[cfg(feature = "ep-directml")]
     providers.push(ort::ep::DirectML::default().build());
-    #[cfg(feature = "ep-qnn")]
-    providers.push(ort::ep::QNN::default().build());
-    #[cfg(feature = "ep-nnapi")]
-    providers.push(ort::ep::NNAPI::default().build());
-    #[cfg(feature = "ep-openvino")]
-    providers.push(ort::ep::OpenVINO::default().build());
-    #[cfg(feature = "ep-vitis")]
-    providers.push(ort::ep::Vitis::default().build());
-    #[cfg(feature = "ep-cann")]
-    providers.push(ort::ep::CANN::default().build());
 
     ort::init()
         .with_name("uniinfer")
@@ -181,7 +182,6 @@ impl InferenceEngine for OnnxEngine {
             .map_err(|error| {
                 EngineError::LoadFailed(format!("cannot load {}: {error}", model_path.display()))
             })?;
-
         let inputs = convert_specs(session.inputs(), "input")?;
         let outputs = convert_specs(session.outputs(), "output")?;
 
