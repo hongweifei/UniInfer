@@ -1,12 +1,10 @@
-//! Candle engine for quantized Qwen3 GGUF and Safetensors models.
-#![allow(unsafe_code)] // mmap of trusted local weight files is the only unsafe boundary.
+//! Candle engine for Qwen3 GGUF and Safetensors models.
 
-use std::sync::{LazyLock, Mutex};
+mod qwen3;
 
-use candle_core::quantized::gguf_file;
+use std::sync::Mutex;
+
 use candle_core::{DType, Device, Tensor};
-use candle_transformers::models::quantized_qwen3::ModelWeights;
-use candle_transformers::models::qwen3::{Config as Qwen3Config, ModelForCausalLM};
 use uniinfer_core::{
     Device as CoreDevice, DeviceClass, EngineError, EngineLoadSpec, EngineSession, InferenceEngine,
     Modality, ModelFormat, Quantization, Result, Tensor as CoreTensor, TensorData, TensorDtype,
@@ -15,60 +13,73 @@ use uniinfer_core::{
 
 const FORMATS: &[ModelFormat] = &[ModelFormat::Gguf, ModelFormat::Safetensors];
 const MODALITIES: &[Modality] = &[Modality::Text];
-const GGUF_QUANTIZATIONS: &[Quantization] = &[
-    Quantization::Q4KM,
-    Quantization::Q4_0,
-    Quantization::Q5KM,
-    Quantization::Q6K,
-    Quantization::Q8_0,
-];
-const SAFETENSORS_QUANTIZATIONS: &[Quantization] =
-    &[Quantization::Bf16, Quantization::Fp16, Quantization::Fp32];
+const FAMILY: &str = "qwen3";
 
-static DEVICES: LazyLock<Vec<DeviceClass>> = LazyLock::new(|| {
-    let mut devices = vec![DeviceClass::Cpu];
-    if cfg!(any(feature = "cuda", feature = "metal")) {
-        devices.push(DeviceClass::Gpu);
-    }
-    devices
-});
-
+/// Candle engine; the concrete device is chosen per session from the plan.
 pub struct CandleEngine {
-    device: Device,
+    devices: Vec<DeviceClass>,
 }
 
 impl CandleEngine {
     pub fn new() -> Result<Self> {
-        #[cfg(feature = "cuda")]
-        if let Ok(device) = Device::new_cuda(0) {
-            return Ok(Self { device });
-        }
-        #[cfg(feature = "metal")]
-        if let Ok(device) = Device::new_metal(0) {
-            return Ok(Self { device });
-        }
         Ok(Self {
-            device: Device::Cpu,
+            devices: probe_devices(),
         })
     }
 
     #[must_use]
     pub fn probe_devices(&self) -> Vec<CoreDevice> {
-        let mut devices = vec![CoreDevice {
-            id: "cpu:candle:0".into(),
-            class: DeviceClass::Cpu,
-            backend: "candle".into(),
-            memory_bytes: 0,
-        }];
-        if self.device.is_cuda() || self.device.is_metal() {
-            devices.push(CoreDevice {
-                id: "gpu:candle:0".into(),
-                class: DeviceClass::Gpu,
+        self.devices
+            .iter()
+            .map(|class| CoreDevice {
+                id: format!("{class}:candle:0"),
+                class: *class,
                 backend: "candle".into(),
                 memory_bytes: 0,
-            });
+            })
+            .collect()
+    }
+}
+
+fn probe_devices() -> Vec<DeviceClass> {
+    let mut devices = vec![DeviceClass::Cpu];
+    if gpu_available() {
+        devices.push(DeviceClass::Gpu);
+    }
+    devices
+}
+
+fn gpu_available() -> bool {
+    #[cfg(feature = "cuda")]
+    if Device::new_cuda(0).is_ok() {
+        return true;
+    }
+    #[cfg(feature = "metal")]
+    if Device::new_metal(0).is_ok() {
+        return true;
+    }
+    false
+}
+
+fn device_for(class: DeviceClass) -> Result<Device> {
+    match class {
+        DeviceClass::Cpu => Ok(Device::Cpu),
+        DeviceClass::Gpu => {
+            #[cfg(feature = "cuda")]
+            if let Ok(device) = Device::new_cuda(0) {
+                return Ok(device);
+            }
+            #[cfg(feature = "metal")]
+            if let Ok(device) = Device::new_metal(0) {
+                return Ok(device);
+            }
+            Err(EngineError::PlacementUnsatisfiable(
+                "candle GPU backend is unavailable".into(),
+            ))
         }
-        devices
+        DeviceClass::Npu => Err(EngineError::PlacementUnsatisfiable(
+            "candle has no NPU backend".into(),
+        )),
     }
 }
 
@@ -90,93 +101,72 @@ impl InferenceEngine for CandleEngine {
 
     fn supported_quantizations(&self, format: ModelFormat) -> &[Quantization] {
         match format {
-            ModelFormat::Gguf => GGUF_QUANTIZATIONS,
-            ModelFormat::Safetensors => SAFETENSORS_QUANTIZATIONS,
+            ModelFormat::Gguf => qwen3::GGUF_QUANTIZATIONS,
+            ModelFormat::Safetensors => qwen3::SAFETENSORS_QUANTIZATIONS,
             _ => &[],
         }
     }
 
     fn supported_devices(&self) -> &[DeviceClass] {
-        &DEVICES
+        &self.devices
     }
 
     fn load_session(&self, spec: EngineLoadSpec) -> Result<Box<dyn EngineSession>> {
         if !FORMATS.contains(&spec.manifest.format) {
             return Err(EngineError::UnsupportedFormat(spec.manifest.format));
         }
-        let supported_quantizations = match spec.manifest.format {
-            ModelFormat::Gguf => GGUF_QUANTIZATIONS,
-            ModelFormat::Safetensors => SAFETENSORS_QUANTIZATIONS,
-            _ => &[],
-        };
-        if !supported_quantizations.contains(&spec.manifest.quantization) {
+        if !self
+            .supported_quantizations(spec.manifest.format)
+            .contains(&spec.manifest.quantization)
+        {
             return Err(EngineError::UnsupportedQuantization(
                 spec.manifest.quantization,
             ));
         }
-        if spec
+        let class = spec
             .placement
             .devices
-            .iter()
-            .any(|device| !DEVICES.contains(&device.class))
-        {
+            .first()
+            .map(|device| device.class)
+            .ok_or_else(|| EngineError::PlacementUnsatisfiable("empty placement".into()))?;
+        if !self.devices.contains(&class) {
             return Err(EngineError::PlacementUnsatisfiable(format!(
-                "candle engine has no device for {:?}",
-                spec.placement.devices
+                "candle has no {class} device"
             )));
         }
+        let device = device_for(class)?;
         spec.manifest.verify_files(&spec.base_dir)?;
 
+        let text = spec
+            .manifest
+            .text
+            .as_ref()
+            .ok_or_else(|| EngineError::ManifestInvalid("text config required".into()))?;
+        if text.family.as_deref() != Some(FAMILY) {
+            return Err(EngineError::UnsupportedEngine(format!(
+                "candle family {:?} is not implemented",
+                text.family
+            )));
+        }
         let model_file = spec
             .manifest
             .files
             .first()
             .ok_or_else(|| EngineError::ManifestInvalid("files is empty".into()))?;
         let path = spec.base_dir.join(&model_file.path);
-        let text = spec
-            .manifest
-            .text
-            .as_ref()
-            .ok_or_else(|| EngineError::ManifestInvalid("text config required".into()))?;
 
         let model = match spec.manifest.format {
-            ModelFormat::Gguf => {
-                let mut file = std::fs::File::open(&path).map_err(|error| {
-                    EngineError::LoadFailed(format!("open {}: {error}", path.display()))
-                })?;
-                let content = gguf_file::Content::read(&mut file)
-                    .map_err(|error| EngineError::LoadFailed(format!("gguf metadata: {error}")))?;
-                CandleModel::Quantized(
-                    ModelWeights::from_gguf(content, &mut file, &self.device).map_err(|error| {
-                        EngineError::LoadFailed(format!("gguf weights: {error}"))
-                    })?,
-                )
-            }
+            ModelFormat::Gguf => qwen3::load_gguf(&path, &device)?,
             ModelFormat::Safetensors => {
                 let config_file = text.config_file.as_ref().ok_or_else(|| {
                     EngineError::ManifestInvalid("text.config_file is required".into())
                 })?;
-                let raw = std::fs::read_to_string(spec.base_dir.join(config_file))
-                    .map_err(|error| EngineError::LoadFailed(format!("config: {error}")))?;
-                let config: Qwen3Config = serde_json::from_str(&raw)
-                    .map_err(|error| EngineError::LoadFailed(format!("config json: {error}")))?;
                 let dtype = match spec.manifest.quantization {
                     Quantization::Bf16 => DType::BF16,
                     Quantization::Fp16 => DType::F16,
                     _ => DType::F32,
                 };
-                let vb = unsafe {
-                    candle_nn::VarBuilder::from_mmaped_safetensors(
-                        &[path.as_path()],
-                        dtype,
-                        &self.device,
-                    )
-                }
-                .map_err(|error| EngineError::LoadFailed(format!("safetensors: {error}")))?;
-                CandleModel::Dense(
-                    ModelForCausalLM::new(&config, vb)
-                        .map_err(|error| EngineError::LoadFailed(format!("qwen3: {error}")))?,
-                )
+                qwen3::load_safetensors(&path, &spec.base_dir.join(config_file), dtype, &device)?
             }
             _ => unreachable!(),
         };
@@ -190,7 +180,7 @@ impl InferenceEngine for CandleEngine {
 
         Ok(Box::new(CandleSession {
             model: Mutex::new(model),
-            device: self.device.clone(),
+            device,
             inputs: vec![TensorSpec {
                 name: "input_ids".into(),
                 dtype: TensorDtype::I64,
@@ -205,28 +195,8 @@ impl InferenceEngine for CandleEngine {
     }
 }
 
-enum CandleModel {
-    Quantized(ModelWeights),
-    Dense(ModelForCausalLM),
-}
-
-impl CandleModel {
-    fn forward(&mut self, input: &Tensor, offset: usize) -> candle_core::Result<Tensor> {
-        match self {
-            Self::Quantized(model) => {
-                model.clear_kv_cache();
-                model.forward(input, offset)
-            }
-            Self::Dense(model) => {
-                model.clear_kv_cache();
-                model.forward(input, offset)
-            }
-        }
-    }
-}
-
 struct CandleSession {
-    model: Mutex<CandleModel>,
+    model: Mutex<qwen3::Model>,
     device: Device,
     inputs: Vec<TensorSpec>,
     outputs: Vec<TensorSpec>,
