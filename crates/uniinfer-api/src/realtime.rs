@@ -13,9 +13,9 @@ use tokio::sync::mpsc;
 use uniinfer_core::{CancelToken, EngineError};
 use uniinfer_service::ModelSlot;
 
-use crate::audio::{EnergyVad, FRAME_BYTES, VadEvent};
 use crate::state::{ActiveGuard, AppState};
-use crate::utf8::Utf8Decoder;
+use uniinfer_backends::audio::{EnergyVad, FRAME_BYTES, VadEvent};
+use uniinfer_backends::utf8::Utf8Decoder;
 
 /// WebSocket entry point for the realtime session protocol.
 pub(crate) async fn realtime(

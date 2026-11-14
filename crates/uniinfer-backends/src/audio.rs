@@ -1,25 +1,25 @@
 //! PCM framing and energy-based voice activity detection.
 
-pub(crate) const SAMPLE_RATE: usize = 16_000;
-pub(crate) const FRAME_MS: usize = 20;
-pub(crate) const FRAME_BYTES: usize = SAMPLE_RATE / 1000 * FRAME_MS * 2;
+pub const SAMPLE_RATE: usize = 16_000;
+pub const FRAME_MS: usize = 20;
+pub const FRAME_BYTES: usize = SAMPLE_RATE / 1000 * FRAME_MS * 2;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum VadEvent {
+pub enum VadEvent {
     SpeechStarted,
     SpeechStopped,
 }
 
 /// Minimal energy VAD with hangover, matching the M3 orchestrated baseline.
 #[derive(Debug)]
-pub(crate) struct EnergyVad {
+pub struct EnergyVad {
     threshold: f64,
     speaking: bool,
     silence_frames: u8,
 }
 
 impl EnergyVad {
-    pub(crate) fn new(threshold: f64) -> Self {
+    pub fn new(threshold: f64) -> Self {
         Self {
             threshold,
             speaking: false,
@@ -27,7 +27,7 @@ impl EnergyVad {
         }
     }
 
-    pub(crate) fn push(&mut self, frame: &[u8]) -> Option<VadEvent> {
+    pub fn push(&mut self, frame: &[u8]) -> Option<VadEvent> {
         let rms = rms(frame);
         if rms >= self.threshold {
             self.silence_frames = 0;

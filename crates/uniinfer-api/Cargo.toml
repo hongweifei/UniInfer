@@ -28,6 +28,7 @@ llama-rocm = ["uniinfer-service/llama-rocm"]
 [dependencies]
 uniinfer-core.workspace = true
 uniinfer-service.workspace = true
+uniinfer-backends.workspace = true
 axum.workspace = true
 tokio.workspace = true
 tokio-stream.workspace = true

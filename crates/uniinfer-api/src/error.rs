@@ -31,15 +31,6 @@ impl ApiError {
         }
     }
 
-    pub fn busy(message: impl Into<String>) -> Self {
-        Self {
-            status: StatusCode::TOO_MANY_REQUESTS,
-            code: "busy",
-            message: message.into(),
-            fallback_reason: None,
-        }
-    }
-
     pub fn unauthorized(message: impl Into<String>) -> Self {
         Self {
             status: StatusCode::UNAUTHORIZED,

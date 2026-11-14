@@ -52,7 +52,7 @@
 
 ## 核心特性
 
-- **三格式统一接入**：ONNX 走 `ort` + `onnx-genai`；GGUF 与 Safetensors 走 `CandleEngine`，同一 `InferenceEngine` 契约。
+- **三格式统一接入**：ONNX 走 `ort` + GenAI KV cache；GGUF 与 Safetensors 走 `CandleEngine` 或可选的 `llama.cpp` 引擎，同一 `InferenceEngine` 契约。
 - **实时双工**：`/v1/realtime` 支持文本、音频、图像、视频四通道；打断级联在 3 帧内生效，取消语义跨层传播。
 - **生成能力**：图像覆盖 SD 1.5/2.1、SDXL、SD 3/3.5、FLUX.1-dev、PixArt-Σ、Stable Cascade，支持 img2img、inpaint、LoRA/DoRA 堆叠与 AnimateDiff；视频覆盖 LTX-Video 2B/13B 与 AnimateDiff。
 - **显式能力声明**：格式、量化、模态、设备类别、EP 的支持状态同时来自模型清单与 `capabilities()`；降级路径附带稳定 `fallback_reason`。
@@ -96,7 +96,7 @@ flowchart TB
     end
 
     subgraph Engines["InferenceEngine"]
-        E1["OnnxEngine · ort + onnx-genai"]
+        E1["OnnxEngine · ort + GenAI KV cache"]
         E2["CandleEngine · GGUF / Safetensors"]
         E3["可选引擎 · frink / mistral.rs"]
     end
@@ -411,11 +411,13 @@ crates/
   uniinfer-core          # 枚举、Manifest schema、EngineError、Trait
   uniinfer-devices       # DeviceInventory、代价模型、PlacementPlan
   uniinfer-registry      # 格式+模态路由、预检、SessionLease、显存预算
-  uniinfer-service       # Runtime、ModelSlot、生成入口与装配
-  uniinfer-engine-onnx   # ort + onnx-genai；EP feature 门控
+  uniinfer-service       # Runtime、ModelSlot、文本生成入口
+  uniinfer-engine-set    # 默认引擎装配与 engine feature 收敛
+  uniinfer-engine-onnx   # ort + GenAI KV cache；EP feature 门控
   uniinfer-engine-candle # candle-core/transformers；GGUF / Safetensors
-  uniinfer-backends      # 四个模态 Backend，引擎无关
-  uniinfer-router        # mode 路由、帧编排、打断级联、异步任务
+  uniinfer-engine-llama  # llama.cpp；可选 GGUF 引擎
+  uniinfer-backends      # Tokenizer、文本生成、PCM/VAD、UTF-8 流
+  uniinfer-router        # 目标层：请求/帧编排（尚未落地）
   uniinfer-api           # axum 路由、OpenAI 兼容层、WebSocket
   uniinfer-cli           # 冒烟、清单校验、bench 驱动
   uniinfer-bench         # 场景矩阵与基线对比

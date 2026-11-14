@@ -16,7 +16,7 @@ use crate::error::ApiError;
 use crate::extract::ApiJson;
 use crate::sse::{self, StreamEvent};
 use crate::state::{ActiveGuard, AppState, CancelGuard};
-use crate::utf8::Utf8Decoder;
+use uniinfer_backends::utf8::Utf8Decoder;
 
 #[derive(Debug, Deserialize)]
 pub(crate) struct ChatRequest {
@@ -58,12 +58,12 @@ pub(crate) async fn chat(
     let manifest = slot.manifest();
 
     let prompt = extract_prompt(&request.messages)?;
-    let prompt_tokens = prompt.len();
+    let prompt_tokens = slot.count_tokens(&prompt).map_err(ApiError::from)?;
     if prompt_tokens >= manifest.context_len {
         return Err(ApiError::bad_request(
             "context_overflow",
             format!(
-                "prompt uses {prompt_tokens} bytes, context_len is {}",
+                "prompt uses {prompt_tokens} tokens, context_len is {}",
                 manifest.context_len
             ),
         ));

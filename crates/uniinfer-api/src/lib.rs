@@ -1,15 +1,13 @@
 //! HTTP surface for the text service.
 
-mod audio;
 mod auth;
-pub mod chat;
-pub mod error;
-pub mod extract;
-pub mod realtime;
+mod chat;
+mod error;
+mod extract;
+mod realtime;
 pub mod routes;
-pub mod sse;
-pub mod state;
-pub mod utf8;
+mod sse;
+mod state;
 
 use std::io;
 
