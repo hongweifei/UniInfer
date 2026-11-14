@@ -219,7 +219,16 @@ $env:LIBCLANG_PATH = "C:\path\to\llvm\bin"
 cargo build -p uniinfer-cli --features llama
 ```
 
-AMD GPU 使用 Vulkan 后端，需要 Vulkan SDK（`glslc`）后启用 `llama-vulkan`；NVIDIA 用 `llama-cuda`。未启用 GPU feature 时引擎只报告 CPU，放置计划自然回退。
+AMD GPU 使用 Vulkan 后端。安装 Vulkan SDK 后启用 `llama-vulkan`；NVIDIA 用 `llama-cuda`：
+
+```powershell
+$env:VULKAN_SDK = "C:\VulkanSDK\1.4.363.0"
+cargo run -p uniinfer-cli --features llama-vulkan -- run \
+  --manifest models/qwen3-0.6b/manifest.toml \
+  --prompt "你好" --max-tokens 32
+```
+
+`RUST_LOG=info` 可看到 llama.cpp 的设备与层卸载日志，例如 `using device Vulkan0 (AMD Radeon ...)`、`offloaded 29/29 layers to GPU`。未启用 GPU feature 时引擎只报告 CPU，放置计划自然回退。
 
 ### M0：CLI 与 ONNX CPU 路径
 

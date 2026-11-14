@@ -55,7 +55,7 @@ impl LlamaEngine {
     /// Initialise the llama.cpp backend and probe its devices.
     pub fn new() -> Result<Self> {
         llama_cpp_2::send_logs_to_tracing(
-            llama_cpp_2::LogOptions::default().with_logs_enabled(false),
+            llama_cpp_2::LogOptions::default().with_logs_enabled(true),
         );
         let backend = LlamaBackend::init()
             .map_err(|error| EngineError::LoadFailed(format!("llama backend: {error}")))?;
