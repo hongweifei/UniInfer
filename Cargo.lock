@@ -1460,6 +1460,10 @@ dependencies = [
 name = "uniinfer-registry"
 version = "0.0.0"
 dependencies = [
+ "hex",
+ "sha2",
+ "tempfile",
+ "toml",
  "tracing",
  "uniinfer-core",
  "uniinfer-devices",

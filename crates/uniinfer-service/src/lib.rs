@@ -5,7 +5,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
-use uniinfer_backends::{GenerateOptions, generate_bytes_cancellable};
+use uniinfer_backends::{ByteTokenizer, TextGenerator};
 use uniinfer_core::{Device, EngineError, EngineSession, ModelManifest, PlacementPlan, Result};
 use uniinfer_devices::DeviceInventory;
 use uniinfer_engine_onnx::OnnxEngine;
@@ -55,11 +55,14 @@ impl Runtime {
             .text
             .as_ref()
             .ok_or_else(|| EngineError::ManifestInvalid("manifest has no [text] section".into()))?;
+        let generator = TextGenerator::new(
+            Arc::new(ByteTokenizer::new(text.vocab_size)?),
+            manifest.context_len,
+            text.eos_token,
+        );
 
         Ok(Arc::new(ModelSlot {
-            context_len: manifest.context_len,
-            vocab: text.vocab_size,
-            eos_token: text.eos_token,
+            generator,
             lease,
             permit: Arc::new(Semaphore::new(1)),
         }))
@@ -69,9 +72,7 @@ impl Runtime {
 /// A loaded model with a single generation permit.
 pub struct ModelSlot {
     lease: Arc<SessionLease>,
-    vocab: usize,
-    eos_token: Option<u32>,
-    context_len: usize,
+    generator: TextGenerator,
     permit: Arc<Semaphore>,
 }
 
@@ -111,20 +112,9 @@ impl ModelSlot {
         prompt: &str,
         max_tokens: usize,
         cancel: &CancelToken,
-        on_byte: &mut dyn FnMut(u8) -> bool,
+        on_bytes: &mut dyn FnMut(&[u8]) -> bool,
     ) -> Result<Vec<u8>> {
-        let options = GenerateOptions {
-            max_tokens,
-            eos_token: self.eos_token,
-        };
-        generate_bytes_cancellable(
-            self.session(),
-            prompt,
-            self.vocab,
-            self.context_len,
-            &options,
-            cancel,
-            on_byte,
-        )
+        self.generator
+            .generate(self.session(), prompt, max_tokens, cancel, on_bytes)
     }
 }

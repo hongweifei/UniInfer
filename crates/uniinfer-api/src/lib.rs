@@ -1,7 +1,10 @@
 //! HTTP surface for the text service.
 
+pub mod chat;
 pub mod error;
+pub mod extract;
 pub mod routes;
+pub mod sse;
 pub mod state;
 pub mod utf8;
 

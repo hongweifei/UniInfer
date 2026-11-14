@@ -50,6 +50,9 @@ struct Measurement {
     model: String,
     engine: String,
     device: String,
+    ep: String,
+    commit: String,
+    ram_bytes: u64,
     prompt_bytes: usize,
     max_tokens: usize,
     iterations: usize,
@@ -105,11 +108,11 @@ fn run(
         let start = Instant::now();
         let mut first_byte = None;
         let mut bytes = 0usize;
-        slot.generate(prompt, max_tokens, &token, &mut |_| {
+        slot.generate(prompt, max_tokens, &token, &mut |chunk| {
             if first_byte.is_none() {
                 first_byte = Some(start.elapsed());
             }
-            bytes += 1;
+            bytes += chunk.len();
             true
         })?;
         let elapsed = start.elapsed();
@@ -131,6 +134,13 @@ fn run(
             .devices
             .first()
             .map_or_else(|| "unknown".into(), |device| device.id.clone()),
+        ep: slot
+            .placement()
+            .devices
+            .first()
+            .map_or_else(|| "unknown".into(), |device| device.backend.clone()),
+        commit: git_commit(),
+        ram_bytes: total_memory(),
         prompt_bytes: prompt.len(),
         max_tokens,
         iterations,
@@ -159,6 +169,25 @@ fn compare(baseline_path: &Path, current_path: &Path, warn: f64, fail: f64) -> R
         &std::fs::read_to_string(current_path)
             .with_context(|| format!("read {}", current_path.display()))?,
     )?;
+
+    for (name, baseline_value, current_value) in [
+        (
+            "schema",
+            baseline.schema.to_string(),
+            current.schema.to_string(),
+        ),
+        ("model", baseline.model.clone(), current.model.clone()),
+        ("engine", baseline.engine.clone(), current.engine.clone()),
+        ("device", baseline.device.clone(), current.device.clone()),
+        ("ep", baseline.ep.clone(), current.ep.clone()),
+        ("commit", baseline.commit.clone(), current.commit.clone()),
+    ] {
+        if baseline_value != current_value {
+            bail!(
+                "baseline mismatch for {name}: baseline {baseline_value}, current {current_value}"
+            );
+        }
+    }
 
     let checks = [
         (
@@ -219,6 +248,22 @@ fn ratio(current: f64, baseline: f64) -> f64 {
     } else {
         current / baseline - 1.0
     }
+}
+
+fn git_commit() -> String {
+    std::process::Command::new("git")
+        .args(["rev-parse", "--short", "HEAD"])
+        .output()
+        .ok()
+        .filter(|output| output.status.success())
+        .map_or_else(
+            || "unknown".into(),
+            |output| String::from_utf8_lossy(&output.stdout).trim().to_owned(),
+        )
+}
+
+fn total_memory() -> u64 {
+    sysinfo::System::new().map_or(0, |system| system.total_memory())
 }
 
 fn current_process_memory() -> u64 {

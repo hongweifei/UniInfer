@@ -101,8 +101,8 @@ fn run(manifest_path: &std::path::Path, prompt: &str, max_tokens: usize) -> Resu
         .with_context(|| format!("load {}", manifest_path.display()))?;
 
     let mut stdout = std::io::stdout().lock();
-    slot.generate(prompt, max_tokens, &CancelToken::new(), &mut |byte| {
-        stdout.write_all(&[byte]).is_ok() && stdout.flush().is_ok()
+    slot.generate(prompt, max_tokens, &CancelToken::new(), &mut |chunk| {
+        stdout.write_all(chunk).is_ok() && stdout.flush().is_ok()
     })?;
     writeln!(stdout)?;
     Ok(())
