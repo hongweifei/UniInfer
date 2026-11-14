@@ -184,15 +184,17 @@ CPU、GPU、NPU 是地位对等的设备类别。`DeviceInventory` 在启动时�
 | CPU | 全平台 | CPU EP | CPU | 回退执行、层卸载、小模型常驻 |
 | GPU | Windows / Linux NVIDIA | CUDA、TensorRT | CUDA | prefill/decode 主力、扩散与视频 |
 | GPU | macOS / iOS | CoreML（GPU 委派） | Metal | 实时双工与生成主力 |
-| GPU | Windows 通用 | DirectML | CPU / CUDA | 跨厂商 GPU 路径 |
+| GPU | Windows AMD / Intel | DirectML | CPU / CUDA | AMD Radeon 与 Intel Arc 的 Windows 路径 |
 | GPU | Android | NNAPI（GPU 委派） | — | 轻量视觉/语音前端 |
-| GPU | Linux AMD / Intel | ROCm、OpenVINO | — | 经 `OnnxEngine` 覆盖 |
+| GPU | Linux AMD | ROCm | — | AMD 独显；经 `OnnxEngine` 覆盖 |
+| GPU | Linux Intel | OpenVINO | — | Intel GPU；经 `OnnxEngine` 覆盖 |
 | NPU | Android | QNN、NNAPI（NPU/DSP 委派） | 经 `OnnxEngine` 路由 | ASR/TTS、常驻小模型 |
 | NPU | Windows Copilot+ | QNN、OpenVINO | 经 `OnnxEngine` 路由 | 语音前端、低功耗推理 |
+| NPU | AMD Ryzen AI | Vitis AI | 经 `OnnxEngine` 路由 | XDNA / XDNA2，本地语音与视觉编码 |
 | NPU | Apple Silicon / iOS | CoreML（ANE 委派） | 经 `OnnxEngine` 路由 | 语音与视觉编码器 |
 | NPU | 服务器 Ascend | CANN | 经 `OnnxEngine` 路由 | 高并发语音/视觉前端 |
 
-`CandleEngine` 的原生后端是 CPU、CUDA、Metal；NPU 由 `OnnxEngine` 的 EP 路径承载。两类引擎在同一会话内组合时，由 Router 的放置计划编排。
+`CandleEngine` 的原生后端是 CPU、CUDA、Metal；AMD GPU 与 NPU 由 `OnnxEngine` 的 DirectML、ROCm、Vitis AI 路径承载。Vitis AI EP 依赖 AMD 提供的 ONNX Runtime 构建（Ryzen AI SDK），标准预编译包在链接期缺 Vitis 符号。GGUF 在 AMD GPU 上的原生路径由 `frink` 的 Vulkan 后端在 M11 提供，M11 之前该组合走 Candle CPU。两类引擎在同一会话内组合时，由 Router 的放置计划编排。
 
 ### 9.2 混合推理的四个层级
 
@@ -242,7 +244,7 @@ GUI 层使用 **Tauri 2.x**（基线 2.12.5），桌面端和移动端共享 Web
 | :--- | :--- | :--- |
 | **Phase 1** | `OnnxEngine` + `EngineRegistry` 最小实现，ONNX 路由；编排式全双工 + WebSocket 事件流 + Tauri 桌面端 | 端到端双工对话可用，打断生效，EP 编译时门控的 CI 通过 |
 | **Phase 2** | 注册 `CandleEngine`，接入 GGUF/Safetensors 文本与双工模型；`DeviceInventory` 最小实现（CPU/GPU 探测、显存与带宽） | GGUF/Safetensors 量化预检正确；Candle 上的双工帧循环在 CUDA/Metal 上可量化；设备清单与 `PlacementPlan` 可导出 |
-| **Phase 3** | `uniinfer-devices` 完整落地：NPU EP（QNN、NNAPI、CoreML、OpenVINO、CANN）、四层混合推理（T1–T4）、清单 `placement` 策略与代价模型 | NPU 与 CPU 数值一致性达标；层卸载让超出显存的模型可运行；跨引擎双工按阶段分置且延迟可量化；`strict` 模式正确拒绝回退 |
+| **Phase 3** | `uniinfer-devices` 完整落地：NPU EP（QNN、NNAPI、CoreML、OpenVINO、Vitis AI、CANN）、AMD GPU 的 DirectML/ROCm、四层混合推理（T1–T4）、清单 `placement` 策略与代价模型 | NPU 与 CPU 数值一致性达标；层卸载让超出显存的模型可运行；跨引擎双工按阶段分置且延迟可量化；`strict` 模式正确拒绝回退 |
 | **Phase 4** | **`plakat` 接入 GGUF/Safetensors 图像生成（batch）**；`mistral.rs` 作为 Safetensors 可选引擎对照评估 | **`plakat` 的 FLUX GGUF 在 16GB 显存上可运行**；mistral.rs 的吞吐对比有明确结论 |
 | **Phase 5** | **`candle-video`（LTX-Video）和 `plakat`（AnimateDiff）接入视频生成（batch）**；实时图像渐进预览帧 + RAVE 逐帧视频管道；Tauri 移动端编排式双工基线 | **`candle-video` 的 LTX-Video 在 CUDA 上端到端可运行**；首帧预览延迟可量化；移动端 PCM 音频 I/O 可用 |
 | **Phase 6** | `frink` 作为 GGUF 可选引擎接入；原生双工在移动端 NPU/GPU 上的逐机型验证；`mistral.rs` 是否提升为 Safetensors 默认可选引擎的决策 | frink 的 OpenAI 兼容服务层与 Router 事件流对齐；至少一个原生模型在移动端设备上达到可用实时性 |

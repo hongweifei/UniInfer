@@ -6,6 +6,7 @@ on:
   pull_request:
 
 jobs:
+  # 编译期检查 feature 接线；Vitis/ROCm 等运行时链接需要供应商提供的 ORT 构建
   features:
     strategy:
       fail-fast: false
@@ -16,6 +17,8 @@ jobs:
           - { os: ubuntu-latest, feature: ep-qnn }
           - { os: ubuntu-latest, feature: ep-openvino }
           - { os: ubuntu-latest, feature: ep-cann }
+          - { os: ubuntu-latest, feature: ep-rocm }
+          - { os: windows-latest, feature: ep-vitis }
           - { os: windows-latest, feature: ep-directml }
           - { os: windows-latest, feature: ep-nnapi }
           - { os: macos-latest, feature: ep-coreml }

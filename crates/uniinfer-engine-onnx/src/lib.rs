@@ -7,8 +7,9 @@ use ort::environment::Environment;
 use ort::session::Session;
 use ort::value::{DynValue, Outlet, Tensor as OrtTensor, TensorElementType, ValueType};
 use uniinfer_core::{
-    DeviceClass, EngineCapabilities, EngineError, EngineLoadSpec, EngineSession, InferenceEngine,
-    Modality, ModelFormat, Quantization, Result, Tensor, TensorData, TensorDtype, TensorSpec,
+    Device, DeviceClass, EngineCapabilities, EngineError, EngineLoadSpec, EngineSession,
+    InferenceEngine, Modality, ModelFormat, Quantization, Result, Tensor, TensorData, TensorDtype,
+    TensorSpec,
 };
 
 const FORMATS: &[ModelFormat] = &[ModelFormat::Onnx];
@@ -17,6 +18,7 @@ static DEVICES: LazyLock<Vec<DeviceClass>> = LazyLock::new(|| {
     if cfg!(any(
         feature = "ep-cuda",
         feature = "ep-tensorrt",
+        feature = "ep-rocm",
         feature = "ep-coreml",
         feature = "ep-directml"
     )) {
@@ -26,6 +28,7 @@ static DEVICES: LazyLock<Vec<DeviceClass>> = LazyLock::new(|| {
         feature = "ep-nnapi",
         feature = "ep-qnn",
         feature = "ep-openvino",
+        feature = "ep-vitis",
         feature = "ep-cann"
     )) {
         devices.push(DeviceClass::Npu);
@@ -54,6 +57,8 @@ impl OnnxEngine {
         providers.push(ort::ep::TensorRT::default().build());
         #[cfg(feature = "ep-cuda")]
         providers.push(ort::ep::CUDA::default().build());
+        #[cfg(feature = "ep-rocm")]
+        providers.push(ort::ep::ROCm::default().build());
         #[cfg(feature = "ep-coreml")]
         providers.push(ort::ep::CoreML::default().build());
         #[cfg(feature = "ep-directml")]
@@ -64,6 +69,8 @@ impl OnnxEngine {
         providers.push(ort::ep::NNAPI::default().build());
         #[cfg(feature = "ep-openvino")]
         providers.push(ort::ep::OpenVINO::default().build());
+        #[cfg(feature = "ep-vitis")]
+        providers.push(ort::ep::Vitis::default().build());
         #[cfg(feature = "ep-cann")]
         providers.push(ort::ep::CANN::default().build());
 
@@ -73,6 +80,33 @@ impl OnnxEngine {
             .build()
             .map_err(|error| EngineError::LoadFailed(format!("ort environment: {error}")))?;
         Ok(Self { environment })
+    }
+
+    /// Enumerate hardware devices visible to the configured execution providers.
+    #[must_use]
+    pub fn probe_devices(&self) -> Vec<Device> {
+        self.environment
+            .devices()
+            .filter_map(|device| {
+                let hardware = device.hardware_device();
+                let class = match hardware.ty() {
+                    ort::memory::DeviceType::CPU => DeviceClass::Cpu,
+                    ort::memory::DeviceType::GPU => DeviceClass::Gpu,
+                    ort::memory::DeviceType::NPU => DeviceClass::Npu,
+                    _ => return None,
+                };
+                let backend = device.ep().unwrap_or("unknown").to_owned();
+                if !ep_enabled(&backend) {
+                    return None;
+                }
+                Some(Device {
+                    id: format!("{class}:{backend}:{}", hardware.id()),
+                    class,
+                    backend,
+                    memory_bytes: 0,
+                })
+            })
+            .collect()
     }
 }
 
@@ -166,6 +200,23 @@ impl InferenceEngine for OnnxEngine {
             cancelled: AtomicBool::new(false),
         }))
     }
+}
+
+fn ep_enabled(ep: &str) -> bool {
+    let ep = ep.to_ascii_lowercase();
+    if ep.contains("cpu") {
+        return true;
+    }
+    (cfg!(feature = "ep-cuda") && ep.contains("cuda"))
+        || (cfg!(feature = "ep-tensorrt") && ep.contains("tensorrt"))
+        || (cfg!(feature = "ep-rocm") && ep.contains("rocm"))
+        || (cfg!(feature = "ep-coreml") && ep.contains("coreml"))
+        || (cfg!(feature = "ep-directml") && (ep.contains("dml") || ep.contains("directml")))
+        || (cfg!(feature = "ep-qnn") && ep.contains("qnn"))
+        || (cfg!(feature = "ep-nnapi") && ep.contains("nnapi"))
+        || (cfg!(feature = "ep-openvino") && ep.contains("openvino"))
+        || (cfg!(feature = "ep-vitis") && ep.contains("vitis"))
+        || (cfg!(feature = "ep-cann") && ep.contains("cann"))
 }
 
 fn convert_specs(outlets: &[Outlet], kind: &str) -> Result<Vec<TensorSpec>> {

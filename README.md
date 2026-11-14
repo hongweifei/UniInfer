@@ -58,7 +58,7 @@
 - **显式能力声明**：格式、量化、模态、设备类别、EP 的支持状态同时来自模型清单与 `capabilities()`；降级路径附带稳定 `fallback_reason`。
 - **加载期预检**：量化、EP、显存与放置可行性四项在 `load_session` 前校验，错误在请求入口返回，推理循环保持干净。
 - **取消与租约**：`CancellationToken` + RAII `SessionLease`，客户端断开、任务取消、模型驱逐共用一条释放路径，覆盖 CPU/GPU/NPU 资源。
-- **异构放置**：CPU、GPU、NPU 统一探测；GPU 覆盖 CUDA、TensorRT、Metal、DirectML、ROCm、OpenVINO，NPU 覆盖 QNN、NNAPI、CoreML（ANE）、OpenVINO、CANN。
+- **异构放置**：CPU、GPU、NPU 统一探测；GPU 覆盖 CUDA、TensorRT、Metal、DirectML、ROCm、OpenVINO，NPU 覆盖 QNN、NNAPI、CoreML（ANE）、OpenVINO、Vitis AI、CANN。
 - **混合推理**：算子级 EP 回退、层与 KV 卸载、阶段分置、跨引擎组合四层可选，回退与迁移均进入 `PlacementPlan` 与指标。
 - **纯 Rust 推理路径**：服务端、引擎、桌面外壳与移动端共享同一代码库。
 - **可观测**：请求、加载、prefill、decode 分层 span，延迟直方图与会话计量随每个里程碑扩展。
@@ -149,11 +149,13 @@ pub trait InferenceEngine: Send + Sync {
 | CPU | 全平台 | CPU EP | CPU | 回退执行、层卸载、小模型常驻 |
 | GPU | Windows / Linux NVIDIA | CUDA、TensorRT | CUDA | prefill/decode 主力、扩散与视频 |
 | GPU | macOS / iOS | CoreML（GPU 委派） | Metal | 实时双工与生成主力 |
-| GPU | Windows 通用 | DirectML | CPU / CUDA | 跨厂商 GPU 路径 |
+| GPU | Windows AMD / Intel | DirectML | CPU / CUDA | AMD Radeon 与 Intel Arc 的 Windows 路径 |
 | GPU | Android | NNAPI（GPU 委派） | — | 轻量视觉/语音前端 |
-| GPU | Linux AMD / Intel | ROCm、OpenVINO | — | 经 `OnnxEngine` 覆盖 |
+| GPU | Linux AMD | ROCm | — | 经 `OnnxEngine` 覆盖 |
+| GPU | Linux Intel | OpenVINO | — | 经 `OnnxEngine` 覆盖 |
 | NPU | Android | QNN、NNAPI（NPU/DSP 委派） | 经 `OnnxEngine` 路由 | ASR/TTS、常驻小模型 |
 | NPU | Windows Copilot+ | QNN、OpenVINO | 经 `OnnxEngine` 路由 | 语音前端、低功耗推理 |
+| NPU | AMD Ryzen AI | Vitis AI | 经 `OnnxEngine` 路由 | XDNA / XDNA2，本地语音与视觉编码 |
 | NPU | Apple Silicon / iOS | CoreML（ANE 委派） | 经 `OnnxEngine` 路由 | 语音与视觉编码器 |
 | NPU | 服务器 Ascend | CANN | 经 `OnnxEngine` 路由 | 高并发语音/视觉前端 |
 
@@ -166,7 +168,7 @@ pub trait InferenceEngine: Send + Sync {
 | T3 阶段级 | 编码器、骨干、解码器、VAE 分置 | `plakat`、`candle-video`、编排式双工 | ASR 在 NPU、LLM 在 GPU、TTS 在 CPU |
 | T4 引擎级 | Router 按模态或阶段分配引擎 | `OnnxEngine` + `CandleEngine` | NPU 语音前端 + GPU 文本生成 |
 
-放置策略为 `auto`、`pinned`、`strict`；`PlacementPlan` 记录阶段→设备、卸载层数、KV cache 位置与回退清单，经 `/v1/models` 与会话 span 可查。NPU 路径由 `OnnxEngine` 的 EP 承载，`CandleEngine` 负责 CPU、CUDA、Metal。
+放置策略为 `auto`、`pinned`、`strict`；`PlacementPlan` 记录阶段→设备、卸载层数、KV cache 位置与回退清单，经 `/v1/models` 与会话 span 可查。NPU 与 AMD GPU 路径由 `OnnxEngine` 的 EP 承载，`CandleEngine` 负责 CPU、CUDA、Metal；GGUF 的 AMD GPU 原生路径由 `frink` Vulkan 在 M11 接入。Vitis AI EP 需要 AMD 提供的 ONNX Runtime 构建（Ryzen AI SDK）；标准预编译包在链接期缺 Vitis 符号，`ep-vitis` 的 CI 只做 feature 编译检查。
 
 ## 快速开始
 
@@ -213,6 +215,8 @@ cargo build --release -p uniinfer-cli --features ep-coreml    # Apple GPU / ANE
 cargo build --release -p uniinfer-cli --features ep-directml  # Windows GPU
 cargo build --release -p uniinfer-cli --features ep-qnn       # Qualcomm NPU
 cargo build --release -p uniinfer-cli --features ep-openvino  # Intel GPU / NPU
+cargo build --release -p uniinfer-cli --features ep-rocm       # Linux AMD GPU
+cargo build --release -p uniinfer-cli --features ep-vitis      # AMD Ryzen AI NPU（需 SDK 的 ORT 构建）
 ```
 
 ### 启动服务

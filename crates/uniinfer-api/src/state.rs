@@ -45,8 +45,13 @@ pub struct AppState {
 
 impl AppState {
     pub fn new(config: &ApiConfig) -> Result<Self> {
-        let mut registry = EngineRegistry::new(DeviceInventory::probe());
-        registry.register(Arc::new(OnnxEngine::new()?));
+        let engine = OnnxEngine::new()?;
+        let mut inventory = DeviceInventory::probe();
+        for device in engine.probe_devices() {
+            inventory.register(device);
+        }
+        let mut registry = EngineRegistry::new(inventory);
+        registry.register(Arc::new(engine));
 
         let lease = registry.load(&config.manifest)?;
         let manifest = lease.manifest().clone();

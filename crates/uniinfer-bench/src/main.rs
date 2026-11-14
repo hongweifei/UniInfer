@@ -94,8 +94,13 @@ fn run(
         bail!("iterations must be at least 1");
     }
 
-    let mut registry = EngineRegistry::new(DeviceInventory::probe());
-    registry.register(Arc::new(OnnxEngine::new()?));
+    let engine = OnnxEngine::new()?;
+    let mut inventory = DeviceInventory::probe();
+    for device in engine.probe_devices() {
+        inventory.register(device);
+    }
+    let mut registry = EngineRegistry::new(inventory);
+    registry.register(Arc::new(engine));
     let lease = registry.load(manifest_path)?;
     let manifest = lease.manifest();
     let tokenizer = manifest.tokenizer.as_deref().unwrap_or_default();

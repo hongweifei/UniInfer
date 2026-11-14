@@ -240,11 +240,11 @@ M0–M3 建立请求生命周期（租约、取消、帧、打断），M4–M8 �
 - T2 层与缓存级：Candle 层卸载、KV cache 分层，权重大于显存的模型按预算运行。
 - T3 阶段级：`plakat`、`candle-video`、编排式双工按模块放置（文本编码器 GPU、VAE CPU、ASR NPU）。
 - T4 引擎级：Router 将模态或阶段分配给 `OnnxEngine` 与 `CandleEngine`，token/帧边界交接，事件流与帧协议保持一致。
-- NPU EP：QNN、NNAPI、CoreML（ANE）、OpenVINO、CANN，各自独立 feature 与启动探测；`supported_devices` 与 `supported_eps` 参与预检。
+- NPU EP：QNN、NNAPI、CoreML（ANE）、OpenVINO、Vitis AI、CANN，各自独立 feature 与启动探测；AMD GPU 走 DirectML（Windows）或 ROCm（Linux）；`supported_devices` 与 `supported_eps` 参与预检。
 - 代价模型：`compute + transfer`，prefill 与 decode 分开评分；选择结果可解释并写入基线。
 
 **出口**
-- 四类环境（Windows NVIDIA、Windows Copilot+、macOS、Android）正确报告 CPU/GPU/NPU 与 EP 可用性。
+- 五类环境（Windows NVIDIA、Windows AMD、Windows Copilot+、macOS、Android）正确报告 CPU/GPU/NPU 与 EP 可用性。
 - NPU 与 CPU 的输出在容差内（文本 logits / 音频帧），回退算子计数可观测。
 - T2：超过单卡显存的模型通过层卸载运行，吞吐与峰值内存入库；`offload_layers=0` 作为对照。
 - T3/T4：双工会话把 ASR 放 NPU、LLM 放 GPU、TTS 放 CPU，端到端延迟 p95 达标；`PlacementPlan` 可在 `/v1/models` 与会话 span 核对。
@@ -356,7 +356,7 @@ M0–M3 建立请求生命周期（租约、取消、帧、打断），M4–M8 �
 | 轨道 | 起点 | 内容 | 门禁 |
 | :--- | :--- | :--- | :--- |
 | Manifest 与供应链 | M0 | schema 版本、sha256、许可证字段、设备与放置字段、fetch 脚本 | 清单按 schema 校验，缺字段返回 `ManifestInvalid` |
-| 构建与 EP 矩阵 | M1 | CPU 默认；`ep-cuda/ep-tensorrt/ep-coreml/ep-directml/ep-nnapi` 组合编译检查；M6 起加入 `ep-qnn/ep-openvino/ep-cann` | PR 执行编译检查；具备硬件的 runner 运行对应用例 |
+| 构建与 EP 矩阵 | M1 | CPU 默认；`ep-cuda/ep-tensorrt/ep-rocm/ep-coreml/ep-directml/ep-nnapi/ep-vitis` 编译检查；M6 起加入 `ep-qnn/ep-openvino/ep-cann` | PR 执行编译检查；具备硬件的 runner 运行对应用例 |
 | 设备与放置 | M6 | `DeviceInventory`、`PlacementPlan`、代价模型、设备×EP 矩阵回归 | 每个新增 EP 附带探测与数值一致性用例 |
 | 依赖与工具链 | M0 | 最新 stable；`cargo update` / `outdated` / `deny`；锁文件、SBOM 与版本清单 | 每次升级跑契约测试与基线；主版本附 ADR |
 | 契约测试 | M0 | 所有引擎参数化跑同一组断言（能力、设备、取消、流式、错误码、放置计划） | 新引擎通过契约测试后合入 |
@@ -376,7 +376,7 @@ M0–M3 建立请求生命周期（租约、取消、帧、打断），M4–M8 �
 | G4 | M8 | LTX 13B 在 24GB 可用？ | 是：声明支持；否：预检拒绝并在清单标注 |
 | G5 | M11 | `frink` 在契约、吞吐、量化覆盖三项领先？ | 是：成为 GGUF 默认；否：保留为可选 |
 | G6 | M5 探针后 | 双工模型在 Candle 上的帧时序达标？ | 是：进入主线；否：按机型白名单发布，ONNX 编排路径保持默认 |
-| G7 | M6 | 目标 NPU EP（QNN/NNAPI/CoreML/OpenVINO/CANN）在目标设备上可用且数值达标？ | 是：进入默认放置候选；否：该设备类别回退 GPU/CPU 路径，结论写入支持矩阵 |
+| G7 | M6 | 目标 NPU EP（QNN/NNAPI/CoreML/OpenVINO/Vitis AI/CANN）在目标设备上可用且数值达标？ | 是：进入默认放置候选；否：该设备类别回退 GPU/CPU 路径，结论写入支持矩阵 |
 
 门的产出为文档 + 数据；门通过后进入下一里程碑主线开发。
 
@@ -396,6 +396,8 @@ M0–M3 建立请求生命周期（租约、取消、帧、打断），M4–M8 �
 | NPU 算子覆盖不足 | 单模型回退算子比例超出阈值 | T1 回退计数 + T3 阶段分置；支持矩阵按模型族标注 |
 | 跨设备迁移开销 | p95 延迟超出单设备基线 | 代价模型纳入 transfer；热点阶段用 pinned 固定；小张量留驻设备 |
 | NPU 驱动碎片化 | 同型号不同驱动行为不一致 | EP 与驱动版本写入清单与基线；启动探测 + `fallback_reason` |
+| AMD GPU 路径分裂 | Windows DirectML 与 Linux ROCm 行为不同 | 按平台固定 EP 矩阵；能力清单标注 `windows-directml` / `linux-rocm` |
+| Vitis AI 运行时缺失 | Ryzen AI 驱动或 EP 库未安装 | 启动探测失败时回退 CPU 并记录 `missing_ep`，不阻断 CPU 路径 |
 | 层卸载吞吐下降 | tok/s 低于预算 | `offload_layers` 与 KV 位置联合调优；预检给出估算 |
 | 取消泄漏显存 | 浸泡测试 RSS/显存漂移 | `CancellationToken` + RAII 租约；浸泡门禁覆盖每个里程碑 |
 | 移动端音频延迟 | 真机首音频 p95 超出预算 | 编排式基线先行；原生双工按 M10 设备矩阵在 M11 逐机型承诺 |

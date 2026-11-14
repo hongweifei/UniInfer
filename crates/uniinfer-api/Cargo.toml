@@ -15,6 +15,8 @@ ep-directml = ["uniinfer-engine-onnx/ep-directml"]
 ep-nnapi = ["uniinfer-engine-onnx/ep-nnapi"]
 ep-qnn = ["uniinfer-engine-onnx/ep-qnn"]
 ep-openvino = ["uniinfer-engine-onnx/ep-openvino"]
+ep-rocm = ["uniinfer-engine-onnx/ep-rocm"]
+ep-vitis = ["uniinfer-engine-onnx/ep-vitis"]
 ep-cann = ["uniinfer-engine-onnx/ep-cann"]
 
 [dependencies]

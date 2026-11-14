@@ -80,7 +80,11 @@ async fn serve(
 }
 
 fn devices() -> Result<()> {
-    let inventory = DeviceInventory::probe();
+    let mut inventory = DeviceInventory::probe();
+    let engine = OnnxEngine::new().context("initialize ONNX engine")?;
+    for device in engine.probe_devices() {
+        inventory.register(device);
+    }
     println!(
         "{:<10} {:<16} {:<10} {:>12}",
         "ID", "CLASS", "BACKEND", "MEMORY"

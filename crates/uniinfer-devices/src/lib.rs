@@ -30,7 +30,11 @@ impl DeviceInventory {
 
     /// Register a device reported by an engine.
     pub fn register(&mut self, device: Device) {
-        if !self.devices.iter().any(|known| known.id == device.id) {
+        let duplicate = self.devices.iter().any(|known| {
+            known.id == device.id
+                || (known.class == device.class && device.class == DeviceClass::Cpu)
+        });
+        if !duplicate {
             self.devices.push(device);
         }
     }

@@ -21,6 +21,8 @@ ep-directml = ["ort/directml"]
 ep-nnapi = ["ort/nnapi"]
 ep-qnn = ["ort/qnn"]
 ep-openvino = ["ort/openvino"]
+ep-rocm = ["ort/rocm"]
+ep-vitis = ["ort/vitis"]
 ep-cann = ["ort/cann"]
 
 [dev-dependencies]
