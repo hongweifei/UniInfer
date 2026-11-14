@@ -27,14 +27,15 @@ pub(crate) enum Model {
 impl Model {
     pub(crate) fn forward(&mut self, input: &Tensor, offset: usize) -> candle_core::Result<Tensor> {
         match self {
-            Self::Quantized(model) => {
-                model.clear_kv_cache();
-                model.forward(input, offset)
-            }
-            Self::Dense(model) => {
-                model.clear_kv_cache();
-                model.forward(input, offset)
-            }
+            Self::Quantized(model) => model.forward(input, offset),
+            Self::Dense(model) => model.forward(input, offset),
+        }
+    }
+
+    pub(crate) fn clear(&mut self) {
+        match self {
+            Self::Quantized(model) => model.clear_kv_cache(),
+            Self::Dense(model) => model.clear_kv_cache(),
         }
     }
 }

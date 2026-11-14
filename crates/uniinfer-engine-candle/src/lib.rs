@@ -179,7 +179,10 @@ impl InferenceEngine for CandleEngine {
         }
 
         Ok(Box::new(CandleSession {
-            model: Mutex::new(model),
+            state: Mutex::new(CandleState {
+                model,
+                cached_ids: Vec::new(),
+            }),
             device,
             inputs: vec![TensorSpec {
                 name: "input_ids".into(),
@@ -195,8 +198,13 @@ impl InferenceEngine for CandleEngine {
     }
 }
 
+struct CandleState {
+    model: qwen3::Model,
+    cached_ids: Vec<u32>,
+}
+
 struct CandleSession {
-    model: Mutex<qwen3::Model>,
+    state: Mutex<CandleState>,
     device: Device,
     inputs: Vec<TensorSpec>,
     outputs: Vec<TensorSpec>,
@@ -226,16 +234,26 @@ impl EngineSession for CandleSession {
                 u32::try_from(*value).map_err(|_| EngineError::Other("id overflow".into()))
             })
             .collect::<Result<Vec<_>>>()?;
-        let input = Tensor::new(ids.as_slice(), &self.device)
+        let mut state = self
+            .state
+            .lock()
+            .map_err(|_| EngineError::Other("candle state lock poisoned".into()))?;
+        let incremental = state.cached_ids.len() + 1 == ids.len()
+            && ids.starts_with(&state.cached_ids)
+            && !state.cached_ids.is_empty();
+        let (tokens, offset) = if incremental {
+            (&ids[ids.len() - 1..], state.cached_ids.len())
+        } else {
+            state.model.clear();
+            state.cached_ids.clear();
+            (ids.as_slice(), 0)
+        };
+        let input = Tensor::new(tokens, &self.device)
             .and_then(|tensor| tensor.unsqueeze(0))
             .map_err(|error| EngineError::Other(format!("input tensor: {error}")))?;
-
-        let mut model = self
+        let logits = state
             .model
-            .lock()
-            .map_err(|_| EngineError::Other("candle model lock poisoned".into()))?;
-        let logits = model
-            .forward(&input, 0)
+            .forward(&input, offset)
             .map_err(|error| EngineError::Other(format!("candle forward: {error}")))?;
         let logits = logits
             .to_dtype(DType::F32)
@@ -245,6 +263,7 @@ impl EngineSession for CandleSession {
             .flatten_all()
             .and_then(|tensor| tensor.to_vec1::<f32>())
             .map_err(|error| EngineError::Other(format!("logits: {error}")))?;
+        state.cached_ids = ids;
         Ok(vec![CoreTensor::new(
             "logits",
             shape,
