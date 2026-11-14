@@ -75,12 +75,10 @@ fn manifest() -> ModelManifest {
         context_len: 16,
         tokenizer: Some("bytes".into()),
         min_vram: None,
-        supported_engines: vec!["fake".into()],
-        supported_eps: vec!["cpu".into()],
-        supported_devices: vec![DeviceClass::Cpu],
         placement: PlacementConfig {
             policy: PlacementPolicy::Auto,
             allow_cpu_fallback: true,
+            prefer: Vec::new(),
             stages: std::collections::BTreeMap::new(),
             offload_layers: None,
             kv_cache: None,
@@ -155,20 +153,14 @@ fn rejects_unsupported_format() {
 }
 
 #[test]
-fn rejects_unknown_engine() {
+fn rejects_pinned_device_unavailable_to_engine() {
     let temp = tempfile::tempdir().expect("tempdir");
     let mut manifest = manifest();
-    manifest.supported_engines = vec!["missing".into()];
-    let path = write_manifest(temp.path(), &manifest);
-    let error = registry().load(&path).err().expect("must reject");
-    assert!(matches!(error, EngineError::UnsupportedEngine(_)));
-}
-
-#[test]
-fn rejects_unavailable_device() {
-    let temp = tempfile::tempdir().expect("tempdir");
-    let mut manifest = manifest();
-    manifest.supported_devices = vec![DeviceClass::Gpu];
+    manifest.placement.policy = PlacementPolicy::Pinned;
+    manifest
+        .placement
+        .stages
+        .insert("llm".into(), DeviceClass::Gpu);
     let path = write_manifest(temp.path(), &manifest);
     let error = registry().load(&path).err().expect("must reject");
     assert!(matches!(error, EngineError::PlacementUnsatisfiable(_)));

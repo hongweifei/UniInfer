@@ -147,14 +147,11 @@ streaming_capable = false
 context_len = 64
 tokenizer = "bytes"
 min_vram = "0GiB"
-supported_engines = ["onnx"]
-supported_eps = ["cpu"]
-supported_devices = ["cpu"]
 
 [placement]
 policy = "auto"
+prefer = ["npu", "gpu", "cpu"]
 allow_cpu_fallback = true
-stages.llm = "cpu"
 
 [text]
 vocab_size = {VOCAB}

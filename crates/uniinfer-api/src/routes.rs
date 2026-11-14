@@ -54,7 +54,7 @@ async fn models(State(state): State<AppState>) -> Json<Value> {
                 "modalities": manifest.modalities,
                 "context_len": manifest.context_len,
                 "streaming_capable": manifest.streaming_capable,
-                "devices": manifest.supported_devices,
+                "devices": slot.placement().devices.iter().map(|device| device.class).collect::<Vec<_>>(),
                 "placement": slot.placement(),
             })
         })

@@ -148,6 +148,8 @@ pub struct PlacementConfig {
     #[serde(default = "default_allow_cpu_fallback")]
     pub allow_cpu_fallback: bool,
     #[serde(default)]
+    pub prefer: Vec<DeviceClass>,
+    #[serde(default)]
     pub stages: BTreeMap<String, DeviceClass>,
     #[serde(default)]
     pub offload_layers: Option<String>,
@@ -164,6 +166,7 @@ impl Default for PlacementConfig {
         Self {
             policy: PlacementPolicy::Auto,
             allow_cpu_fallback: true,
+            prefer: Vec::new(),
             stages: BTreeMap::new(),
             offload_layers: None,
             kv_cache: None,
@@ -187,12 +190,6 @@ pub struct ModelManifest {
     pub tokenizer: Option<String>,
     #[serde(default)]
     pub min_vram: Option<String>,
-    #[serde(default)]
-    pub supported_engines: Vec<String>,
-    #[serde(default)]
-    pub supported_eps: Vec<String>,
-    #[serde(default)]
-    pub supported_devices: Vec<DeviceClass>,
     #[serde(default)]
     pub placement: PlacementConfig,
     pub files: Vec<ModelFile>,
@@ -303,10 +300,6 @@ quantization = "fp32"
 modalities = ["text"]
 context_len = 64
 tokenizer = "bytes"
-supported_engines = ["onnx"]
-supported_eps = ["cpu"]
-supported_devices = ["cpu"]
-
 [placement]
 policy = "auto"
 stages.llm = "cpu"

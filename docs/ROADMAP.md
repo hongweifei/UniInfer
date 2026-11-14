@@ -112,7 +112,7 @@ M0–M3 建立请求生命周期（租约、取消、帧、打断），M4–M8 �
 **交付**
 - Trait 冻结 v1（后续只做加法，枚举 `#[non_exhaustive]`）：`InferenceEngine::{engine_name, supported_formats, supported_modalities, supported_quantizations, supported_devices, capabilities, load_session}`；`EngineSession::{run, run_streaming, cancel}`。
 - `EngineError` 分类：`UnsupportedFormat`、`UnsupportedQuantization`、`UnsupportedEngine`、`MissingEp`、`InsufficientVram`、`ManifestInvalid`、`LoadFailed`、`Cancelled`、`Busy`、`PlacementUnsatisfiable`。
-- `ModelManifest` schema v0：`id`、`format`、`quantization`、`modalities`、`streaming_capable`、`supported_engines`、`supported_eps`、`supported_devices`、`min_vram`、`files[]`（含 sha256）、`context_len`、`tokenizer`、`placement`。
+- `ModelManifest` schema v0：`id`、`format`、`quantization`、`modalities`、`streaming_capable`、`min_vram`、`files[]`（含 sha256）、`context_len`、`tokenizer`、`placement`；设备与 EP 由运行时探测。
 - `DeviceInventory` 最小实现：枚举 CPU/GPU/NPU 的 EP 编译与运行可用性、内存；本里程碑走 CPU 路径。
 - 依赖基线：`rust-toolchain.toml` 指向最新 stable，`Cargo.lock` 入库，`cargo deny` / `cargo outdated` 进入 CI；版本表见 DESIGN §12。
 - `models/fetch.sh` 拉取极小 ONNX 文本模型（GPT-2 级）并校验摘要。
@@ -235,12 +235,12 @@ M0–M3 建立请求生命周期（租约、取消、帧、打断），M4–M8 �
 
 **交付**
 - `DeviceClass`（CPU/GPU/NPU）、`DeviceId`（`cpu:0`、`gpu:cuda:0`、`npu:qnn:0`）、`DeviceInventory`：EP 编译与运行可用性、设备数量、显存/统一内存、带宽、驱动版本；`/v1/models` 返回设备清单。
-- `PlacementPolicy`（auto / pinned / strict）与 `PlacementPlan`：阶段→设备、卸载层数、KV cache 位置、迁移字节、回退清单；计划在加载时冻结并写入 `placement.plan` span。
+- `PlacementPolicy`（auto / pinned / strict）与 `PlacementPlan`：默认 NPU → GPU → CPU，记录阶段→设备、卸载层数、KV cache 位置、迁移字节与 `fallback_reason`；计划在加载时冻结并写入 `placement.plan` span。
 - T1 算子级：ORT EP 分区与 CPU 回退计数；`strict` 下未覆盖算子返回 `PlacementUnsatisfiable`。
 - T2 层与缓存级：Candle 层卸载、KV cache 分层，权重大于显存的模型按预算运行。
 - T3 阶段级：`plakat`、`candle-video`、编排式双工按模块放置（文本编码器 GPU、VAE CPU、ASR NPU）。
 - T4 引擎级：Router 将模态或阶段分配给 `OnnxEngine` 与 `CandleEngine`，token/帧边界交接，事件流与帧协议保持一致。
-- NPU EP：QNN、NNAPI、CoreML（ANE）、OpenVINO、Vitis AI、CANN，各自独立 feature 与启动探测；AMD GPU 走 DirectML（Windows）或 ROCm（Linux）；`supported_devices` 与 `supported_eps` 参与预检。
+- NPU EP：QNN、NNAPI、CoreML（ANE）、OpenVINO、Vitis AI、CANN，各自独立 feature 与启动探测；AMD GPU 走 DirectML（Windows）或 ROCm（Linux）；引擎能力与 `DeviceInventory` 参与预检。
 - 代价模型：`compute + transfer`，prefill 与 decode 分开评分；选择结果可解释并写入基线。
 
 **出口**

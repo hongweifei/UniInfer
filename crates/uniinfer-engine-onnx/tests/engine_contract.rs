@@ -18,7 +18,9 @@ fn engine() -> &'static OnnxEngine {
 
 fn spec(manifest: ModelManifest, base_dir: &Path) -> EngineLoadSpec {
     let inventory = DeviceInventory::probe();
-    let placement = inventory.plan(&manifest).expect("placement");
+    let placement = inventory
+        .plan(&manifest, &[uniinfer_core::DeviceClass::Cpu])
+        .expect("placement");
     EngineLoadSpec {
         manifest,
         base_dir: base_dir.to_path_buf(),

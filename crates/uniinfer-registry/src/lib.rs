@@ -47,9 +47,7 @@ impl EngineRegistry {
         let manifest = ModelManifest::load(manifest_path)?;
         let base_dir = ModelManifest::base_dir(manifest_path);
 
-        let placement = self.inventory.plan(&manifest)?;
-        let engine = self.resolve(&manifest, &placement)?;
-
+        let (engine, placement) = self.resolve(&manifest)?;
         let lease_placement = placement.clone();
         let spec = EngineLoadSpec {
             manifest,
@@ -74,25 +72,13 @@ impl EngineRegistry {
     fn resolve(
         &self,
         manifest: &ModelManifest,
-        placement: &PlacementPlan,
-    ) -> Result<Arc<dyn InferenceEngine>> {
+    ) -> Result<(Arc<dyn InferenceEngine>, PlacementPlan)> {
         let mut saw_format = false;
         let mut saw_quantization = false;
         let mut saw_device = false;
         let mut saw_modality = false;
-        let mut saw_engine = false;
 
         for engine in &self.engines {
-            if !manifest.supported_engines.is_empty()
-                && !manifest
-                    .supported_engines
-                    .iter()
-                    .any(|name| name == engine.engine_name())
-            {
-                continue;
-            }
-            saw_engine = true;
-
             if !engine.supported_formats().contains(&manifest.format) {
                 continue;
             }
@@ -117,29 +103,18 @@ impl EngineRegistry {
                 continue;
             }
 
-            let devices = engine.supported_devices();
-            if !placement
-                .devices
-                .iter()
-                .all(|device| devices.contains(&device.class))
-            {
-                saw_device = true;
-                continue;
+            match self.inventory.plan(manifest, engine.supported_devices()) {
+                Ok(placement) => return Ok((Arc::clone(engine), placement)),
+                Err(EngineError::PlacementUnsatisfiable(reason)) => {
+                    saw_device = true;
+                    tracing::debug!(%reason, "engine placement unavailable");
+                }
+                Err(error) => return Err(error),
             }
-
-            return Ok(Arc::clone(engine));
         }
 
-        if !saw_engine {
-            return Err(EngineError::UnsupportedEngine(
-                manifest.supported_engines.join(","),
-            ));
-        }
         if !saw_format {
             return Err(EngineError::UnsupportedFormat(manifest.format));
-        }
-        if saw_quantization {
-            return Err(EngineError::UnsupportedQuantization(manifest.quantization));
         }
         if saw_modality {
             return Err(EngineError::UnsupportedModality {
@@ -147,16 +122,17 @@ impl EngineRegistry {
                 modality: manifest.modalities[0],
             });
         }
-        if saw_device {
-            return Err(EngineError::PlacementUnsatisfiable(format!(
-                "engine devices do not cover {:?}",
-                placement.devices
-            )));
+        if saw_quantization {
+            return Err(EngineError::UnsupportedQuantization(manifest.quantization));
         }
-        Err(EngineError::UnsupportedEngine(format!(
-            "no engine can serve {:?} {:?}",
-            manifest.format, manifest.modalities
-        )))
+        if saw_device {
+            return Err(EngineError::PlacementUnsatisfiable(
+                "no engine has an available device".into(),
+            ));
+        }
+        Err(EngineError::UnsupportedEngine(
+            "no engine can serve this manifest".into(),
+        ))
     }
 }
 

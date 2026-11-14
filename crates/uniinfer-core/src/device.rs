@@ -78,4 +78,6 @@ pub struct PlacementPlan {
     /// Transformer layers left on CPU, zero for fully resident models.
     pub offload_layers: usize,
     pub kv_cache: KvCachePlacement,
+    /// Why a preference was not honored, e.g. `engine_no_npu`.
+    pub fallback_reason: Option<String>,
 }

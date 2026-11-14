@@ -218,7 +218,7 @@ offload_layers = "auto"
 kv_cache = "auto"
 ```
 
-- `auto`：在内存与带宽预算内选择估算延迟最低的方案；回退附带 `fallback_reason`。
+- `auto`：默认按 NPU → GPU → CPU 选择，在内存与带宽预算内取估算延迟最低的方案；回退附带 `fallback_reason`。
 - `pinned`：清单固定阶段到设备；不可满足时返回 `PlacementUnsatisfiable`。
 - `strict`：算子回退关闭；任何未覆盖算子使加载失败。
 
@@ -226,7 +226,7 @@ kv_cache = "auto"
 
 设备探测项：EP 编译可用性与运行可用性、设备数量、显存/统一内存、PCIe/统一内存带宽、NPU 驱动版本。代价模型按 `compute + transfer` 估算，prefill 与 decode 分别评分；计划在加载时冻结，运行期沿计划内路径降级。
 
-模型清单中的 `supported_engines`、`supported_eps`、`supported_devices`、`min_vram`、`streaming_capable`、`quantization` 与 `placement` 共同决定加载决策。预检失败返回 `PlacementUnsatisfiable` 或对应的 `fallback_reason`。
+模型清单只声明格式、量化、模态、资源需求与放置偏好；设备与 EP 是运行时资源，由 `DeviceInventory` 探测、引擎能力声明决定。注册表为「引擎 × 可用设备」生成放置计划，失败返回 `PlacementUnsatisfiable` 或对应的 `fallback_reason`。
 
 
 ## 10. GUI、移动端与音频 I/O
