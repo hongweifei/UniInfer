@@ -1,0 +1,20 @@
+[package]
+name = "uniinfer-engine-onnx"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+uniinfer-core.workspace = true
+ort.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+uniinfer-devices.workspace = true
+tempfile.workspace = true
+
+[lints]
+workspace = true

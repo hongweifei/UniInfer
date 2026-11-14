@@ -6,7 +6,7 @@
 </p>
 
 <p align="center">
-  <a href="#项目状态"><img src="https://img.shields.io/badge/status-design-blue.svg" alt="Status"></a>
+  <a href="#项目状态"><img src="https://img.shields.io/badge/status-M0-blue.svg" alt="Status"></a>
   <a href="https://www.rust-lang.org"><img src="https://img.shields.io/badge/rust-stable-orange.svg" alt="Rust"></a>
   <a href="#许可证"><img src="https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg" alt="License"></a>
   <a href="docs/DESIGN.md"><img src="https://img.shields.io/badge/docs-design%20%2B%20roadmap-informational.svg" alt="Docs"></a>
@@ -17,7 +17,7 @@
 
 ## 项目状态
 
-**设计阶段。** 架构与里程碑已定稿（[DESIGN](docs/DESIGN.md) · [ROADMAP](docs/ROADMAP.md)），实现从路线图 M0 起推进。下文的能力、接口、命令与清单格式是目标契约，v0.1 发布前保持演进；支持状态以矩阵与路线图门禁为准。
+**M0 已交付。** Trait、Manifest、Registry、ONNX CPU 引擎、字节级文本后端与 CLI 已可运行；契约测试覆盖加载、推理、取消与校验和。后续里程碑按 [ROADMAP](docs/ROADMAP.md) 推进。下文的能力与 REST 接口是目标契约，v0.1 发布前保持演进。
 
 ## 目录
 
@@ -173,8 +173,31 @@ pub trait InferenceEngine: Send + Sync {
 ### 前置条件
 
 - Rust 最新 stable 工具链
-- 一个受支持的模型文件（GGUF、Safetensors 或 ONNX）及其清单
-- CPU、GPU 或 NPU 之一；EP 以编译期 feature 选择，混合推理由放置计划编排
+- M0 自带 `models/tiny-onnx` 固定件；GGUF、Safetensors 与 GPU/NPU 路径随里程碑接入
+- CPU 为 M0 的默认设备；EP 由编译期 feature 选择，混合推理由放置计划编排
+
+### M0：CLI 与 ONNX CPU 路径
+
+设备探测：
+
+```bash
+cargo run -p uniinfer-cli -- devices
+```
+
+一次性生成（固定件把输入字节推进一位，`ab` 生成 `cde`）：
+
+```bash
+cargo run -p uniinfer-cli -- run \
+  --manifest models/tiny-onnx/manifest.toml \
+  --prompt ab \
+  --max-tokens 3
+```
+
+一键冒烟：
+
+```bash
+bash scripts/e2e/m0_smoke.sh
+```
 
 ### 构建
 
@@ -182,7 +205,7 @@ pub trait InferenceEngine: Send + Sync {
 cargo build --release
 ```
 
-按目标平台选择 EP feature：
+按目标平台选择 EP feature（随 M1/M6 接入）：
 
 ```bash
 cargo build --release --features ep-cuda      # NVIDIA GPU
@@ -192,21 +215,13 @@ cargo build --release --features ep-qnn       # Qualcomm NPU
 cargo build --release --features ep-openvino  # Intel GPU / NPU
 ```
 
-设备探测：
-
-```bash
-cargo run -p uniinfer-cli --release -- devices
-```
-
-输出 CPU/GPU/NPU 的设备编号、可用 EP、内存与带宽，以及默认 `PlacementPlan`。
-
-### 启动服务
+### 启动服务（M1 目标接口）
 
 ```bash
 cargo run -p uniinfer-cli --release -- serve --addr 127.0.0.1:8080
 ```
 
-一次性推理：
+GGUF 一次性推理（M4 目标路径）：
 
 ```bash
 cargo run -p uniinfer-cli --release -- run \
@@ -323,6 +338,7 @@ sha256 = "9f8e6c1d0a4b7e2f5c8d1a3b6e9f0c2d4a7b1e8f3c6d9a2b5e0f4c7d1a8b3e6f"  # �
 ## 项目结构
 
 ```
+# 当前 M0 已落地前 5 个；其余随路线图加入
 crates/
   uniinfer-core          # 枚举、Manifest schema、EngineError、Trait
   uniinfer-devices       # DeviceInventory、代价模型、PlacementPlan
@@ -367,7 +383,7 @@ cargo run -p uniinfer-bench --release -- compare --baseline bench/baseline.json
 | 合并 | 预览帧与逐帧视频 | M9 |
 | 扩展 | 移动端、可选引擎与规模化 | M10–M11 |
 
-完整出口门禁、决策门与风险登记见 [ROADMAP](docs/ROADMAP.md)。当前里程碑：**M0 走路骨架**。
+完整出口门禁、决策门与风险登记见 [ROADMAP](docs/ROADMAP.md)。当前进度：**M0 已交付**，下一步 M1 文本服务面。
 
 ## 文档
 
