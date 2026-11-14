@@ -37,6 +37,12 @@
         font: inherit;
         max-width: 320px;
       }
+      #device-strip {
+        padding: 6px 18px;
+        border-bottom: 1px solid var(--border);
+        color: var(--muted);
+        font-size: 12px;
+      }
       #messages {
         flex: 1;
         overflow-y: auto;

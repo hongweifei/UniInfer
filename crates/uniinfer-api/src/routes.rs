@@ -17,6 +17,7 @@ pub fn router(state: AppState) -> Router {
         .route("/health", get(health))
         .route("/metrics", get(metrics))
         .route("/v1/models", get(models))
+        .route("/v1/devices", get(devices))
         .route("/v1/chat/completions", post(chat))
         .route("/v1/realtime", get(realtime))
         .route("/v1/sessions/{id}/cancel", post(cancel))
@@ -60,6 +61,35 @@ async fn models(State(state): State<AppState>) -> Json<Value> {
         })
         .collect::<Vec<_>>();
     Json(json!({"object": "list", "data": data}))
+}
+
+async fn devices(State(state): State<AppState>) -> Json<Value> {
+    let devices = state
+        .runtime
+        .devices()
+        .iter()
+        .map(|device| {
+            json!({
+                "id": device.id,
+                "class": device.class,
+                "backend": device.backend,
+                "memory_bytes": device.memory_bytes,
+            })
+        })
+        .collect::<Vec<_>>();
+    let models = state
+        .slots
+        .values()
+        .map(|slot| {
+            json!({
+                "id": slot.manifest().id,
+                "engine": slot.engine_name(),
+                "placement": slot.placement(),
+                "fallback_reason": slot.placement().fallback_reason,
+            })
+        })
+        .collect::<Vec<_>>();
+    Json(json!({"devices": devices, "models": models}))
 }
 
 async fn cancel(

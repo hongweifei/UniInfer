@@ -217,3 +217,20 @@ async fn lists_and_routes_multiple_models() {
     let body = body_json(response).await;
     assert_eq!(body["choices"][0]["message"]["content"], "cde");
 }
+
+#[tokio::test]
+async fn devices_endpoint_reports_runtime_plan() {
+    let response = app()
+        .oneshot(
+            Request::builder()
+                .uri("/v1/devices")
+                .body(Body::empty())
+                .expect("request"),
+        )
+        .await
+        .expect("response");
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = body_json(response).await;
+    assert!(!body["devices"].as_array().expect("devices").is_empty());
+    assert_eq!(body["models"][0]["fallback_reason"], "engine_no_npu");
+}

@@ -2,6 +2,7 @@ const { invoke } = window.__TAURI__.core;
       const messages = document.getElementById("messages");
       const status = document.getElementById("status");
       const modelSelect = document.getElementById("model");
+      const deviceStrip = document.getElementById("device-strip");
       const form = document.getElementById("composer");
       const input = document.getElementById("input");
       const sendButton = document.getElementById("send");
@@ -55,13 +56,26 @@ const { invoke } = window.__TAURI__.core;
             return option;
           })
         );
+        const inventory = await fetch(`${info.base}/v1/devices`, {
+          headers: authHeaders(),
+        }).then((response) => response.json());
+        const renderDevices = () => {
+          const classes = [...new Set(inventory.devices.map((device) => device.class))];
+          const plan = inventory.models.find((entry) => entry.id === model);
+          const planned = plan?.placement?.devices?.map((device) => device.class) ?? [];
+          const reason = plan?.fallback_reason ? ` · ${plan.fallback_reason}` : "";
+          deviceStrip.textContent =
+            `设备：${classes.join(" / ")} · 计划：${planned.join(" / ") || "pending"}${reason}`;
+        };
         model = body.data[0]?.id ?? null;
         modelSelect.value = model ?? "";
         modelSelect.disabled = body.data.length < 2;
         modelSelect.addEventListener("change", () => {
           model = modelSelect.value;
           status.textContent = model;
+          renderDevices();
         });
+        renderDevices();
         setBusy(false);
         status.textContent = `${model} · ${desktop.manifest}`;
         input.focus();

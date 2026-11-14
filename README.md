@@ -325,6 +325,7 @@ sha256 = "9f8e6c1d0a4b7e2f5c8d1a3b6e9f0c2d4a7b1e8f3c6d9a2b5e0f4c7d1a8b3e6f"  # �
 | `/v1/videos/generations/{id}` | GET | 任务查询 |
 | `/v1/realtime` | WS | 实时会话，当前提供 text 通道 |
 | `/v1/models` | GET | 已加载模型、能力矩阵与放置计划 |
+| `/v1/devices` | GET | 运行时设备清单与各模型放置/回退原因 |
 | `/v1/sessions/{id}/cancel` | POST | 取消生成 |
 
 实时会话以 JSON 文本帧承载控制事件，以 20ms PCM16 二进制帧承载音频：
