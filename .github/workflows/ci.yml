@@ -18,5 +18,5 @@ jobs:
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo test --workspace
       - run: bash scripts/e2e/m1_smoke.sh
-      - run: sha256sum -c models/tiny-onnx/sha256.txt
+      - run: sha256sum -c sha256.txt
         working-directory: models/tiny-onnx
