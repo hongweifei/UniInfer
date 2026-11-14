@@ -354,7 +354,7 @@ crates/
   uniinfer-api           # axum 路由、OpenAI 兼容层、WebSocket
   uniinfer-cli           # 冒烟、清单校验、bench 驱动
   uniinfer-bench         # 场景矩阵与基线对比
-apps/desktop             # Tauri 2（桌面 + 移动）
+apps/desktop             # Tauri 2，独立 workspace
 models/                  # manifest + fetch 脚本 + sha256
 scripts/e2e/             # 里程碑出口脚本
 ```
