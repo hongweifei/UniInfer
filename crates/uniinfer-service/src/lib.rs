@@ -5,7 +5,10 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
-use uniinfer_backends::{ByteTokenizer, HuggingFaceTokenizer, TextGenerator, Tokenizer};
+use uniinfer_backends::{
+    ByteTokenizer, ChatMessage, ChatTemplate, HuggingFaceTokenizer, TextGenerator, Tokenizer,
+    fallback_prompt,
+};
 use uniinfer_core::{Device, EngineError, EngineSession, ModelManifest, PlacementPlan, Result};
 use uniinfer_registry::{EngineRegistry, SessionLease};
 
@@ -47,16 +50,16 @@ impl Runtime {
         let lease = Arc::new(self.registry.load(manifest_path)?);
         let manifest = lease.manifest();
         let tokenizer = manifest.tokenizer.as_deref().unwrap_or_default();
+        let base = manifest_path.parent().map_or_else(
+            || std::path::PathBuf::from("."),
+            std::path::Path::to_path_buf,
+        );
         let tokenizer: Arc<dyn Tokenizer> = match tokenizer {
             "bytes" => Arc::new(ByteTokenizer::new(text.vocab_size)?),
             "hf" => {
                 let file = text.tokenizer_file.as_ref().ok_or_else(|| {
                     EngineError::ManifestInvalid("text.tokenizer_file is required for hf".into())
                 })?;
-                let base = manifest_path.parent().map_or_else(
-                    || std::path::PathBuf::from("."),
-                    std::path::Path::to_path_buf,
-                );
                 Arc::new(HuggingFaceTokenizer::from_file(base.join(file))?)
             }
             other => {
@@ -65,6 +68,16 @@ impl Runtime {
                 )));
             }
         };
+        let chat_template = text
+            .tokenizer_file
+            .as_ref()
+            .map(|file| {
+                ChatTemplate::from_tokenizer_config(
+                    &base.join(file).with_file_name("tokenizer_config.json"),
+                )
+            })
+            .transpose()?
+            .flatten();
         let generator = TextGenerator::new(
             tokenizer,
             text.vocab_size,
@@ -74,6 +87,7 @@ impl Runtime {
 
         Ok(Arc::new(ModelSlot {
             generator,
+            chat_template,
             lease,
             permit: Arc::new(Semaphore::new(1)),
         }))
@@ -84,6 +98,7 @@ impl Runtime {
 pub struct ModelSlot {
     lease: Arc<SessionLease>,
     generator: TextGenerator,
+    chat_template: Option<ChatTemplate>,
     permit: Arc<Semaphore>,
 }
 
@@ -121,6 +136,14 @@ impl ModelSlot {
     #[must_use]
     pub fn try_acquire(&self) -> Option<OwnedSemaphorePermit> {
         Arc::clone(&self.permit).try_acquire_owned().ok()
+    }
+
+    /// Render chat messages with the model template, or the fallback prompt.
+    pub fn render_chat(&self, messages: &[ChatMessage]) -> Result<String> {
+        match &self.chat_template {
+            Some(template) => template.render(messages),
+            None => fallback_prompt(messages),
+        }
     }
 
     /// Count prompt tokens with the slot's tokenizer.

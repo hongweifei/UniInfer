@@ -1,9 +1,11 @@
 //! Tokenization, text generation and realtime audio primitives.
 
 pub mod audio;
+pub mod chat_template;
 pub mod text;
 pub mod tokenizer;
 pub mod utf8;
 
+pub use chat_template::{ChatMessage, ChatTemplate, fallback_prompt};
 pub use text::TextGenerator;
 pub use tokenizer::{ByteTokenizer, HuggingFaceTokenizer, Tokenizer};

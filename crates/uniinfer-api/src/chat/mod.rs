@@ -4,6 +4,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use axum::extract::State;
 use axum::response::Response;
 use serde::Deserialize;
+use uniinfer_backends::ChatMessage as BackendMessage;
 use uniinfer_core::CancelToken;
 use uniinfer_router::PreparedText;
 use uniinfer_service::ModelSlot;
@@ -49,7 +50,21 @@ pub(crate) async fn chat(
     State(state): State<AppState>,
     ApiJson(request): ApiJson<ChatRequest>,
 ) -> Result<Response, ApiError> {
-    let prompt = extract_prompt(&request.messages)?;
+    let slot = state.router.slot(&request.model).ok_or_else(|| {
+        ApiError::not_found(
+            "model_not_found",
+            format!("model {} is not loaded", request.model),
+        )
+    })?;
+    let messages = request
+        .messages
+        .iter()
+        .map(|message| BackendMessage {
+            role: message.role.clone(),
+            content: message.content.clone(),
+        })
+        .collect::<Vec<_>>();
+    let prompt = slot.render_chat(&messages).map_err(ApiError::from)?;
     let prepared = state
         .router
         .prepare_text(&request.model, prompt, request.max_tokens)
@@ -84,27 +99,6 @@ pub(crate) async fn chat(
     } else {
         complete_response(generation).await
     }
-}
-
-pub(super) fn extract_prompt(messages: &[ChatMessage]) -> Result<String, ApiError> {
-    if messages.is_empty() {
-        return Err(ApiError::bad_request(
-            "invalid_request",
-            "messages is empty",
-        ));
-    }
-    let message = messages
-        .iter()
-        .rev()
-        .find(|message| message.role == "user")
-        .unwrap_or_else(|| messages.last().expect("non-empty"));
-    if message.content.is_empty() {
-        return Err(ApiError::bad_request(
-            "invalid_request",
-            "message content is empty",
-        ));
-    }
-    Ok(message.content.clone())
 }
 
 pub(super) fn unix_seconds() -> u64 {
