@@ -7,7 +7,7 @@ use candle_core::{DType, Device, Tensor};
 use candle_nn::VarBuilder;
 use candle_transformers::models::quantized_qwen3::ModelWeights;
 use candle_transformers::models::qwen3::{Config, ModelForCausalLM};
-use uniinfer_core::{EngineError, Quantization, Result};
+use uniinfer_core::{CancelToken, EngineError, Quantization, Result};
 
 pub(crate) const GGUF_QUANTIZATIONS: &[Quantization] = &[
     Quantization::Q4_0,
@@ -51,13 +51,27 @@ impl Model {
     }
 }
 
-pub(crate) fn load_gguf(path: &Path, device: &Device) -> Result<Model> {
-    let mut file = std::fs::File::open(path)
+pub(crate) fn load_gguf(path: &Path, device: &Device, cancel: &CancelToken) -> Result<Model> {
+    let file = std::fs::File::open(path)
         .map_err(|error| EngineError::LoadFailed(format!("open {}: {error}", path.display())))?;
-    let content = gguf_file::Content::read(&mut file)
-        .map_err(|error| EngineError::LoadFailed(format!("gguf metadata: {error}")))?;
-    let model = ModelWeights::from_gguf(content, &mut file, device)
-        .map_err(|error| EngineError::LoadFailed(format!("gguf weights: {error}")))?;
+    let mut file = crate::cancel_io::CancellableReader::new(file, cancel.clone());
+    let content = gguf_file::Content::read(&mut file).map_err(|error| {
+        if cancel.is_cancelled() {
+            EngineError::Cancelled
+        } else {
+            EngineError::LoadFailed(format!("gguf metadata: {error}"))
+        }
+    })?;
+    if cancel.is_cancelled() {
+        return Err(EngineError::Cancelled);
+    }
+    let model = ModelWeights::from_gguf(content, &mut file, device).map_err(|error| {
+        if cancel.is_cancelled() {
+            EngineError::Cancelled
+        } else {
+            EngineError::LoadFailed(format!("gguf weights: {error}"))
+        }
+    })?;
     Ok(Model::Quantized(model))
 }
 
@@ -67,7 +81,11 @@ pub(crate) fn load_safetensors(
     config_path: &Path,
     dtype: DType,
     device: &Device,
+    cancel: &CancelToken,
 ) -> Result<Model> {
+    if cancel.is_cancelled() {
+        return Err(EngineError::Cancelled);
+    }
     let raw = std::fs::read_to_string(config_path)
         .map_err(|error| EngineError::LoadFailed(format!("config: {error}")))?;
     let config: Config = serde_json::from_str(&raw)
@@ -78,7 +96,15 @@ pub(crate) fn load_safetensors(
         .collect::<Vec<_>>();
     let builder = unsafe { VarBuilder::from_mmaped_safetensors(&paths, dtype, device) }
         .map_err(|error| EngineError::LoadFailed(format!("safetensors: {error}")))?;
-    let model = ModelForCausalLM::new(&config, builder)
-        .map_err(|error| EngineError::LoadFailed(format!("qwen3: {error}")))?;
+    let model = ModelForCausalLM::new(&config, builder).map_err(|error| {
+        if cancel.is_cancelled() {
+            EngineError::Cancelled
+        } else {
+            EngineError::LoadFailed(format!("qwen3: {error}"))
+        }
+    })?;
+    if cancel.is_cancelled() {
+        return Err(EngineError::Cancelled);
+    }
     Ok(Model::Dense(model))
 }

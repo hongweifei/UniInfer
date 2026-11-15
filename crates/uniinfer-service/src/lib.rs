@@ -71,9 +71,18 @@ impl Runtime {
 
     /// Load an audio model for transcription.
     pub fn load_audio(&self, manifest_path: &Path) -> Result<Arc<AudioSlot>> {
+        self.load_audio_cancellable(manifest_path, CancelToken::new())
+    }
+
+    /// Load an audio model with cooperative cancellation.
+    pub fn load_audio_cancellable(
+        &self,
+        manifest_path: &Path,
+        cancel: CancelToken,
+    ) -> Result<Arc<AudioSlot>> {
         let manifest = ModelManifest::load(manifest_path)?;
         let base_dir = ModelManifest::base_dir(manifest_path);
-        self.load_audio_manifest(manifest, &base_dir)
+        self.load_audio_manifest_cancellable(manifest, &base_dir, cancel)
     }
 
     /// Load an in-memory audio manifest against a model directory.
@@ -81,6 +90,15 @@ impl Runtime {
         &self,
         manifest: ModelManifest,
         base_dir: &Path,
+    ) -> Result<Arc<AudioSlot>> {
+        self.load_audio_manifest_cancellable(manifest, base_dir, CancelToken::new())
+    }
+
+    pub fn load_audio_manifest_cancellable(
+        &self,
+        manifest: ModelManifest,
+        base_dir: &Path,
+        cancel: CancelToken,
     ) -> Result<Arc<AudioSlot>> {
         if !manifest
             .modalities
@@ -90,15 +108,27 @@ impl Runtime {
                 "audio runtime requires the audio modality".into(),
             ));
         }
-        let lease = Arc::new(self.registry.load_manifest(manifest, base_dir)?);
+        let lease = Arc::new(
+            self.registry
+                .load_manifest_with_cancel(manifest, base_dir, cancel)?,
+        );
         Ok(Arc::new(AudioSlot::new(lease)?))
     }
 
     /// Load one model and validate the text-generation contract.
     pub fn load(&self, manifest_path: &Path) -> Result<Arc<ModelSlot>> {
+        self.load_cancellable(manifest_path, CancelToken::new())
+    }
+
+    /// Load a text model with cooperative cancellation.
+    pub fn load_cancellable(
+        &self,
+        manifest_path: &Path,
+        cancel: CancelToken,
+    ) -> Result<Arc<ModelSlot>> {
         let manifest = ModelManifest::load(manifest_path)?;
         let base_dir = ModelManifest::base_dir(manifest_path);
-        self.load_manifest(manifest, &base_dir)
+        self.load_manifest_cancellable(manifest, &base_dir, cancel)
     }
 
     /// Load an in-memory text manifest against a model directory.
@@ -107,6 +137,15 @@ impl Runtime {
         manifest: ModelManifest,
         base_dir: &Path,
     ) -> Result<Arc<ModelSlot>> {
+        self.load_manifest_cancellable(manifest, base_dir, CancelToken::new())
+    }
+
+    pub fn load_manifest_cancellable(
+        &self,
+        manifest: ModelManifest,
+        base_dir: &Path,
+        cancel: CancelToken,
+    ) -> Result<Arc<ModelSlot>> {
         // Backend dispatch is still text-only. Check before loading a session
         // so non-text manifests fail without allocating model weights.
         let text = manifest.text.clone().ok_or_else(|| {
@@ -114,7 +153,10 @@ impl Runtime {
                 "runtime currently supports text models; manifest has no [text] section".into(),
             )
         })?;
-        let lease = Arc::new(self.registry.load_manifest(manifest, base_dir)?);
+        let lease = Arc::new(
+            self.registry
+                .load_manifest_with_cancel(manifest, base_dir, cancel)?,
+        );
         let manifest = lease.manifest();
         let tokenizer = manifest.tokenizer.as_deref().unwrap_or_default();
         let base = base_dir.to_path_buf();

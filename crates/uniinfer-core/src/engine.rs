@@ -1,5 +1,6 @@
 use std::path::PathBuf;
 
+use crate::cancel::CancelToken;
 use crate::device::{DeviceBudget, DeviceClass, PlacementPlan};
 use crate::error::Result;
 use crate::manifest::{Modality, ModelFormat, ModelManifest, Quantization};
@@ -21,6 +22,8 @@ pub struct EngineLoadSpec {
     pub base_dir: PathBuf,
     pub placement: PlacementPlan,
     pub budget: DeviceBudget,
+    /// Cooperative cancellation checked by engines during load.
+    pub cancel: CancelToken,
 }
 
 /// A loaded model session.

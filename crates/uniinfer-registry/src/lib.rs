@@ -5,8 +5,8 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use uniinfer_core::{
-    EngineError, EngineLoadSpec, EngineSession, InferenceEngine, ModelManifest, PlacementPlan,
-    Result,
+    CancelToken, EngineError, EngineLoadSpec, EngineSession, InferenceEngine, ModelManifest,
+    PlacementPlan, Result,
 };
 use uniinfer_devices::DeviceInventory;
 
@@ -68,6 +68,16 @@ impl EngineRegistry {
     /// Load a manifest that was produced in memory (for example by the
     /// inspector) without requiring a manifest file on disk.
     pub fn load_manifest(&self, manifest: ModelManifest, base_dir: &Path) -> Result<SessionLease> {
+        self.load_manifest_with_cancel(manifest, base_dir, CancelToken::new())
+    }
+
+    /// Load with a cooperative cancellation token shared with the engine.
+    pub fn load_manifest_with_cancel(
+        &self,
+        manifest: ModelManifest,
+        base_dir: &Path,
+        cancel: CancelToken,
+    ) -> Result<SessionLease> {
         let (engine, placement) = self.resolve(&manifest)?;
         let lease_placement = placement.clone();
         let spec = EngineLoadSpec {
@@ -75,6 +85,7 @@ impl EngineRegistry {
             base_dir: base_dir.to_path_buf(),
             placement,
             budget: self.inventory.budget(),
+            cancel,
         };
         let engine_name = engine.engine_name().to_owned();
         let manifest = spec.manifest.clone();

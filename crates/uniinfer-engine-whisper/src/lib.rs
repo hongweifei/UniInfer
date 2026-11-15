@@ -101,6 +101,9 @@ impl InferenceEngine for WhisperEngine {
         if spec.manifest.format != ModelFormat::Ggml {
             return Err(EngineError::UnsupportedFormat(spec.manifest.format));
         }
+        if spec.cancel.is_cancelled() {
+            return Err(EngineError::Cancelled);
+        }
         let file = spec
             .manifest
             .files
@@ -114,7 +117,16 @@ impl InferenceEngine for WhisperEngine {
             .ok_or_else(|| EngineError::ManifestInvalid("files is empty".into()))?;
         let path = spec.base_dir.join(&file.path);
         let context = WhisperContext::new_with_params(&path, WhisperContextParameters::default())
-            .map_err(|error| load_error(&path, error))?;
+            .map_err(|error| {
+            if spec.cancel.is_cancelled() {
+                EngineError::Cancelled
+            } else {
+                load_error(&path, error)
+            }
+        })?;
+        if spec.cancel.is_cancelled() {
+            return Err(EngineError::Cancelled);
+        }
         let audio = spec.manifest.audio.clone().unwrap_or_default();
         Ok(Box::new(WhisperSession::new(
             Arc::new(context),

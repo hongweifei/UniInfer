@@ -2,7 +2,8 @@ use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
 
 use uniinfer_core::{
-    DeviceBudget, EngineError, EngineLoadSpec, InferenceEngine, ModelManifest, Tensor, TensorData,
+    CancelToken, DeviceBudget, EngineError, EngineLoadSpec, InferenceEngine, ModelManifest, Tensor,
+    TensorData,
 };
 use uniinfer_devices::DeviceInventory;
 use uniinfer_engine_onnx::OnnxEngine;
@@ -26,6 +27,7 @@ fn spec(manifest: ModelManifest, base_dir: &Path) -> EngineLoadSpec {
         base_dir: base_dir.to_path_buf(),
         placement,
         budget: DeviceBudget::default(),
+        cancel: CancelToken::new(),
     }
 }
 

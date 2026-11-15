@@ -175,6 +175,9 @@ impl InferenceEngine for LlamaEngine {
                 ));
             }
         }
+        if spec.cancel.is_cancelled() {
+            return Err(EngineError::Cancelled);
+        }
         spec.manifest.verify_files(&spec.base_dir)?;
         let text = spec
             .manifest
@@ -194,9 +197,16 @@ impl InferenceEngine for LlamaEngine {
         }
         let model = Arc::new(
             LlamaModel::load_from_file(&self.backend, &path, &params).map_err(|error| {
-                EngineError::LoadFailed(format!("llama model {}: {error}", path.display()))
+                if spec.cancel.is_cancelled() {
+                    EngineError::Cancelled
+                } else {
+                    EngineError::LoadFailed(format!("llama model {}: {error}", path.display()))
+                }
             })?,
         );
+        if spec.cancel.is_cancelled() {
+            return Err(EngineError::Cancelled);
+        }
         let vocab = match usize::try_from(model.n_vocab()) {
             Ok(0) | Err(_) => {
                 return Err(EngineError::LoadFailed(

@@ -4,7 +4,7 @@ use std::sync::{Arc, Mutex};
 
 use tokio::sync::Mutex as AsyncMutex;
 use uniinfer_config::ConfigHandle;
-use uniinfer_core::{EngineError, Modality, ModelManifest, Result};
+use uniinfer_core::{CancelToken, EngineError, Modality, ModelManifest, Result};
 use uniinfer_service::{AudioSlot, ModelSlot, Runtime};
 
 use crate::api_config::ApiConfig;
@@ -111,8 +111,11 @@ impl AppState {
         }
         let runtime = Arc::clone(&self.runtime);
         let path = entry.path;
-        let task = tokio::task::spawn_blocking(move || runtime.load(&path));
-        let slot = self.await_load(task).await?;
+        let cancel = CancelToken::new();
+        let task_cancel = cancel.clone();
+        let task =
+            tokio::task::spawn_blocking(move || runtime.load_cancellable(&path, task_cancel));
+        let slot = self.await_load(task, cancel).await?;
         self.router.insert_slot(id, Arc::clone(&slot))?;
         Ok(slot)
     }
@@ -145,8 +148,11 @@ impl AppState {
         }
         let runtime = Arc::clone(&self.runtime);
         let path = entry.path;
-        let task = tokio::task::spawn_blocking(move || runtime.load_audio(&path));
-        let slot = self.await_load(task).await?;
+        let cancel = CancelToken::new();
+        let task_cancel = cancel.clone();
+        let task =
+            tokio::task::spawn_blocking(move || runtime.load_audio_cancellable(&path, task_cancel));
+        let slot = self.await_load(task, cancel).await?;
         self.audio_slots
             .lock()
             .map_err(|_| EngineError::Other("audio catalog lock poisoned".into()))?
@@ -180,11 +186,19 @@ impl AppState {
         }
     }
 
-    async fn await_load<T>(&self, task: tokio::task::JoinHandle<Result<T>>) -> Result<T> {
+    async fn await_load<T>(
+        &self,
+        task: tokio::task::JoinHandle<Result<T>>,
+        cancel: CancelToken,
+    ) -> Result<T> {
         let joined = match self.model_load_timeout {
-            Some(timeout) => tokio::time::timeout(timeout, task)
-                .await
-                .map_err(|_| EngineError::Timeout)?,
+            Some(timeout) => match tokio::time::timeout(timeout, task).await {
+                Ok(joined) => joined,
+                Err(_) => {
+                    cancel.cancel();
+                    return Err(EngineError::Timeout);
+                }
+            },
             None => task.await,
         };
         joined.map_err(|error| EngineError::Other(format!("model load task: {error}")))?
@@ -212,5 +226,59 @@ impl AppState {
             .filter(|(_, entry)| entry.audio_only)
             .map(|(id, _)| id.clone())
             .collect()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn state(model_load_timeout: std::time::Duration) -> AppState {
+        let manifest =
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../models/tiny-onnx/manifest.toml");
+        let mut config = ApiConfig::new(manifest);
+        config.model_load_timeout = model_load_timeout;
+        AppState::new(&config).expect("state")
+    }
+
+    fn slow_load() -> tokio::task::JoinHandle<Result<()>> {
+        tokio::task::spawn_blocking(|| {
+            std::thread::sleep(std::time::Duration::from_millis(200));
+            Ok(())
+        })
+    }
+
+    #[tokio::test]
+    async fn load_past_deadline_returns_timeout_and_cancels_task() {
+        let state = state(std::time::Duration::from_millis(5));
+        let cancel = CancelToken::new();
+        let error = state
+            .await_load(slow_load(), cancel.clone())
+            .await
+            .expect_err("timeout");
+        assert!(matches!(error, EngineError::Timeout));
+        assert!(cancel.is_cancelled());
+    }
+
+    #[tokio::test]
+    async fn load_within_deadline_returns_value() {
+        let state = state(std::time::Duration::from_secs(5));
+        let cancel = CancelToken::new();
+        state
+            .await_load(slow_load(), cancel.clone())
+            .await
+            .expect("load");
+        assert!(!cancel.is_cancelled());
+    }
+
+    #[tokio::test]
+    async fn zero_deadline_never_times_out() {
+        let state = state(std::time::Duration::ZERO);
+        let cancel = CancelToken::new();
+        state
+            .await_load(slow_load(), cancel.clone())
+            .await
+            .expect("load");
+        assert!(!cancel.is_cancelled());
     }
 }

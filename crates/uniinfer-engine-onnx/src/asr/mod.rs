@@ -17,6 +17,9 @@ pub(crate) fn load(
     spec: &EngineLoadSpec,
     class: DeviceClass,
 ) -> Result<Box<dyn EngineSession>> {
+    if spec.cancel.is_cancelled() {
+        return Err(EngineError::Cancelled);
+    }
     let audio = spec
         .manifest
         .audio

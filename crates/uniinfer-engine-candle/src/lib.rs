@@ -1,5 +1,6 @@
 //! Candle engine for Qwen3 GGUF and Safetensors models.
 
+mod cancel_io;
 mod qwen3;
 
 use std::sync::Mutex;
@@ -136,6 +137,9 @@ impl InferenceEngine for CandleEngine {
             )));
         }
         let device = device_for(class)?;
+        if spec.cancel.is_cancelled() {
+            return Err(EngineError::Cancelled);
+        }
         spec.manifest.verify_files(&spec.base_dir)?;
 
         let text = spec
@@ -156,7 +160,7 @@ impl InferenceEngine for CandleEngine {
                     .files
                     .first()
                     .ok_or_else(|| EngineError::ManifestInvalid("files is empty".into()))?;
-                qwen3::load_gguf(&spec.base_dir.join(&model_file.path), &device)?
+                qwen3::load_gguf(&spec.base_dir.join(&model_file.path), &device, &spec.cancel)?
             }
             ModelFormat::Safetensors => {
                 let config_file = text.config_file.as_ref().ok_or_else(|| {
@@ -182,11 +186,20 @@ impl InferenceEngine for CandleEngine {
                     Quantization::Fp16 => DType::F16,
                     _ => DType::F32,
                 };
-                qwen3::load_safetensors(&shards, &spec.base_dir.join(config_file), dtype, &device)?
+                qwen3::load_safetensors(
+                    &shards,
+                    &spec.base_dir.join(config_file),
+                    dtype,
+                    &device,
+                    &spec.cancel,
+                )?
             }
             _ => unreachable!(),
         };
 
+        if spec.cancel.is_cancelled() {
+            return Err(EngineError::Cancelled);
+        }
         let vocab = text.vocab_size;
         if vocab == 0 {
             return Err(EngineError::ManifestInvalid(

@@ -174,6 +174,9 @@ impl InferenceEngine for OnnxEngine {
     }
 
     fn load_session(&self, spec: EngineLoadSpec) -> Result<Box<dyn EngineSession>> {
+        if spec.cancel.is_cancelled() {
+            return Err(EngineError::Cancelled);
+        }
         if spec.manifest.format != ModelFormat::Onnx {
             return Err(EngineError::UnsupportedFormat(spec.manifest.format));
         }
@@ -217,6 +220,9 @@ impl InferenceEngine for OnnxEngine {
         }
 
         let session = build_session(&self.environment, class, &model_path)?;
+        if spec.cancel.is_cancelled() {
+            return Err(EngineError::Cancelled);
+        }
 
         let genai_config = load_genai_config(&spec.base_dir)?;
         if let Some(config) = genai_config {
@@ -232,6 +238,9 @@ impl InferenceEngine for OnnxEngine {
                 genai = true,
                 "onnx genai session loaded"
             );
+            if spec.cancel.is_cancelled() {
+                return Err(EngineError::Cancelled);
+            }
             return Ok(Box::new(GenaiOnnxSession::new(graph, genai)?));
         }
 
@@ -244,6 +253,9 @@ impl InferenceEngine for OnnxEngine {
             genai = false,
             "onnx session loaded"
         );
+        if spec.cancel.is_cancelled() {
+            return Err(EngineError::Cancelled);
+        }
         Ok(Box::new(PlainOnnxSession::new(graph)))
     }
 }
