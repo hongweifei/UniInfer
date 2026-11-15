@@ -429,7 +429,7 @@ curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:8080/v1/images/generat
 cargo run -p uniinfer-desktop
 ```
 
-应用在进程内启动 loopback API（随机端口 + bearer token），窗口通过 Tauri command 获取地址与 token。服务端读取 `UNIINFER_CONFIG` 指定的持久配置；未设置时使用工作目录下的 `uniinfer.toml`，并以 `UNIINFER_MANIFEST` / `UNIINFER_MANIFESTS`（分号分隔）作为初始模型列表。首次启动会把随机 token 写入配置，后续复用；`GET/PUT /v1/config` 可读写同一份配置。使用 WebView2，Windows 11 已内置。
+应用在进程内启动 loopback API（随机端口 + bearer token），窗口通过 Tauri command 获取地址与 token。服务端读取 `UNIINFER_CONFIG` 指定的持久配置；未设置时使用工作目录下的 `uniinfer.toml`，并以 `UNIINFER_MANIFEST` / `UNIINFER_MANIFESTS`（分号分隔）作为初始模型列表。首次启动会把随机 token 写入配置，后续复用；设置面板通过 `GET/PUT /v1/config` 读写同一份配置，并可调用 `/v1/models/inspect` 与 `/v1/models/import` 导入模型。保存配置或导入模型后需重启服务。使用 WebView2，Windows 11 已内置。
 
 ## 模型清单
 

@@ -94,3 +94,48 @@
       }
       button.secondary { background: transparent; color: var(--text); }
       button:disabled { opacity: .45; cursor: default; }
+      dialog {
+        width: min(760px, 92vw);
+        max-height: 86vh;
+        overflow: auto;
+        background: var(--bg);
+        color: var(--text);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        padding: 18px;
+      }
+      dialog::backdrop { background: rgba(0, 0, 0, .62); }
+      .settings-head, .settings-actions {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+      .settings-head { justify-content: space-between; }
+      .settings-actions { flex-wrap: wrap; }
+      .settings-meta { color: var(--muted); font-size: 12px; }
+      #config-json {
+        width: 100%;
+        min-height: 260px;
+        resize: vertical;
+        font: 12px/1.5 ui-monospace, SFMono-Regular, Consolas, monospace;
+      }
+      #model-path {
+        flex: 1;
+        min-width: 240px;
+        padding: 9px 11px;
+        color: var(--text);
+        background: var(--panel);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        font: inherit;
+      }
+      .settings-result {
+        max-height: 220px;
+        overflow: auto;
+        padding: 10px;
+        background: var(--panel);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        font: 12px/1.45 ui-monospace, SFMono-Regular, Consolas, monospace;
+        white-space: pre-wrap;
+      }

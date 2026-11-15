@@ -78,6 +78,7 @@ const { invoke } = window.__TAURI__.core;
         renderDevices();
         setBusy(false);
         status.textContent = `${model} · ${desktop.manifest}`;
+        window.mountSettings?.({ info, authHeaders });
         input.focus();
       }
 
