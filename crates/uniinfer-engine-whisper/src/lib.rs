@@ -12,7 +12,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use uniinfer_core::{
     Device, DeviceClass, EngineError, EngineLoadSpec, EngineSession, InferenceEngine, Modality,
-    ModelFormat, Quantization, Result, Tensor, TensorData, TensorDtype, TensorSpec,
+    ModelFormat, ModelManifest, Quantization, Result, Tensor, TensorData, TensorDtype, TensorSpec,
 };
 use whisper_rs::{
     FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters, WhisperError,
@@ -76,6 +76,17 @@ impl InferenceEngine for WhisperEngine {
 
     fn supported_devices(&self) -> &[DeviceClass] {
         DEVICES
+    }
+
+    fn supports_architecture(&self, manifest: &ModelManifest) -> bool {
+        manifest.modalities.contains(&Modality::Audio)
+            && matches!(
+                manifest
+                    .audio
+                    .as_ref()
+                    .and_then(|audio| audio.architecture.as_deref()),
+                None | Some("whisper")
+            )
     }
 
     fn load_session(&self, spec: EngineLoadSpec) -> Result<Box<dyn EngineSession>> {

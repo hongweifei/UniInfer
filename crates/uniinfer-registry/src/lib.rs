@@ -90,6 +90,7 @@ impl EngineRegistry {
         manifest: &ModelManifest,
     ) -> Result<(Arc<dyn InferenceEngine>, PlacementPlan)> {
         let mut saw_format = false;
+        let mut saw_architecture = false;
         let mut saw_quantization = false;
         let mut saw_device = false;
         let mut saw_modality = false;
@@ -99,6 +100,15 @@ impl EngineRegistry {
                 continue;
             }
             saw_format = true;
+
+            if !engine.supports_architecture(manifest) {
+                saw_architecture = true;
+                tracing::debug!(
+                    architecture = manifest.architecture().unwrap_or("<none>"),
+                    "engine does not support architecture"
+                );
+                continue;
+            }
 
             let modalities = engine.supported_modalities(manifest.format);
             if let Some(missing) = manifest
@@ -131,6 +141,12 @@ impl EngineRegistry {
 
         if !saw_format {
             return Err(EngineError::UnsupportedFormat(manifest.format));
+        }
+        if saw_architecture {
+            return Err(EngineError::UnsupportedArchitecture {
+                format: manifest.format,
+                architecture: manifest.architecture().unwrap_or("<unknown>").to_owned(),
+            });
         }
         if saw_modality {
             return Err(EngineError::UnsupportedModality {

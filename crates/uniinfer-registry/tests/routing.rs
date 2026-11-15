@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use uniinfer_core::{
     DeviceClass, EngineError, EngineLoadSpec, EngineSession, InferenceEngine, Modality,
     ModelFormat, ModelManifest, PlacementConfig, PlacementPolicy, Quantization, Result, Tensor,
-    TensorData, TensorSpec,
+    TensorData, TensorSpec, TextConfig,
 };
 use uniinfer_devices::DeviceInventory;
 use uniinfer_registry::EngineRegistry;
@@ -35,6 +35,14 @@ impl InferenceEngine for FakeEngine {
 
     fn supported_devices(&self) -> &[DeviceClass] {
         &[DeviceClass::Cpu]
+    }
+
+    fn supports_architecture(&self, manifest: &ModelManifest) -> bool {
+        manifest
+            .text
+            .as_ref()
+            .and_then(|text| text.family.as_deref())
+            != Some("unsupported")
     }
 
     fn load_session(&self, _spec: EngineLoadSpec) -> Result<Box<dyn EngineSession>> {
@@ -131,6 +139,22 @@ fn rejects_unsupported_quantization() {
     let path = write_manifest(temp.path(), &manifest);
     let error = registry().load(&path).err().expect("must reject");
     assert!(matches!(error, EngineError::UnsupportedQuantization(_)));
+}
+
+#[test]
+fn rejects_unsupported_architecture() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let mut manifest = manifest();
+    manifest.text = Some(TextConfig {
+        vocab_size: 1,
+        eos_token: None,
+        family: Some("unsupported".into()),
+        config_file: None,
+        tokenizer_file: None,
+    });
+    let path = write_manifest(temp.path(), &manifest);
+    let error = registry().load(&path).err().expect("must reject");
+    assert!(matches!(error, EngineError::UnsupportedArchitecture { .. }));
 }
 
 #[test]

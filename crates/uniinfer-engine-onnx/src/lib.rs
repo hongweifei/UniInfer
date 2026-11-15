@@ -7,7 +7,7 @@ use ort::environment::Environment;
 use ort::session::Session;
 use uniinfer_core::{
     Device, DeviceClass, EngineError, EngineLoadSpec, EngineSession, InferenceEngine, Modality,
-    ModelFormat, Quantization, Result,
+    ModelFormat, ModelManifest, Quantization, Result,
 };
 
 mod asr;
@@ -158,6 +158,19 @@ impl InferenceEngine for OnnxEngine {
 
     fn supported_devices(&self) -> &[DeviceClass] {
         &DEVICES
+    }
+
+    fn supports_architecture(&self, manifest: &ModelManifest) -> bool {
+        if !manifest.modalities.contains(&Modality::Audio) {
+            return true;
+        }
+        matches!(
+            manifest
+                .audio
+                .as_ref()
+                .and_then(|audio| audio.architecture.as_deref()),
+            None | Some("whisper" | "ctc")
+        )
     }
 
     fn load_session(&self, spec: EngineLoadSpec) -> Result<Box<dyn EngineSession>> {

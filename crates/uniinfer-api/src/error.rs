@@ -69,6 +69,7 @@ impl From<uniinfer_core::EngineError> for ApiError {
             EngineError::UnsupportedFormat(_)
             | EngineError::UnsupportedQuantization(_)
             | EngineError::UnsupportedEngine(_)
+            | EngineError::UnsupportedArchitecture { .. }
             | EngineError::UnsupportedModality { .. }
             | EngineError::ManifestInvalid(_)
             | EngineError::InvalidAudio(_) => StatusCode::BAD_REQUEST,

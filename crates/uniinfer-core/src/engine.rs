@@ -59,6 +59,14 @@ pub trait InferenceEngine: Send + Sync {
 
     fn supported_devices(&self) -> &[DeviceClass];
 
+    /// Whether this engine implements the manifest's model family/architecture.
+    ///
+    /// Engines with a generic graph contract return true; model-family engines
+    /// override this so routing fails before loading weights.
+    fn supports_architecture(&self, _manifest: &ModelManifest) -> bool {
+        true
+    }
+
     fn capabilities(&self) -> EngineCapabilities {
         let formats = self.supported_formats().to_vec();
         let modalities = formats

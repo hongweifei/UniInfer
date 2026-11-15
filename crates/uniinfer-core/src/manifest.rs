@@ -357,6 +357,15 @@ impl ModelManifest {
         Ok(())
     }
 
+    /// Model-family hint used by engine architecture capability checks.
+    #[must_use]
+    pub fn architecture(&self) -> Option<&str> {
+        self.audio
+            .as_ref()
+            .and_then(|audio| audio.architecture.as_deref())
+            .or_else(|| self.text.as_ref().and_then(|text| text.family.as_deref()))
+    }
+
     /// Verify every listed weight file against its digest.
     pub fn verify_files(&self, base_dir: &Path) -> Result<()> {
         for file in &self.files {

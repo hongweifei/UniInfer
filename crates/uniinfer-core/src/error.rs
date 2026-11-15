@@ -11,6 +11,11 @@ pub enum EngineError {
     UnsupportedQuantization(Quantization),
     #[error("unsupported engine: {0}")]
     UnsupportedEngine(String),
+    #[error("unsupported architecture {architecture} for format {format}")]
+    UnsupportedArchitecture {
+        format: ModelFormat,
+        architecture: String,
+    },
     #[error("unsupported modality {modality:?} for format {format}")]
     UnsupportedModality {
         format: ModelFormat,
@@ -48,6 +53,7 @@ impl EngineError {
             Self::UnsupportedFormat(_) => "unsupported_format",
             Self::UnsupportedQuantization(_) => "unsupported_quantization",
             Self::UnsupportedEngine(_) => "unsupported_engine",
+            Self::UnsupportedArchitecture { .. } => "unsupported_architecture",
             Self::UnsupportedModality { .. } => "unsupported_modality",
             Self::InputTooLong { .. } => "input_too_long",
             Self::MissingEp(_) => "missing_ep",
