@@ -18,8 +18,8 @@ mod io;
 mod session;
 
 use genai::{GenaiSpec, GenaiState, load_genai_config};
-use io::convert_specs;
-use session::{OnnxSession, OnnxState};
+use graph::Graph;
+use session::{OnnxSession, OnnxState, PlainOnnxSession};
 
 const FORMATS: &[ModelFormat] = &[ModelFormat::Onnx];
 static DEVICES: LazyLock<Vec<DeviceClass>> = LazyLock::new(|| {
@@ -207,39 +207,40 @@ impl InferenceEngine for OnnxEngine {
         let session = build_session(&self.environment, class, &model_path)?;
 
         let genai_config = load_genai_config(&spec.base_dir)?;
-        let (inputs, outputs, genai) = match genai_config {
-            Some(config) => {
-                let genai = GenaiSpec::from_config(&config, &session)?;
-                let inputs = genai.input_specs(&session)?;
-                let outputs = genai.output_specs(&session)?;
-                (inputs, outputs, Some(genai))
-            }
-            None => (
-                convert_specs(session.inputs(), "input")?,
-                convert_specs(session.outputs(), "output")?,
-                None,
-            ),
-        };
+        if let Some(config) = genai_config {
+            let genai = GenaiSpec::from_config(&config, &session)?;
+            let inputs = genai.input_specs(&session)?;
+            let outputs = genai.output_specs(&session)?;
+            tracing::debug!(
+                model = %spec.manifest.id,
+                path = %model_path.display(),
+                inputs = inputs.len(),
+                outputs = outputs.len(),
+                genai = true,
+                "onnx genai session loaded"
+            );
+            return Ok(Box::new(OnnxSession {
+                state: Mutex::new(OnnxState {
+                    session,
+                    genai: Some(GenaiState::new(genai)),
+                }),
+                inputs,
+                outputs,
+                cancelled: AtomicBool::new(false),
+                active: Mutex::new(None),
+            }));
+        }
 
+        let graph = Graph::from_session(session, "onnx")?;
         tracing::debug!(
             model = %spec.manifest.id,
             path = %model_path.display(),
-            inputs = inputs.len(),
-            outputs = outputs.len(),
-            genai = genai.is_some(),
+            inputs = graph.inputs().len(),
+            outputs = graph.outputs().len(),
+            genai = false,
             "onnx session loaded"
         );
-
-        Ok(Box::new(OnnxSession {
-            state: Mutex::new(OnnxState {
-                session,
-                genai: genai.map(GenaiState::new),
-            }),
-            inputs,
-            outputs,
-            cancelled: AtomicBool::new(false),
-            active: Mutex::new(None),
-        }))
+        Ok(Box::new(PlainOnnxSession::new(graph)))
     }
 }
 

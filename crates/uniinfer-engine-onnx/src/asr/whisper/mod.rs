@@ -16,7 +16,7 @@ use uniinfer_core::{
     TensorDtype, TensorSpec,
 };
 
-use crate::graph::Graph;
+use crate::graph::{Graph, GraphCanceller};
 
 use self::cache::{run_decoder, run_with_past};
 use self::config::{WhisperConfig, options};
@@ -51,6 +51,14 @@ pub(crate) fn load(
             })
         })
         .transpose()?;
+    let cancels = [
+        Some(encoder.canceller()),
+        Some(decoder.canceller()),
+        decoder_with_past.as_ref().map(Graph::canceller),
+    ]
+    .into_iter()
+    .flatten()
+    .collect::<Vec<_>>();
     let tokenizer = Tokenizer::from_file(&tokenizer_file)
         .map_err(|error| EngineError::LoadFailed(format!("tokenizer: {error}")))?;
     let config = WhisperConfig::load(&config_file)?;
@@ -85,6 +93,7 @@ pub(crate) fn load(
             shape: vec![None],
         }],
         cancelled: AtomicBool::new(false),
+        cancels,
     })
 }
 
@@ -95,6 +104,7 @@ pub(crate) struct WhisperOnnxSession {
     inputs: Vec<TensorSpec>,
     outputs: Vec<TensorSpec>,
     cancelled: AtomicBool,
+    cancels: Vec<GraphCanceller>,
 }
 
 struct WhisperState {
@@ -143,6 +153,9 @@ impl EngineSession for WhisperOnnxSession {
 
     fn cancel(&self) {
         self.cancelled.store(true, Ordering::SeqCst);
+        for cancel in &self.cancels {
+            cancel.cancel();
+        }
     }
 }
 

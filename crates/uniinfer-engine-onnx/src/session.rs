@@ -4,15 +4,57 @@ use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use ort::session::{NoSelectedOutputs, RunOptions, Session};
-use ort::value::DynValue;
 use uniinfer_core::{EngineError, EngineSession, Result, Tensor, TensorSpec};
 
 use crate::genai::{GenaiState, run_genai};
-use crate::io::{from_ort, to_ort};
+use crate::graph::{Graph, GraphCanceller};
 
 pub(crate) struct OnnxState {
     pub(crate) session: Session,
     pub(crate) genai: Option<GenaiState>,
+}
+
+/// Ordinary single-graph ONNX session backed by the shared `Graph` layer.
+pub(crate) struct PlainOnnxSession {
+    graph: Mutex<Graph>,
+    cancel_handle: GraphCanceller,
+    inputs: Vec<TensorSpec>,
+    outputs: Vec<TensorSpec>,
+}
+
+impl PlainOnnxSession {
+    pub(crate) fn new(graph: Graph) -> Self {
+        let inputs = graph.inputs().to_vec();
+        let outputs = graph.outputs().to_vec();
+        let cancel_handle = graph.canceller();
+        Self {
+            graph: Mutex::new(graph),
+            cancel_handle,
+            inputs,
+            outputs,
+        }
+    }
+}
+
+impl EngineSession for PlainOnnxSession {
+    fn inputs(&self) -> &[TensorSpec] {
+        &self.inputs
+    }
+
+    fn outputs(&self) -> &[TensorSpec] {
+        &self.outputs
+    }
+
+    fn run(&self, inputs: Vec<Tensor>) -> Result<Vec<Tensor>> {
+        self.graph
+            .lock()
+            .map_err(|_| EngineError::Other("graph lock poisoned".into()))?
+            .run(inputs)
+    }
+
+    fn cancel(&self) {
+        self.cancel_handle.cancel();
+    }
 }
 
 pub(crate) struct OnnxSession {
@@ -73,47 +115,7 @@ impl EngineSession for OnnxSession {
             .state
             .lock()
             .map_err(|_| EngineError::Other("session lock poisoned".into()))?;
-        if state.genai.is_some() {
-            return run_genai(&mut state, &inputs, &active.options, &self.cancelled);
-        }
-
-        let mut values: Vec<(String, DynValue)> = Vec::with_capacity(inputs.len());
-        for input in inputs {
-            if !self.inputs.iter().any(|spec| spec.name == input.name) {
-                return Err(EngineError::Other(format!(
-                    "unknown input tensor {}",
-                    input.name
-                )));
-            }
-            values.push((input.name.clone(), to_ort(input)?));
-        }
-
-        for spec in &self.inputs {
-            if !values.iter().any(|(name, _)| name == &spec.name) {
-                return Err(EngineError::Other(format!(
-                    "missing input tensor {}",
-                    spec.name
-                )));
-            }
-        }
-
-        let OnnxState { session, .. } = &mut *state;
-        let outputs = session
-            .run_with_options(values, &active.options)
-            .map_err(|error| {
-                if self.cancelled.load(Ordering::SeqCst) {
-                    EngineError::Cancelled
-                } else {
-                    EngineError::Other(format!("onnx run: {error}"))
-                }
-            })?;
-
-        let mut result = Vec::with_capacity(self.outputs.len());
-        for spec in &self.outputs {
-            let value = &outputs[spec.name.as_str()];
-            result.push(from_ort(spec, value)?);
-        }
-        Ok(result)
+        run_genai(&mut state, &inputs, &active.options, &self.cancelled)
     }
 
     fn cancel(&self) {

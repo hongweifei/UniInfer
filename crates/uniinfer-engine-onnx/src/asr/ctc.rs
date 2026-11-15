@@ -16,7 +16,7 @@ use uniinfer_core::{
     TensorDtype, TensorSpec,
 };
 
-use crate::graph::Graph;
+use crate::graph::{Graph, GraphCanceller};
 
 use super::decode::ctc_tokens;
 use super::options;
@@ -71,6 +71,7 @@ pub(crate) fn load(
             options.graph_output
         )));
     }
+    let cancel_handle = graph.canceller();
     let tokenizer = Tokenizer::from_file(&tokenizer_file)
         .map_err(|error| EngineError::LoadFailed(format!("tokenizer: {error}")))?;
     let input_name = audio.input.clone();
@@ -96,6 +97,7 @@ pub(crate) fn load(
             shape: vec![None],
         }],
         cancelled: AtomicBool::new(false),
+        cancel_handle,
     })
 }
 
@@ -134,6 +136,7 @@ pub(crate) struct CtcOnnxSession {
     inputs: Vec<TensorSpec>,
     outputs: Vec<TensorSpec>,
     cancelled: AtomicBool,
+    cancel_handle: GraphCanceller,
 }
 
 struct CtcState {
@@ -208,5 +211,6 @@ impl EngineSession for CtcOnnxSession {
 
     fn cancel(&self) {
         self.cancelled.store(true, Ordering::SeqCst);
+        self.cancel_handle.cancel();
     }
 }
