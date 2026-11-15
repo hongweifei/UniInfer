@@ -7,7 +7,8 @@ use std::sync::Arc;
 
 use uniinfer_core::{EngineSession, ModelManifest};
 use uniinfer_engine_process::{
-    WireSpec, WireTensor, WorkerRequest, WorkerResponse, decode_frame, read_frame, write_frame,
+    PROTOCOL_VERSION, WireSpec, WireTensor, WorkerRequest, WorkerResponse, decode_frame,
+    read_frame, write_frame,
 };
 use uniinfer_service::{AudioSlot, ModelSlot, Runtime};
 
@@ -37,17 +38,26 @@ fn main() -> anyhow::Result<()> {
     let path = std::env::args()
         .nth(1)
         .ok_or_else(|| anyhow::anyhow!("usage: uniinfer-worker <manifest.toml>"))?;
-    let manifest = ModelManifest::load(std::path::Path::new(&path))?;
+    let mut manifest = ModelManifest::load(std::path::Path::new(&path))?;
+    if std::env::var("UNIINFER_WORKER_PLACEMENT").as_deref() == Ok("cpu") {
+        manifest.placement.policy = uniinfer_core::PlacementPolicy::Auto;
+        manifest.placement.prefer = vec![uniinfer_core::DeviceClass::Cpu];
+        manifest.placement.allow_cpu_fallback = true;
+    }
+    let base_dir = std::path::Path::new(&path)
+        .parent()
+        .unwrap_or_else(|| std::path::Path::new("."));
     let runtime = Runtime::new()?;
     let slot = if manifest.text.is_none() {
-        WorkerModel::Audio(runtime.load_audio(std::path::Path::new(&path))?)
+        WorkerModel::Audio(runtime.load_audio_manifest(manifest, base_dir)?)
     } else {
-        WorkerModel::Text(runtime.load(std::path::Path::new(&path))?)
+        WorkerModel::Text(runtime.load_manifest(manifest, base_dir)?)
     };
     let session = slot.session();
 
     let mut stdout = std::io::stdout().lock();
     let ready = WorkerResponse::Ready {
+        protocol: PROTOCOL_VERSION,
         inputs: session.inputs().iter().map(WireSpec::from).collect(),
         outputs: session.outputs().iter().map(WireSpec::from).collect(),
     };
