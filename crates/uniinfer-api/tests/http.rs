@@ -874,3 +874,23 @@ async fn tools_and_text_content_parts_are_accepted() {
     let body = body_json(response).await;
     assert_eq!(body["choices"][0]["message"]["content"], "c");
 }
+
+#[tokio::test]
+async fn tool_choice_none_keeps_plain_text_response() {
+    let body = json!({
+        "model": "tiny-byte-onnx",
+        "messages": [{"role": "user", "content": "ab"}],
+        "tools": [{"type": "function", "function": {"name": "lookup"}}],
+        "tool_choice": "none",
+        "max_tokens": 1
+    })
+    .to_string();
+    let response = app()
+        .oneshot(post("/v1/chat/completions", &body))
+        .await
+        .expect("response");
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = body_json(response).await;
+    assert_eq!(body["choices"][0]["message"]["content"], "c");
+    assert!(body["choices"][0]["message"].get("tool_calls").is_none());
+}

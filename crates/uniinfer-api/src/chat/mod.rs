@@ -160,8 +160,12 @@ pub(crate) async fn chat(
         .text_slot(&request.model)
         .await
         .map_err(ApiError::from)?;
-    let tools = request.tools.clone().unwrap_or_default();
     let tool_choice = request.tool_choice.clone();
+    let tools = if tool_choice.as_ref().and_then(serde_json::Value::as_str) == Some("none") {
+        Vec::new()
+    } else {
+        request.tools.clone().unwrap_or_default()
+    };
     let messages = request
         .messages
         .iter()

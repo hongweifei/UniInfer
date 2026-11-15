@@ -52,6 +52,26 @@ pub fn parse(content: &str, id_prefix: &str) -> ParsedToolCalls {
     }
     outside.push_str(rest);
 
+    if calls.is_empty()
+        && let Some(marker) = outside.find("[TOOL_CALLS]")
+    {
+        let payload = outside[marker + "[TOOL_CALLS]".len()..].trim();
+        if let Ok(value) = serde_json::from_str::<Value>(payload) {
+            let values = match value {
+                Value::Array(values) => values,
+                value => vec![value],
+            };
+            for (index, value) in values.into_iter().enumerate() {
+                if let Some(call) = parse_call_value(&value, id_prefix, index) {
+                    calls.push(call);
+                }
+            }
+            if !calls.is_empty() {
+                outside.truncate(marker);
+            }
+        }
+    }
+
     if calls.is_empty() {
         if let Some(call) = parse_call(content.trim(), id_prefix, 0) {
             calls.push(call);
@@ -68,6 +88,10 @@ pub fn parse(content: &str, id_prefix: &str) -> ParsedToolCalls {
 
 fn parse_call(raw: &str, prefix: &str, index: usize) -> Option<ToolCall> {
     let value: Value = serde_json::from_str(raw).ok()?;
+    parse_call_value(&value, prefix, index)
+}
+
+fn parse_call_value(value: &Value, prefix: &str, index: usize) -> Option<ToolCall> {
     let name = value.get("name")?.as_str()?.to_owned();
     let arguments = match value.get("arguments")? {
         Value::String(arguments) => arguments.clone(),
@@ -101,6 +125,16 @@ mod tests {
         let parsed = parse(r#"{"name":"ping","arguments":"{}"}"#, "s2");
         assert_eq!(parsed.content, None);
         assert_eq!(parsed.calls[0].function.name, "ping");
+    }
+
+    #[test]
+    fn parses_mistral_array() {
+        let parsed = parse(
+            "calling\n[TOOL_CALLS] [{\"name\":\"lookup\",\"arguments\":{\"q\":\"x\"}}]",
+            "s4",
+        );
+        assert_eq!(parsed.content.as_deref(), Some("calling"));
+        assert_eq!(parsed.calls[0].function.name, "lookup");
     }
 
     #[test]
