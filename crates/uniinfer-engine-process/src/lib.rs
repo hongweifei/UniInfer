@@ -163,7 +163,8 @@ impl InferenceEngine for ProcessEngine {
 
     fn supported_modalities(&self, format: ModelFormat) -> &[Modality] {
         match format {
-            ModelFormat::Onnx | ModelFormat::Gguf | ModelFormat::Safetensors => &[Modality::Text],
+            ModelFormat::Onnx => &[Modality::Text, Modality::Audio],
+            ModelFormat::Gguf | ModelFormat::Safetensors => &[Modality::Text],
             _ => &[],
         }
     }

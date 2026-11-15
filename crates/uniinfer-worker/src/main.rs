@@ -5,9 +5,25 @@
 
 use std::io::{BufRead, Write};
 
-use uniinfer_core::ModelManifest;
+use std::sync::Arc;
+
+use uniinfer_core::{EngineSession, ModelManifest};
 use uniinfer_engine_process::{WireSpec, WireTensor, WorkerRequest, WorkerResponse};
-use uniinfer_service::Runtime;
+use uniinfer_service::{AudioSlot, ModelSlot, Runtime};
+
+enum WorkerModel {
+    Text(Arc<ModelSlot>),
+    Audio(Arc<AudioSlot>),
+}
+
+impl WorkerModel {
+    fn session(&self) -> &dyn EngineSession {
+        match self {
+            Self::Text(slot) => slot.session(),
+            Self::Audio(slot) => slot.session(),
+        }
+    }
+}
 
 fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt()
@@ -22,11 +38,12 @@ fn main() -> anyhow::Result<()> {
         .nth(1)
         .ok_or_else(|| anyhow::anyhow!("usage: uniinfer-worker <manifest.toml>"))?;
     let manifest = ModelManifest::load(std::path::Path::new(&path))?;
-    if manifest.text.is_none() {
-        anyhow::bail!("worker currently supports text models only");
-    }
     let runtime = Runtime::new()?;
-    let slot = runtime.load(std::path::Path::new(&path))?;
+    let slot = if manifest.text.is_none() {
+        WorkerModel::Audio(runtime.load_audio(std::path::Path::new(&path))?)
+    } else {
+        WorkerModel::Text(runtime.load(std::path::Path::new(&path))?)
+    };
     let session = slot.session();
 
     let mut stdout = std::io::stdout().lock();

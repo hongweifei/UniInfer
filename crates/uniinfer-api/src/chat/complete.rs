@@ -28,6 +28,7 @@ pub(super) async fn complete_response(generation: Generation) -> Result<Response
     let task_state = state.clone();
     let task_session = session_id.clone();
     let model = slot.manifest().id.clone();
+    let process_isolated = slot.engine_name() == "process";
     let metric_model = model.clone();
     let task_model = model.clone();
     let (result, bytes, finish, completion_tokens) = tokio::task::spawn_blocking(move || {
@@ -68,6 +69,9 @@ pub(super) async fn complete_response(generation: Generation) -> Result<Response
     if let Err(error) = result {
         if matches!(error, uniinfer_core::EngineError::Timeout) {
             state.router.record_timeout(&metric_model);
+            if process_isolated {
+                state.unload_text(&metric_model);
+            }
         }
         return Err(error.into());
     }

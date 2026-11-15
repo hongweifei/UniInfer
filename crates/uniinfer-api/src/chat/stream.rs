@@ -47,6 +47,7 @@ pub(super) async fn stream_response(generation: Generation) -> Result<Response, 
     } = generation;
     let (tx, rx) = mpsc::channel::<StreamEvent>(32);
     let model = slot.manifest().id.clone();
+    let process_isolated = slot.engine_name() == "process";
     let metric_model = model.clone();
     let created = unix_seconds();
     let task_state = state.clone();
@@ -104,6 +105,9 @@ pub(super) async fn stream_response(generation: Generation) -> Result<Response, 
             Err(error) => {
                 if matches!(&error, EngineError::Timeout) {
                     task_state.router.record_timeout(&metric_model);
+                    if process_isolated {
+                        task_state.unload_text(&metric_model);
+                    }
                 }
                 let _ = tx.blocking_send(StreamEvent::Error(error.into()));
                 ("stop", 0)

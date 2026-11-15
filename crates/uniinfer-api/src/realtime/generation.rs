@@ -35,6 +35,7 @@ pub(super) fn spawn_response(
         let _active = router.active_guard();
         let mut decoder = Utf8Decoder::new();
         let metric_model = slot.manifest().id.clone();
+        let process_isolated = slot.engine_name() == "process";
         let mut measured_ttft = false;
         let send = |event: Value| -> bool { tx.blocking_send(event.to_string()).is_ok() };
         let result = slot.generate_with(
@@ -89,6 +90,11 @@ pub(super) fn spawn_response(
             Err(error) => {
                 if matches!(error, uniinfer_core::EngineError::Timeout) {
                     router.record_timeout(&metric_model);
+                    if process_isolated {
+                        // The worker process was killed by the deadline. Drop
+                        // the dead parent-side slot so the next request reloads.
+                        router.remove_slot(&metric_model);
+                    }
                 }
                 let _ = send(json!({
                     "type": "error",
