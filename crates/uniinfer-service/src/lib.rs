@@ -10,7 +10,7 @@ use uniinfer_backends::{
     TextGenerator, Tokenizer, fallback_prompt,
 };
 use uniinfer_core::{Device, EngineError, EngineSession, ModelManifest, PlacementPlan, Result};
-use uniinfer_registry::{EngineRegistry, SessionLease};
+use uniinfer_registry::{EngineRegistry, EngineRoute, SessionLease};
 
 mod audio;
 pub use audio::AudioSlot;
@@ -56,6 +56,17 @@ impl Runtime {
     #[must_use]
     pub fn active_sessions(&self) -> usize {
         self.registry.active_sessions()
+    }
+
+    /// Resolve engine and device placement without loading weights.
+    pub fn probe_manifest(&self, manifest: &ModelManifest) -> Result<EngineRoute> {
+        self.registry.route(manifest)
+    }
+
+    /// Load a manifest and resolve its engine route without loading weights.
+    pub fn probe(&self, manifest_path: &Path) -> Result<EngineRoute> {
+        let manifest = ModelManifest::load(manifest_path)?;
+        self.probe_manifest(&manifest)
     }
 
     /// Load an audio model for transcription.

@@ -357,7 +357,7 @@ cargo run -p uniinfer-cli --release -- run \
 不需要手写清单。指向模型目录即可生成草稿：
 
 ```bash
-cargo run -p uniinfer-cli -- models inspect models/qwen3-0.6b-onnx
+cargo run -p uniinfer-cli -- models inspect models/qwen3-0.6b-onnx --check
 cargo run -p uniinfer-cli -- --config uniinfer.toml models import models/whisper-tiny.en-onnx
 ```
 

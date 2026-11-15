@@ -25,6 +25,9 @@ enum ModelsCommand {
         path: PathBuf,
         #[arg(long)]
         id: Option<String>,
+        /// Probe the engine route without loading weights.
+        #[arg(long)]
+        check: bool,
     },
     /// Generate manifest.toml and add it to the application config.
     Import {
@@ -88,7 +91,7 @@ async fn main() -> Result<()> {
     match cli.command {
         Command::Devices => devices(),
         Command::Models { command } => match command {
-            ModelsCommand::Inspect { path, id } => models::inspect_model(path, id),
+            ModelsCommand::Inspect { path, id, check } => models::inspect_model(path, id, check),
             ModelsCommand::Import { path, id } => {
                 models::import_model(path, config_path.clone(), id)
             }

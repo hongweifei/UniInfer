@@ -10,6 +10,13 @@ use uniinfer_core::{
 };
 use uniinfer_devices::DeviceInventory;
 
+/// Engine selection and placement without loading model weights.
+#[derive(Debug, Clone)]
+pub struct EngineRoute {
+    pub engine_name: String,
+    pub placement: PlacementPlan,
+}
+
 /// Owns registered engines and hands out leases.
 pub struct EngineRegistry {
     engines: Vec<Arc<dyn InferenceEngine>>,
@@ -39,6 +46,15 @@ impl EngineRegistry {
     #[must_use]
     pub fn active_sessions(&self) -> usize {
         self.active.load(Ordering::SeqCst)
+    }
+
+    /// Resolve engine and placement without allocating or loading weights.
+    pub fn route(&self, manifest: &ModelManifest) -> Result<EngineRoute> {
+        let (engine, placement) = self.resolve(manifest)?;
+        Ok(EngineRoute {
+            engine_name: engine.engine_name().to_owned(),
+            placement,
+        })
     }
 
     /// Resolve the manifest to an engine, preflight the capability matrix and

@@ -5,8 +5,9 @@ use std::path::PathBuf;
 use anyhow::{Context, Result};
 use uniinfer_config::{ConfigHandle, ModelEntry};
 use uniinfer_model_inspect::{InspectOptions, inspect};
+use uniinfer_service::Runtime;
 
-pub(crate) fn inspect_model(path: PathBuf, id: Option<String>) -> Result<()> {
+pub(crate) fn inspect_model(path: PathBuf, id: Option<String>, check: bool) -> Result<()> {
     let inspection = inspect(
         &path,
         &InspectOptions {
@@ -17,6 +18,22 @@ pub(crate) fn inspect_model(path: PathBuf, id: Option<String>) -> Result<()> {
     .with_context(|| format!("inspect {}", path.display()))?;
     for warning in &inspection.warnings {
         eprintln!("warning: {warning}");
+    }
+    if check {
+        let runtime = Runtime::new().context("initialize runtime")?;
+        match runtime.probe_manifest(&inspection.manifest) {
+            Ok(route) => eprintln!(
+                "supported: engine={} devices={:?}",
+                route.engine_name,
+                route
+                    .placement
+                    .devices
+                    .iter()
+                    .map(|device| device.class)
+                    .collect::<Vec<_>>()
+            ),
+            Err(error) => eprintln!("unsupported: {}: {error}", error.code()),
+        }
     }
     println!("{}", inspection.to_toml()?);
     Ok(())

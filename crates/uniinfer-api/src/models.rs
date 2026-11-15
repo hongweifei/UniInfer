@@ -19,6 +19,7 @@ pub(crate) struct InspectRequest {
 }
 
 pub(crate) async fn inspect_model(
+    State(state): State<AppState>,
     ApiJson(request): ApiJson<InspectRequest>,
 ) -> Result<Json<Value>, ApiError> {
     let inspection = inspect(
@@ -29,10 +30,24 @@ pub(crate) async fn inspect_model(
         },
     )
     .map_err(ApiError::from)?;
+    let route = state.runtime.probe_manifest(&inspection.manifest);
+    let route = match route {
+        Ok(route) => json!({
+            "supported": true,
+            "engine": route.engine_name,
+            "placement": route.placement,
+        }),
+        Err(error) => json!({
+            "supported": false,
+            "code": error.code(),
+            "message": error.to_string(),
+        }),
+    };
     Ok(Json(json!({
         "root": inspection.root,
         "manifest": inspection.manifest,
         "warnings": inspection.warnings,
+        "route": route,
     })))
 }
 

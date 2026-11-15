@@ -392,6 +392,7 @@ async fn model_inspect_and_import_endpoints_work() {
     let body = body_json(response).await;
     assert_eq!(body["manifest"]["id"], "imported");
     assert_eq!(body["manifest"]["format"], "onnx");
+    assert_eq!(body["route"]["supported"], true);
 
     let response = app
         .oneshot(post(
