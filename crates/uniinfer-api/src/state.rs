@@ -28,6 +28,7 @@ pub struct AppState {
     pub(crate) config: Option<Arc<ConfigHandle>>,
     pub(crate) manifest_paths: Arc<HashMap<String, PathBuf>>,
     pub(crate) request_timeout: Option<std::time::Duration>,
+    model_load_timeout: Option<std::time::Duration>,
     pub(crate) catalog: Arc<HashMap<String, CatalogEntry>>,
     load_lock: Arc<AsyncMutex<()>>,
     audio_lru: Arc<Mutex<VecDeque<String>>>,
@@ -79,6 +80,8 @@ impl AppState {
             manifest_paths: Arc::new(manifest_paths),
             request_timeout: (config.request_timeout > std::time::Duration::ZERO)
                 .then_some(config.request_timeout),
+            model_load_timeout: (config.model_load_timeout > std::time::Duration::ZERO)
+                .then_some(config.model_load_timeout),
             catalog: Arc::new(catalog),
             load_lock: Arc::new(AsyncMutex::new(())),
             audio_lru: Arc::new(Mutex::new(VecDeque::new())),
@@ -108,9 +111,8 @@ impl AppState {
         }
         let runtime = Arc::clone(&self.runtime);
         let path = entry.path;
-        let slot = tokio::task::spawn_blocking(move || runtime.load(&path))
-            .await
-            .map_err(|error| EngineError::Other(format!("model load task: {error}")))??;
+        let task = tokio::task::spawn_blocking(move || runtime.load(&path));
+        let slot = self.await_load(task).await?;
         self.router.insert_slot(id, Arc::clone(&slot))?;
         Ok(slot)
     }
@@ -143,9 +145,8 @@ impl AppState {
         }
         let runtime = Arc::clone(&self.runtime);
         let path = entry.path;
-        let slot = tokio::task::spawn_blocking(move || runtime.load_audio(&path))
-            .await
-            .map_err(|error| EngineError::Other(format!("model load task: {error}")))??;
+        let task = tokio::task::spawn_blocking(move || runtime.load_audio(&path));
+        let slot = self.await_load(task).await?;
         self.audio_slots
             .lock()
             .map_err(|_| EngineError::Other("audio catalog lock poisoned".into()))?
@@ -177,6 +178,16 @@ impl AppState {
                 slots.remove(&oldest);
             }
         }
+    }
+
+    async fn await_load<T>(&self, task: tokio::task::JoinHandle<Result<T>>) -> Result<T> {
+        let joined = match self.model_load_timeout {
+            Some(timeout) => tokio::time::timeout(timeout, task)
+                .await
+                .map_err(|_| EngineError::Timeout)?,
+            None => task.await,
+        };
+        joined.map_err(|error| EngineError::Other(format!("model load task: {error}")))?
     }
 
     pub(crate) fn unload_text(&self, id: &str) -> bool {

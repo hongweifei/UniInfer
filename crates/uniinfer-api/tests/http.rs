@@ -827,3 +827,25 @@ async fn request_timeout_returns_gateway_timeout() {
     let body = body_json(response).await;
     assert_eq!(body["code"], "timeout");
 }
+
+#[tokio::test]
+async fn model_load_timeout_returns_gateway_timeout() {
+    let manifest =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../models/tiny-onnx/manifest.toml");
+    let mut config = ApiConfig::new(manifest);
+    config.model_load_timeout = std::time::Duration::from_nanos(1);
+    let app = routes::router(AppState::new(&config).expect("state"));
+    let body = json!({
+        "model": "tiny-byte-onnx",
+        "messages": [{"role": "user", "content": "ab"}],
+        "max_tokens": 1
+    })
+    .to_string();
+    let response = app
+        .oneshot(post("/v1/chat/completions", &body))
+        .await
+        .expect("response");
+    assert_eq!(response.status(), StatusCode::GATEWAY_TIMEOUT);
+    let body = body_json(response).await;
+    assert_eq!(body["code"], "timeout");
+}

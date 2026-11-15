@@ -41,6 +41,9 @@ pub struct ServerConfig {
     /// Per-request generation timeout; `0` disables the deadline.
     #[serde(default)]
     pub request_timeout_ms: u64,
+    /// Model load timeout; `0` disables the deadline.
+    #[serde(default)]
+    pub model_load_timeout_ms: u64,
 }
 
 fn default_addr() -> SocketAddr {
@@ -64,6 +67,7 @@ impl Default for ServerConfig {
             token: None,
             max_loaded_models: 0,
             request_timeout_ms: 0,
+            model_load_timeout_ms: 0,
         }
     }
 }
