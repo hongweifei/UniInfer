@@ -131,7 +131,11 @@ impl Runtime {
         cancel: CancelToken,
     ) -> Result<Arc<ModelSlot>> {
         let lease = Arc::new(self.registry.load_with_cancel(manifest_path, cancel)?);
-        self.build_text_slot(lease, manifest_path)
+        let base_dir = manifest_path.parent().map_or_else(
+            || std::path::PathBuf::from("."),
+            std::path::Path::to_path_buf,
+        );
+        self.build_text_slot(lease, &base_dir)
     }
 
     /// Load an in-memory text manifest against a model directory.
