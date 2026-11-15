@@ -7,7 +7,8 @@
 use uniinfer_core::{DeviceClass, EngineError, EngineLoadSpec, EngineSession, Result};
 
 mod ctc;
-mod mel;
+mod decode;
+mod frontend;
 mod whisper;
 
 pub(crate) fn load(
