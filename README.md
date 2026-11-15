@@ -236,7 +236,7 @@ curl -X POST http://127.0.0.1:8080/v1/audio/transcriptions \
   -F file=@hello.wav
 ```
 
-`OnnxEngine` 不包含具体 ASR 模型分支：清单 `[audio].architecture` 选择 adapter。`whisper` 走 encoder/decoder ASR，存在 `decoder_with_past_file` 时复用 KV cache；超过 30 秒的音频按 30 秒分块转写并拼接文本，不再静默截断。`ctc` 走单图 raw audio → logits + CTC 解码，tokenizer、graph 输入输出名与 blank id 都由清单声明。`/v1/audio/transcriptions` 和 `AudioSlot` 不依赖具体引擎。输入 WAV 必须是清单 `[audio].sample_rate` 指定的采样率、单声道、PCM16。
+`OnnxEngine` 不包含具体 ASR 模型分支：清单 `[audio].architecture` 选择 adapter。`whisper` 走 encoder/decoder ASR，存在 `decoder_with_past_file` 时复用 KV cache；超过 30 秒的音频按 30 秒窗口、1 秒重叠分块，转写后按词级重叠去重拼接，不再静默截断。`ctc` 走单图 raw audio → logits + CTC 解码，tokenizer、graph 输入输出名与 blank id 都由清单声明。`/v1/audio/transcriptions` 和 `AudioSlot` 不依赖具体引擎。输入 WAV 支持单声道或立体声；立体声按帧平均下混，非清单采样率在解码期线性重采样。MP3/Opus 容器仍由客户端先转成 WAV。
 
 CTC 单图模型示例：
 
@@ -408,6 +408,8 @@ curl -N http://127.0.0.1:8080/v1/chat/completions \
 ```
 
 `stop` 接受字符串或字符串数组；流式与非流式共用字节级匹配器，跨 token 的停止串不会泄漏到输出。
+
+采样参数：`temperature`（0–2，0 为 greedy）、`top_p`（0–1）、`top_k`（0–4096，0 表示不截断）与 `seed`。只传 `top_p`/`top_k`/`seed` 而未传 `temperature` 时默认 `temperature=1.0`；非法取值返回 `400 invalid_sampling`。
 
 图像、视频与 TTS 端点尚未实现。请求会得到稳定错误，而不是伪造结果：
 

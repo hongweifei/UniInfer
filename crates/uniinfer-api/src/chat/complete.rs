@@ -18,6 +18,7 @@ pub(super) async fn complete_response(generation: Generation) -> Result<Response
         prompt_tokens,
         max_tokens,
         stop,
+        sampling,
         cancel,
     } = generation;
     let task_state = state.clone();
@@ -28,7 +29,7 @@ pub(super) async fn complete_response(generation: Generation) -> Result<Response
         let _active = task_state.router.active_guard();
         let mut bytes = Vec::new();
         let mut matcher = StopMatcher::new(stop);
-        let output = slot.generate(&prompt, max_tokens, &cancel, &mut |chunk| {
+        let output = slot.generate_with(&prompt, max_tokens, &cancel, &sampling, &mut |chunk| {
             matcher.push(chunk, &mut |safe| bytes.extend_from_slice(safe))
         });
         matcher.finish(&mut |safe| bytes.extend_from_slice(safe));

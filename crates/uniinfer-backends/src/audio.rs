@@ -53,33 +53,28 @@ impl EnergyVad {
     }
 }
 
-/// Decode a mono PCM WAV at the expected sample rate into normalized F32 samples.
+/// Decode a WAV into normalized mono F32 samples at the expected rate.
+///
+/// Stereo files are downmixed by averaging channels, and other sample rates
+/// are linearly resampled. WAV is still the only container; MP3/Opus decoding
+/// belongs to the HTTP ingest layer.
 pub fn decode_wav_mono(bytes: &[u8], expected_rate: u32) -> Result<Vec<f32>> {
     let mut reader = hound::WavReader::new(Cursor::new(bytes))
         .map_err(|error| EngineError::InvalidAudio(format!("wav: {error}")))?;
     let spec = reader.spec();
-    if spec.channels != 1 {
+    if !(1..=2).contains(&spec.channels) {
         return Err(EngineError::InvalidAudio(format!(
-            "expected mono, got {} channels",
+            "expected mono or stereo, got {} channels",
             spec.channels
         )));
     }
-    if spec.sample_rate != expected_rate {
-        return Err(EngineError::InvalidAudio(format!(
-            "expected {expected_rate} Hz, got {} Hz",
-            spec.sample_rate
-        )));
+    if expected_rate == 0 {
+        return Err(EngineError::InvalidAudio(
+            "expected sample rate must be positive".into(),
+        ));
     }
 
-    let samples = match spec.sample_format {
-        hound::SampleFormat::Int if spec.bits_per_sample == 16 => reader
-            .samples::<i16>()
-            .map(|sample| {
-                sample
-                    .map(|value| f32::from(value) / 32768.0)
-                    .map_err(|error| EngineError::InvalidAudio(format!("wav sample: {error}")))
-            })
-            .collect::<Result<Vec<_>>>()?,
+    let raw = match spec.sample_format {
         hound::SampleFormat::Int => {
             let scale = (1i64 << (spec.bits_per_sample.saturating_sub(1))) as f32;
             reader
@@ -98,7 +93,32 @@ pub fn decode_wav_mono(bytes: &[u8], expected_rate: u32) -> Result<Vec<f32>> {
             })
             .collect::<Result<Vec<_>>>()?,
     };
-    Ok(samples)
+
+    let mono = if spec.channels == 2 {
+        raw.chunks_exact(2)
+            .map(|frame| (frame[0] + frame[1]) * 0.5)
+            .collect::<Vec<_>>()
+    } else {
+        raw
+    };
+    Ok(resample(&mono, spec.sample_rate, expected_rate))
+}
+
+fn resample(samples: &[f32], from: u32, to: u32) -> Vec<f32> {
+    if from == to || samples.is_empty() {
+        return samples.to_vec();
+    }
+    let out_len = (samples.len() as u64 * u64::from(to) / u64::from(from)) as usize;
+    let mut output = Vec::with_capacity(out_len);
+    for index in 0..out_len {
+        let position = index as f64 * f64::from(from) / f64::from(to);
+        let left = position.floor() as usize;
+        let fraction = (position - left as f64) as f32;
+        let first = samples[left.min(samples.len() - 1)];
+        let second = samples[(left + 1).min(samples.len() - 1)];
+        output.push(first + (second - first) * fraction);
+    }
+    output
 }
 
 fn rms(frame: &[u8]) -> f64 {
@@ -152,15 +172,18 @@ mod tests {
     }
 
     #[test]
-    fn rejects_stereo_and_wrong_rate() {
-        let stereo = wav(&[0, 0], 16_000, 2);
+    fn downmixes_stereo_and_resamples() {
+        let stereo = wav(&[10_000, 20_000, -10_000, -20_000], 32_000, 2);
+        let samples = decode_wav_mono(&stereo, 16_000).expect("decode");
+        assert_eq!(samples.len(), 1);
+        assert!((samples[0] - 15_000.0 / 32_768.0).abs() < 1e-4);
+    }
+
+    #[test]
+    fn rejects_more_than_two_channels() {
+        let surround = wav(&[0, 0, 0, 0, 0, 0], 16_000, 3);
         assert!(matches!(
-            decode_wav_mono(&stereo, 16_000),
-            Err(EngineError::InvalidAudio(_))
-        ));
-        let rate = wav(&[0], 44_100, 1);
-        assert!(matches!(
-            decode_wav_mono(&rate, 16_000),
+            decode_wav_mono(&surround, 16_000),
             Err(EngineError::InvalidAudio(_))
         ));
     }

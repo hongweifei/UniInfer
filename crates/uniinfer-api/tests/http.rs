@@ -536,3 +536,37 @@ async fn model_inspect_rejects_paths_outside_config_root() {
     let body = body_json(response).await;
     assert_eq!(body["code"], "path_not_allowed");
 }
+
+#[tokio::test]
+async fn sampling_parameters_are_validated() {
+    let body = json!({
+        "model": "tiny-byte-onnx",
+        "messages": [{"role": "user", "content": "ab"}],
+        "max_tokens": 1,
+        "temperature": 3.0
+    })
+    .to_string();
+    let response = app()
+        .oneshot(post("/v1/chat/completions", &body))
+        .await
+        .expect("response");
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let body = body_json(response).await;
+    assert_eq!(body["code"], "invalid_sampling");
+
+    let body = json!({
+        "model": "tiny-byte-onnx",
+        "messages": [{"role": "user", "content": "ab"}],
+        "max_tokens": 1,
+        "temperature": 1.0,
+        "top_p": 0.9,
+        "top_k": 4,
+        "seed": 7
+    })
+    .to_string();
+    let response = app()
+        .oneshot(post("/v1/chat/completions", &body))
+        .await
+        .expect("response");
+    assert_eq!(response.status(), StatusCode::OK);
+}

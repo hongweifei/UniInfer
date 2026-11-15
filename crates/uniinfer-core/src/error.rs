@@ -41,6 +41,8 @@ pub enum EngineError {
     Io(#[from] std::io::Error),
     #[error("invalid audio: {0}")]
     InvalidAudio(String),
+    #[error("invalid sampling: {0}")]
+    InvalidSampling(String),
     #[error("engine error: {0}")]
     Other(String),
 }
@@ -65,6 +67,7 @@ impl EngineError {
             Self::PlacementUnsatisfiable(_) => "placement_unsatisfiable",
             Self::Io(_) => "io_error",
             Self::InvalidAudio(_) => "invalid_audio",
+            Self::InvalidSampling(_) => "invalid_sampling",
             Self::Other(_) => "engine_error",
         }
     }

@@ -36,6 +36,7 @@ pub(super) async fn stream_response(generation: Generation) -> Result<Response, 
         prompt,
         max_tokens,
         stop,
+        sampling,
         cancel,
         ..
     } = generation;
@@ -52,14 +53,15 @@ pub(super) async fn stream_response(generation: Generation) -> Result<Response, 
         let mut matcher = StopMatcher::new(stop);
         let mut decoder = Utf8Decoder::new();
         let mut open = true;
-        let result = task_slot.generate(&prompt, max_tokens, &cancel, &mut |chunk| {
-            matcher.push(chunk, &mut |safe| {
-                if open {
-                    open = send_text(&tx, &mut decoder, safe);
-                }
+        let result =
+            task_slot.generate_with(&prompt, max_tokens, &cancel, &sampling, &mut |chunk| {
+                matcher.push(chunk, &mut |safe| {
+                    if open {
+                        open = send_text(&tx, &mut decoder, safe);
+                    }
+                });
+                open && !matcher.is_matched()
             });
-            open && !matcher.is_matched()
-        });
         matcher.finish(&mut |safe| {
             if open {
                 open = send_text(&tx, &mut decoder, safe);

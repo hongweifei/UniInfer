@@ -4,7 +4,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use axum::extract::State;
 use axum::response::Response;
 use serde::Deserialize;
-use uniinfer_backends::ChatMessage as BackendMessage;
+use uniinfer_backends::{ChatMessage as BackendMessage, Sampling};
 use uniinfer_core::CancelToken;
 use uniinfer_router::PreparedText;
 use uniinfer_service::ModelSlot;
@@ -29,6 +29,14 @@ pub(crate) struct ChatRequest {
     pub(super) max_tokens: Option<usize>,
     #[serde(default)]
     stop: Option<StopInput>,
+    #[serde(default)]
+    temperature: Option<f32>,
+    #[serde(default)]
+    top_p: Option<f32>,
+    #[serde(default)]
+    top_k: Option<usize>,
+    #[serde(default)]
+    seed: Option<u64>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -62,6 +70,7 @@ pub(super) struct Generation {
     pub(super) prompt_tokens: usize,
     pub(super) max_tokens: usize,
     pub(super) stop: Vec<String>,
+    pub(super) sampling: Sampling,
     pub(super) cancel: CancelToken,
 }
 
@@ -85,6 +94,19 @@ pub(crate) async fn chat(
         .collect::<Vec<_>>();
     let prompt = slot.render_chat(&messages).map_err(ApiError::from)?;
     let stop = request.stop.map(StopInput::into_vec).unwrap_or_default();
+    let sampling_requested = request.temperature.is_some()
+        || request.top_p.is_some()
+        || request.top_k.is_some()
+        || request.seed.is_some();
+    let sampling = Sampling {
+        temperature: request
+            .temperature
+            .unwrap_or(if sampling_requested { 1.0 } else { 0.0 }),
+        top_p: request.top_p.unwrap_or(1.0),
+        top_k: request.top_k.unwrap_or(0),
+        seed: request.seed,
+    };
+    sampling.validate().map_err(ApiError::from)?;
     let prepared = state
         .router
         .prepare_text(&request.model, prompt, request.max_tokens)
@@ -110,6 +132,7 @@ pub(crate) async fn chat(
         prompt_tokens,
         max_tokens,
         stop,
+        sampling,
         cancel,
     };
 

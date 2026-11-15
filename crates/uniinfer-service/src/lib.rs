@@ -6,7 +6,7 @@ use std::time::Duration;
 
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use uniinfer_backends::{
-    ByteTokenizer, ChatMessage, ChatTemplate, GenerationOutput, HuggingFaceTokenizer,
+    ByteTokenizer, ChatMessage, ChatTemplate, GenerationOutput, HuggingFaceTokenizer, Sampling,
     TextGenerator, Tokenizer, fallback_prompt,
 };
 use uniinfer_core::{Device, EngineError, EngineSession, ModelManifest, PlacementPlan, Result};
@@ -233,8 +233,26 @@ impl ModelSlot {
         cancel: &CancelToken,
         on_bytes: &mut dyn FnMut(&[u8]) -> bool,
     ) -> Result<GenerationOutput> {
-        self.generator
-            .generate(self.session(), prompt, max_tokens, cancel, on_bytes)
+        self.generate_with(prompt, max_tokens, cancel, &Sampling::greedy(), on_bytes)
+    }
+
+    /// Run one generation pass with explicit sampling controls.
+    pub fn generate_with(
+        &self,
+        prompt: &str,
+        max_tokens: usize,
+        cancel: &CancelToken,
+        sampling: &Sampling,
+        on_bytes: &mut dyn FnMut(&[u8]) -> bool,
+    ) -> Result<GenerationOutput> {
+        self.generator.generate_with(
+            self.session(),
+            prompt,
+            max_tokens,
+            cancel,
+            sampling,
+            on_bytes,
+        )
     }
 }
 

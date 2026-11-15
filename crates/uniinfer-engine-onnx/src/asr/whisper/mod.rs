@@ -22,6 +22,9 @@ use self::cache::{run_decoder, run_with_past};
 use self::config::{WhisperConfig, options};
 use super::frontend::mel;
 
+/// One second of shared audio between consecutive 30 s Whisper windows.
+const CHUNK_OVERLAP: usize = 16_000;
+
 pub(crate) fn load(
     environment: &Environment,
     spec: &EngineLoadSpec,
@@ -163,19 +166,22 @@ impl WhisperState {
         if samples.is_empty() {
             return Err(EngineError::InvalidAudio("audio is empty".into()));
         }
-        let mut parts = Vec::new();
-        for chunk in samples.chunks(mel::N_SAMPLES) {
+        let mut transcript = String::new();
+        let mut start = 0usize;
+        loop {
             if cancelled.load(Ordering::SeqCst) {
                 return Err(EngineError::Cancelled);
             }
-            let features = mel::log_mel(chunk, self.sample_rate)?;
+            let end = (start + mel::N_SAMPLES).min(samples.len());
+            let features = mel::log_mel(&samples[start..end], self.sample_rate)?;
             let text = self.transcribe_features(&features, cancelled)?;
-            let text = text.trim();
-            if !text.is_empty() {
-                parts.push(text.to_owned());
+            merge_overlap(&mut transcript, text.trim());
+            if end == samples.len() {
+                break;
             }
+            start = end - CHUNK_OVERLAP.min(end);
         }
-        Ok(parts.join(" "))
+        Ok(transcript)
     }
 
     fn transcribe_features(&mut self, features: &[f32], cancelled: &AtomicBool) -> Result<String> {
@@ -234,5 +240,49 @@ impl WhisperState {
         self.tokenizer
             .decode(&generated, true)
             .map_err(|error| EngineError::Other(format!("detokenize: {error}")))
+    }
+}
+
+/// Append `next` to `transcript`, removing the longest word-level suffix/prefix
+/// shared by the one-second audio overlap.
+fn merge_overlap(transcript: &mut String, next: &str) {
+    if next.is_empty() {
+        return;
+    }
+    let existing = transcript.split_whitespace().collect::<Vec<_>>();
+    let incoming = next.split_whitespace().collect::<Vec<_>>();
+    if existing.is_empty() {
+        transcript.push_str(next);
+        return;
+    }
+    let max = existing.len().min(incoming.len());
+    let overlap = (1..=max)
+        .rev()
+        .find(|&count| existing[existing.len() - count..] == incoming[..count])
+        .unwrap_or(0);
+    for word in &incoming[overlap..] {
+        if !transcript.is_empty() {
+            transcript.push(' ');
+        }
+        transcript.push_str(word);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::merge_overlap;
+
+    #[test]
+    fn merges_word_overlap_without_duplicate() {
+        let mut transcript = String::from("the quick brown fox");
+        merge_overlap(&mut transcript, "brown fox jumps over");
+        assert_eq!(transcript, "the quick brown fox jumps over");
+    }
+
+    #[test]
+    fn keeps_disjoint_chunks() {
+        let mut transcript = String::from("hello world");
+        merge_overlap(&mut transcript, "second window");
+        assert_eq!(transcript, "hello world second window");
     }
 }

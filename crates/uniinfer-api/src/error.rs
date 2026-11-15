@@ -90,7 +90,8 @@ impl From<uniinfer_core::EngineError> for ApiError {
             | EngineError::UnsupportedArchitecture { .. }
             | EngineError::UnsupportedModality { .. }
             | EngineError::ManifestInvalid(_)
-            | EngineError::InvalidAudio(_) => StatusCode::BAD_REQUEST,
+            | EngineError::InvalidAudio(_)
+            | EngineError::InvalidSampling(_) => StatusCode::BAD_REQUEST,
             EngineError::InputTooLong { .. } => StatusCode::PAYLOAD_TOO_LARGE,
             EngineError::MissingEp(_) => StatusCode::NOT_IMPLEMENTED,
             EngineError::InsufficientVram { .. } | EngineError::PlacementUnsatisfiable(_) => {
