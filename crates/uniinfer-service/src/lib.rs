@@ -7,7 +7,6 @@ use std::time::Duration;
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use uniinfer_backends::{ByteTokenizer, HuggingFaceTokenizer, TextGenerator, Tokenizer};
 use uniinfer_core::{Device, EngineError, EngineSession, ModelManifest, PlacementPlan, Result};
-use uniinfer_engine_set;
 use uniinfer_registry::{EngineRegistry, SessionLease};
 
 pub use uniinfer_core::CancelToken;
