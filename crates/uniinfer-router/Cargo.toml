@@ -1,0 +1,18 @@
+[package]
+name = "uniinfer-router"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+description = "Model catalog, cancellation and session routing"
+
+[dependencies]
+uniinfer-core.workspace = true
+uniinfer-service.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+
+[lints]
+workspace = true

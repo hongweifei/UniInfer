@@ -15,6 +15,7 @@ repository = "https://github.com/hongweifei/UniInfer"
 uniinfer-core = { version = "0.0.0", path = "crates/uniinfer-core" }
 uniinfer-devices = { version = "0.0.0", path = "crates/uniinfer-devices" }
 uniinfer-registry = { version = "0.0.0", path = "crates/uniinfer-registry" }
+uniinfer-router = { version = "0.0.0", path = "crates/uniinfer-router" }
 uniinfer-service = { version = "0.0.0", path = "crates/uniinfer-service" }
 uniinfer-engine-onnx = { version = "0.0.0", path = "crates/uniinfer-engine-onnx" }
 uniinfer-engine-candle = { version = "0.0.0", path = "crates/uniinfer-engine-candle" }

@@ -1,5 +1,3 @@
-use std::sync::atomic::Ordering;
-
 use axum::extract::{Path, State};
 use axum::middleware;
 use axum::routing::{get, post};
@@ -35,14 +33,15 @@ async fn health() -> &'static str {
 
 async fn metrics(State(state): State<AppState>) -> Json<Value> {
     Json(json!({
-        "active_requests": state.active.load(Ordering::SeqCst),
+        "active_requests": state.router.active_count(),
         "loaded_sessions": state.runtime.active_sessions(),
     }))
 }
 
 async fn models(State(state): State<AppState>) -> Json<Value> {
     let data = state
-        .slots
+        .router
+        .slots()
         .values()
         .map(|slot| {
             let manifest = slot.manifest();
@@ -78,7 +77,8 @@ async fn devices(State(state): State<AppState>) -> Json<Value> {
         })
         .collect::<Vec<_>>();
     let models = state
-        .slots
+        .router
+        .slots()
         .values()
         .map(|slot| {
             json!({
@@ -96,12 +96,11 @@ async fn cancel(
     Path(id): Path<String>,
     State(state): State<AppState>,
 ) -> Result<Json<Value>, ApiError> {
-    let token = state
-        .cancels
-        .lock()
-        .ok()
-        .and_then(|guard| guard.get(&id).cloned())
-        .ok_or_else(|| ApiError::not_found("session_not_found", format!("unknown session {id}")))?;
-    token.cancel();
+    if !state.router.cancel(&id) {
+        return Err(ApiError::not_found(
+            "session_not_found",
+            format!("unknown session {id}"),
+        ));
+    }
     Ok(Json(json!({"id": id, "cancelled": true})))
 }

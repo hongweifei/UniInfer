@@ -13,7 +13,7 @@ use tokio::sync::mpsc;
 use uniinfer_core::{CancelToken, EngineError};
 use uniinfer_service::ModelSlot;
 
-use crate::state::{ActiveGuard, AppState};
+use crate::state::AppState;
 use uniinfer_backends::audio::{EnergyVad, FRAME_BYTES, VadEvent};
 use uniinfer_backends::utf8::Utf8Decoder;
 
@@ -172,7 +172,7 @@ async fn handle_client(
     let event: ClientEvent = serde_json::from_str(text).map_err(|error| error.to_string())?;
     match event {
         ClientEvent::SessionStart { model, channels } => {
-            let Some(selected) = state.slots.get(&model).cloned() else {
+            let Some(selected) = state.router.slot(&model) else {
                 return tx
                     .send(error_event(
                         "model_not_found",
@@ -263,7 +263,7 @@ async fn handle_client(
                 token,
                 prompt,
                 max_tokens,
-                state.active.clone(),
+                state.router.active_guard(),
             );
             Ok(())
         }
@@ -286,13 +286,13 @@ fn spawn_response(
     cancel: CancelToken,
     prompt: String,
     max_tokens: Option<usize>,
-    active: Arc<std::sync::atomic::AtomicUsize>,
+    active: uniinfer_router::ActiveGuard,
 ) {
     let response_id = format!("resp-{:x}", NEXT_RESPONSE.fetch_add(1, Ordering::Relaxed));
     let max_tokens = max_tokens.unwrap_or(16);
     tokio::task::spawn_blocking(move || {
         let _permit = permit;
-        let _active = ActiveGuard::new(active);
+        let _active = active;
         let mut decoder = Utf8Decoder::new();
         let send = |event: Value| -> bool { tx.blocking_send(event.to_string()).is_ok() };
         let result = slot.generate(&prompt, max_tokens, &cancel, &mut |chunk| {

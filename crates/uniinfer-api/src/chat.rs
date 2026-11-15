@@ -15,7 +15,7 @@ use uniinfer_service::ModelSlot;
 use crate::error::ApiError;
 use crate::extract::ApiJson;
 use crate::sse::{self, StreamEvent};
-use crate::state::{ActiveGuard, AppState, CancelGuard};
+use crate::state::AppState;
 use uniinfer_backends::utf8::Utf8Decoder;
 
 #[derive(Debug, Deserialize)]
@@ -49,7 +49,7 @@ pub(crate) async fn chat(
     State(state): State<AppState>,
     ApiJson(request): ApiJson<ChatRequest>,
 ) -> Result<Response, ApiError> {
-    let slot = state.slots.get(&request.model).cloned().ok_or_else(|| {
+    let slot = state.router.slot(&request.model).ok_or_else(|| {
         ApiError::not_found(
             "model_not_found",
             format!("model {} is not loaded", request.model),
@@ -81,10 +81,10 @@ pub(crate) async fn chat(
     let session_id = next_session_id();
     let cancel = CancelToken::new();
     let permit = slot
-        .acquire(state.queue_timeout)
+        .acquire(state.router.queue_timeout())
         .await
         .map_err(ApiError::from)?;
-    let mut guard = CancelGuard::new(&state, session_id.clone(), cancel.clone())?;
+    let mut guard = state.router.register(&session_id, cancel.clone())?;
 
     let generation = Generation {
         state,
@@ -149,7 +149,7 @@ async fn stream_response(generation: Generation) -> Result<Response, ApiError> {
 
     tokio::task::spawn_blocking(move || {
         let _permit = permit;
-        let _active = ActiveGuard::new(task_state.active.clone());
+        let _active = task_state.router.active_guard();
         let mut decoder = Utf8Decoder::new();
         let result = task_slot.generate(&prompt, max_tokens, &cancel, &mut |chunk| {
             for &byte in chunk {
@@ -173,7 +173,7 @@ async fn stream_response(generation: Generation) -> Result<Response, ApiError> {
         }
         let _ = tx.blocking_send(StreamEvent::Finish);
         let _ = tx.blocking_send(StreamEvent::Done);
-        task_state.unregister(&task_session);
+        task_state.router.unregister(&task_session);
     });
 
     let stream = sse::stream(rx, session_id.clone(), model, created);
@@ -203,13 +203,13 @@ async fn complete_response(generation: Generation) -> Result<Response, ApiError>
     let model = slot.manifest().id.clone();
     let (result, bytes) = tokio::task::spawn_blocking(move || {
         let _permit = permit;
-        let _active = ActiveGuard::new(task_state.active.clone());
+        let _active = task_state.router.active_guard();
         let mut bytes = Vec::new();
         let result = slot.generate(&prompt, max_tokens, &cancel, &mut |chunk| {
             bytes.extend_from_slice(chunk);
             true
         });
-        task_state.unregister(&task_session);
+        task_state.router.unregister(&task_session);
         (result, bytes)
     })
     .await

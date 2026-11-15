@@ -5004,6 +5004,7 @@ dependencies = [
  "tracing",
  "uniinfer-backends",
  "uniinfer-core",
+ "uniinfer-router",
  "uniinfer-service",
 ]
 
@@ -5093,6 +5094,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "uniinfer-router"
+version = "0.0.0"
+dependencies = [
+ "tokio",
+ "tracing",
+ "uniinfer-core",
+ "uniinfer-service",
+]
+
+[[package]]
 name = "uniinfer-service"
 version = "0.0.0"
 dependencies = [
@@ -5100,7 +5111,6 @@ dependencies = [
  "tracing",
  "uniinfer-backends",
  "uniinfer-core",
- "uniinfer-devices",
  "uniinfer-engine-set",
  "uniinfer-registry",
 ]

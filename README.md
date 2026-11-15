@@ -417,7 +417,7 @@ crates/
   uniinfer-engine-candle # candle-core/transformers；GGUF / Safetensors
   uniinfer-engine-llama  # llama.cpp；可选 GGUF 引擎
   uniinfer-backends      # Tokenizer、文本生成、PCM/VAD、UTF-8 流
-  uniinfer-router        # 目标层：请求/帧编排（尚未落地）
+  uniinfer-router        # 模型目录、取消表、活跃请求与队列超时
   uniinfer-api           # axum 路由、OpenAI 兼容层、WebSocket
   uniinfer-cli           # 冒烟、清单校验、bench 驱动
   uniinfer-bench         # 场景矩阵与基线对比
