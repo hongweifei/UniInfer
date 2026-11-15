@@ -23,7 +23,7 @@ pub fn build() -> Result<EngineRegistry> {
 
 /// Build the engine registry, optionally routing text models through an
 /// isolated worker process.
-pub fn build_with_process(isolate_text: bool) -> Result<EngineRegistry> {
+pub fn build_with_process(isolate_models: bool) -> Result<EngineRegistry> {
     let onnx = OnnxEngine::new()?;
     let candle = CandleEngine::new()?;
     #[cfg(feature = "llama")]
@@ -48,7 +48,7 @@ pub fn build_with_process(isolate_text: bool) -> Result<EngineRegistry> {
     }
 
     let mut registry = EngineRegistry::new(inventory);
-    if isolate_text {
+    if isolate_models {
         registry.register(Arc::new(ProcessEngine::new()));
     }
     registry.register(Arc::new(onnx));

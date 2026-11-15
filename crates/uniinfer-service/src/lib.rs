@@ -47,9 +47,9 @@ impl Runtime {
     }
 
     /// Assemble engines, optionally isolating text models in worker processes.
-    pub fn new_with_process(isolate_text: bool) -> Result<Self> {
+    pub fn new_with_process(isolate_models: bool) -> Result<Self> {
         Ok(Self {
-            registry: uniinfer_engine_set::build_with_process(isolate_text)?,
+            registry: uniinfer_engine_set::build_with_process(isolate_models)?,
         })
     }
 
