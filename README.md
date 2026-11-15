@@ -395,7 +395,7 @@ tags = ["onnx", "text", "fixture"]
 
 优先级：默认值 < 配置文件（`--config` 或 `UNIINFER_CONFIG`） < `UNIINFER_*` 环境变量 < CLI 覆盖参数。模型路径相对配置文件解析；GUI 可通过 `GET/PUT /v1/config` 读取和保存配置，服务端返回 `restart_required: true`，由 GUI 决定重启或提示用户。
 
-模型按请求懒加载：启动时只解析清单，不分配权重；`/v1/models` 对未加载模型返回 `loaded: false` 和探测到的路由。`server.max_loaded_models` 非零时按文本/音频类别分别执行 LRU 淘汰；请求仍持有的 `Arc` 会继续完成，不会被强行中断。
+模型按请求懒加载：启动时只解析清单，不分配权重；`/v1/models` 对未加载模型返回 `loaded: false` 和探测到的路由。也可以调用 `POST /v1/models/{id}/load` 预加载、`POST /v1/models/{id}/unload` 主动卸载。`server.max_loaded_models` 非零时按文本/音频类别分别执行 LRU 淘汰；请求仍持有的 `Arc` 会继续完成，不会被强行中断。
 
 ### 调用
 
@@ -478,6 +478,8 @@ sha256 = "9f8e6c1d0a4b7e2f5c8d1a3b6e9f0c2d4a7b1e8f3c6d9a2b5e0f4c7d1a8b3e6f"  # �
 | `/v1/config` | GET/PUT | 已实现 | 读取/保存 GUI 配置；token 读取时脱敏；保存后需要重启生效 |
 | `/v1/models/inspect` | POST | 已实现 | 扫描配置根目录内的模型目录并返回清单草稿 |
 | `/v1/models/import` | POST | 已实现 | 生成 manifest.toml 并加入应用配置 |
+| `/v1/models/{id}/load` | POST | 已实现 | 显式预加载模型 |
+| `/v1/models/{id}/unload` | POST | 已实现 | 从缓存卸载模型；在途请求持有 `Arc` 继续完成 |
 | `/v1/models/{id}/manifest` | GET/PUT | 已实现 | 读取/替换已加载模型的清单；PUT 后需重启 |
 | `/v1/models` | GET | 已实现 | 已加载模型、能力矩阵与放置计划 |
 | `/v1/devices` | GET | 已实现 | 运行时设备清单与各模型放置/回退原因 |

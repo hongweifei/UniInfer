@@ -130,6 +130,19 @@ impl ModelRouter {
             .and_then(|slots| slots.get(id).cloned())
     }
 
+    /// Drop a loaded slot from the cache. Existing request `Arc`s keep it alive.
+    pub fn remove_slot(&self, id: &str) -> bool {
+        let removed = self
+            .slots
+            .write()
+            .map(|mut slots| slots.remove(id).is_some())
+            .unwrap_or(false);
+        if let Ok(mut lru) = self.lru.lock() {
+            lru.retain(|entry| entry != id);
+        }
+        removed
+    }
+
     /// Insert a lazily loaded model. Replacing an existing entry is a no-op
     /// when another request won the load race.
     pub fn insert_slot(&self, id: &str, slot: Arc<ModelSlot>) -> Result<()> {

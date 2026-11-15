@@ -176,6 +176,22 @@ impl AppState {
         }
     }
 
+    pub(crate) fn unload_text(&self, id: &str) -> bool {
+        self.router.remove_slot(id)
+    }
+
+    pub(crate) fn unload_audio(&self, id: &str) -> bool {
+        let removed = self
+            .audio_slots
+            .lock()
+            .map(|mut slots| slots.remove(id).is_some())
+            .unwrap_or(false);
+        if let Ok(mut lru) = self.audio_lru.lock() {
+            lru.retain(|entry| entry != id);
+        }
+        removed
+    }
+
     pub(crate) fn audio_catalog_ids(&self) -> Vec<String> {
         self.catalog
             .iter()

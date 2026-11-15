@@ -17,6 +17,11 @@ pub fn router(state: AppState) -> Router {
         .route("/health", get(health))
         .route("/metrics", get(metrics))
         .route("/v1/models", get(models))
+        .route("/v1/models/{id}/load", post(crate::model_lifecycle::load))
+        .route(
+            "/v1/models/{id}/unload",
+            post(crate::model_lifecycle::unload),
+        )
         .route(
             "/v1/models/{id}/manifest",
             get(crate::manifest_api::get).put(crate::manifest_api::put),
