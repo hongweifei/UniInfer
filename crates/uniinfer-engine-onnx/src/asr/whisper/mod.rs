@@ -10,15 +10,13 @@ mod config;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use ort::environment::Environment;
-use ort::session::Session;
-use ort::value::{DynValue, Tensor as OrtTensor};
 use tokenizers::Tokenizer;
 use uniinfer_core::{
     DeviceClass, EngineError, EngineLoadSpec, EngineSession, Result, Tensor, TensorData,
     TensorDtype, TensorSpec,
 };
 
-use crate::build_session;
+use crate::graph::Graph;
 
 use self::cache::{run_decoder, run_with_past};
 use self::config::{WhisperConfig, options};
@@ -42,14 +40,15 @@ pub(crate) fn load(
     let config_file = super::options::path(&spec.base_dir, &options.config_file, "config_file")?;
     spec.manifest.verify_files(&spec.base_dir)?;
 
-    let encoder = build_session(environment, class, &encoder)?;
-    let decoder = build_session(environment, class, &decoder)?;
+    let encoder = Graph::load(environment, class, &encoder, "whisper encoder")?;
+    let decoder = Graph::load(environment, class, &decoder, "whisper decoder")?;
     let decoder_with_past = options
         .decoder_with_past_file
         .as_ref()
         .map(|file| {
-            super::options::path(&spec.base_dir, file, "decoder_with_past_file")
-                .and_then(|path| build_session(environment, class, &path))
+            super::options::path(&spec.base_dir, file, "decoder_with_past_file").and_then(|path| {
+                Graph::load(environment, class, &path, "whisper decoder_with_past")
+            })
         })
         .transpose()?;
     let tokenizer = Tokenizer::from_file(&tokenizer_file)
@@ -99,9 +98,9 @@ pub(crate) struct WhisperOnnxSession {
 }
 
 struct WhisperState {
-    encoder: Session,
-    decoder: Session,
-    decoder_with_past: Option<Session>,
+    encoder: Graph,
+    decoder: Graph,
+    decoder_with_past: Option<Graph>,
     tokenizer: Tokenizer,
     config: WhisperConfig,
     sample_rate: u32,
@@ -153,34 +152,23 @@ impl WhisperState {
             .encoder
             .inputs()
             .first()
-            .map(|outlet| outlet.name().to_owned())
+            .map(|spec| spec.name.clone())
             .ok_or_else(|| EngineError::LoadFailed("encoder has no inputs".into()))?;
-        let encoder_output = self
+        let features = Tensor::new(
+            encoder_input,
+            vec![1, mel::N_MELS, mel::N_FRAMES],
+            TensorData::F32(features.to_vec()),
+        )?;
+        let hidden = self
             .encoder
-            .outputs()
-            .first()
-            .map(|outlet| outlet.name().to_owned())
+            .run(vec![features])?
+            .into_iter()
+            .next()
             .ok_or_else(|| EngineError::LoadFailed("encoder has no outputs".into()))?;
-        let features =
-            OrtTensor::from_array((vec![1usize, mel::N_MELS, mel::N_FRAMES], features.to_vec()))
-                .map_err(|error| EngineError::Other(format!("encoder features: {error}")))?
-                .into_dyn();
-        let outputs = self
-            .encoder
-            .run(vec![(encoder_input, features)])
-            .map_err(|error| EngineError::Other(format!("onnx encoder: {error}")))?;
-        let (hidden_shape, hidden_values) = outputs[encoder_output.as_str()]
-            .try_extract_tensor::<f32>()
-            .map_err(|error| EngineError::Other(format!("encoder output: {error}")))?;
-        let hidden_shape = hidden_shape
-            .iter()
-            .map(|dim| *dim as usize)
-            .collect::<Vec<_>>();
-        let hidden_values = hidden_values.to_vec();
 
         let mut ids = self.config.initial_ids();
         let mut generated = Vec::new();
-        let mut cache: Option<Vec<(String, DynValue)>> = None;
+        let mut cache: Option<Vec<Tensor>> = None;
         while generated.len() < self.max_tokens {
             if cancelled.load(Ordering::SeqCst) {
                 return Err(EngineError::Cancelled);
@@ -199,13 +187,12 @@ impl WhisperState {
                         token
                     }
                     None => {
-                        let (token, new_cache) =
-                            run_decoder(&mut self.decoder, &ids, &hidden_shape, &hidden_values)?;
+                        let (token, new_cache) = run_decoder(&mut self.decoder, &ids, &hidden)?;
                         cache = Some(new_cache);
                         token
                     }
                 },
-                None => run_decoder(&mut self.decoder, &ids, &hidden_shape, &hidden_values)?.0,
+                None => run_decoder(&mut self.decoder, &ids, &hidden)?.0,
             };
             if token == self.config.eos_token_id {
                 break;

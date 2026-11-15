@@ -1,143 +1,115 @@
 //! Decoder execution and KV-cache hand-off for Whisper ONNX.
+//!
+//! This module only deals in `Tensor` and `Graph`; ORT values stay inside the
+//! graph wrapper.
 
-use ort::session::{Session, SessionInputValue};
-use ort::value::{DynValue, Tensor as OrtTensor};
-use uniinfer_core::{EngineError, Result};
+use uniinfer_core::{EngineError, Result, Tensor, TensorData};
 
 use crate::asr::decode::argmax;
+use crate::graph::Graph;
+
 pub(super) fn run_decoder(
-    session: &mut Session,
+    graph: &mut Graph,
     ids: &[u32],
-    hidden_shape: &[usize],
-    hidden_values: &[f32],
-) -> Result<(u32, Vec<(String, DynValue)>)> {
-    let input_ids_name = session
+    encoder_hidden: &Tensor,
+) -> Result<(u32, Vec<Tensor>)> {
+    let input_ids_name = graph
         .inputs()
-        .first()
-        .map(|outlet| outlet.name().to_owned())
-        .ok_or_else(|| EngineError::LoadFailed("decoder has no inputs".into()))?;
-    let hidden_name = session
+        .iter()
+        .find(|spec| spec.name == "input_ids")
+        .map(|spec| spec.name.clone())
+        .ok_or_else(|| EngineError::LoadFailed("decoder has no input_ids".into()))?;
+    let hidden_name = graph
         .inputs()
-        .get(1)
-        .map(|outlet| outlet.name().to_owned())
+        .iter()
+        .find(|spec| spec.name != input_ids_name)
+        .map(|spec| spec.name.clone())
         .ok_or_else(|| EngineError::LoadFailed("decoder has no encoder input".into()))?;
-    let logits_name = session
-        .outputs()
-        .first()
-        .map(|outlet| outlet.name().to_owned())
-        .ok_or_else(|| EngineError::LoadFailed("decoder has no outputs".into()))?;
-    let input_ids = OrtTensor::from_array((
-        vec![1usize, ids.len()],
-        ids.iter().map(|id| i64::from(*id)).collect::<Vec<_>>(),
-    ))
-    .map_err(|error| EngineError::Other(format!("decoder ids: {error}")))?
-    .into_dyn();
-    let hidden = OrtTensor::from_array((hidden_shape.to_vec(), hidden_values.to_vec()))
-        .map_err(|error| EngineError::Other(format!("encoder hidden: {error}")))?
-        .into_dyn();
-    let present_names = present_names(session);
-    let mut outputs = session
-        .run(vec![(input_ids_name, input_ids), (hidden_name, hidden)])
-        .map_err(|error| EngineError::Other(format!("onnx decoder: {error}")))?;
-    let token = token_from_logits(&outputs, &logits_name)?;
-    let cache = take_present(&mut outputs, &present_names)?;
+    let input_ids = Tensor::new(
+        input_ids_name,
+        vec![1, ids.len()],
+        TensorData::I64(ids.iter().map(|id| i64::from(*id)).collect()),
+    )?;
+    let hidden = Tensor::new(
+        hidden_name,
+        encoder_hidden.shape.clone(),
+        encoder_hidden.data.clone(),
+    )?;
+    let outputs = graph.run(vec![input_ids, hidden])?;
+    let token = token_from_logits(&outputs)?;
+    let cache = take_present(graph, &outputs);
     Ok((token, cache))
 }
 
 pub(super) fn run_with_past(
-    session: &mut Session,
+    graph: &mut Graph,
     token: u32,
-    cache: Vec<(String, DynValue)>,
+    cache: Vec<Tensor>,
     position: usize,
-) -> Result<(u32, Vec<(String, DynValue)>)> {
-    let input_ids_name = session
-        .inputs()
-        .iter()
-        .find(|outlet| outlet.name() == "input_ids")
-        .map(|outlet| outlet.name().to_owned())
-        .ok_or_else(|| EngineError::LoadFailed("decoder_with_past has no input_ids".into()))?;
-    let logits_name = session
-        .outputs()
-        .first()
-        .map(|outlet| outlet.name().to_owned())
-        .ok_or_else(|| EngineError::LoadFailed("decoder_with_past has no outputs".into()))?;
-    let input_names = session
-        .inputs()
-        .iter()
-        .map(|outlet| outlet.name().to_owned())
-        .collect::<Vec<_>>();
-
-    let ids_value = OrtTensor::from_array((vec![1usize, 1usize], vec![i64::from(token)]))
-        .map_err(|error| EngineError::Other(format!("past ids: {error}")))?
-        .into_dyn();
-    let position_value = OrtTensor::from_array((vec![1usize], vec![position as i64]))
-        .map_err(|error| EngineError::Other(format!("cache position: {error}")))?
-        .into_dyn();
-    let mut values: Vec<(String, SessionInputValue<'_>)> = Vec::with_capacity(input_names.len());
-    for name in input_names {
-        match name.as_str() {
-            "input_ids" => {
-                values.push((input_ids_name.clone(), SessionInputValue::from(&ids_value)));
-            }
+) -> Result<(u32, Vec<Tensor>)> {
+    let specs = graph.inputs().to_vec();
+    let mut inputs = Vec::with_capacity(specs.len());
+    for spec in specs {
+        let tensor = match spec.name.as_str() {
+            "input_ids" => Tensor::new(
+                spec.name,
+                vec![1, 1],
+                TensorData::I64(vec![i64::from(token)]),
+            )?,
             "cache_position" => {
-                values.push((name, SessionInputValue::from(&position_value)));
+                Tensor::new(spec.name, vec![1], TensorData::I64(vec![position as i64]))?
             }
-            _ => {
+            name => {
                 let present = name.replacen("past_key_values.", "present.", 1);
-                let value = cache
+                let tensor = cache
                     .iter()
-                    .find(|(cached, _)| cached == &present)
-                    .map(|(_, value)| value)
+                    .find(|tensor| tensor.name == present)
+                    .cloned()
                     .ok_or_else(|| EngineError::Other(format!("missing past cache {present}")))?;
-                values.push((name, SessionInputValue::from(value)));
+                Tensor::new(spec.name, tensor.shape, tensor.data)?
             }
-        }
+        };
+        inputs.push(tensor);
     }
-    let present_names = present_names(session);
-    let mut outputs = session
-        .run(values)
-        .map_err(|error| EngineError::Other(format!("onnx decoder_with_past: {error}")))?;
-    let token = token_from_logits(&outputs, &logits_name)?;
+
+    let outputs = graph.run(inputs)?;
+    let token = token_from_logits(&outputs)?;
     let retained = cache
         .into_iter()
-        .filter(|(name, _)| name.contains(".encoder."))
+        .filter(|tensor| tensor.name.contains(".encoder."))
         .collect::<Vec<_>>();
-    let mut cache = take_present(&mut outputs, &present_names)?;
+    let mut cache = take_present(graph, &outputs);
     cache.extend(retained);
     Ok((token, cache))
 }
 
-fn token_from_logits(outputs: &ort::session::SessionOutputs<'_>, name: &str) -> Result<u32> {
-    let (shape, logits) = outputs[name]
-        .try_extract_tensor::<f32>()
-        .map_err(|error| EngineError::Other(format!("decoder logits: {error}")))?;
-    let shape = shape.iter().map(|dim| *dim as usize).collect::<Vec<_>>();
-    let vocab = *shape
+fn token_from_logits(outputs: &[Tensor]) -> Result<u32> {
+    let logits = outputs
+        .iter()
+        .find(|tensor| tensor.name == "logits")
+        .or_else(|| outputs.first())
+        .ok_or_else(|| EngineError::Other("decoder has no logits".into()))?;
+    let TensorData::F32(values) = &logits.data else {
+        return Err(EngineError::Other("decoder logits must be f32".into()));
+    };
+    let vocab = *logits
+        .shape
         .last()
         .ok_or_else(|| EngineError::Other("empty logits shape".into()))?;
-    let offset = logits.len().saturating_sub(vocab);
-    Ok(argmax(&logits[offset..]))
+    let offset = values.len().saturating_sub(vocab);
+    Ok(argmax(&values[offset..]))
 }
 
-fn present_names(session: &Session) -> Vec<String> {
-    session
+fn take_present(graph: &Graph, outputs: &[Tensor]) -> Vec<Tensor> {
+    graph
         .outputs()
         .iter()
-        .map(|outlet| outlet.name().to_owned())
-        .filter(|name| name.starts_with("present."))
+        .filter(|spec| spec.name.starts_with("present."))
+        .filter_map(|spec| {
+            outputs
+                .iter()
+                .find(|tensor| tensor.name == spec.name)
+                .cloned()
+        })
         .collect()
-}
-
-fn take_present(
-    outputs: &mut ort::session::SessionOutputs<'_>,
-    names: &[String],
-) -> Result<Vec<(String, DynValue)>> {
-    let mut values = Vec::with_capacity(names.len());
-    for name in names {
-        let value = outputs
-            .remove(name.as_str())
-            .ok_or_else(|| EngineError::Other(format!("missing present cache {name}")))?;
-        values.push((name.clone(), value));
-    }
-    Ok(values)
 }

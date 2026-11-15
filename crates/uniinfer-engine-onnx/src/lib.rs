@@ -13,6 +13,7 @@ use uniinfer_core::{
 
 mod asr;
 mod genai;
+mod graph;
 mod io;
 mod session;
 

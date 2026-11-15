@@ -9,8 +9,6 @@ use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use ort::environment::Environment;
-use ort::session::Session;
-use ort::value::Tensor as OrtTensor;
 use serde::Deserialize;
 use tokenizers::Tokenizer;
 use uniinfer_core::{
@@ -18,7 +16,7 @@ use uniinfer_core::{
     TensorDtype, TensorSpec,
 };
 
-use crate::build_session;
+use crate::graph::Graph;
 
 use super::decode::ctc_tokens;
 use super::options;
@@ -52,21 +50,21 @@ pub(crate) fn load(
     };
     let tokenizer_file = options::path(&spec.base_dir, &options.tokenizer_file, "tokenizer_file")?;
     spec.manifest.verify_files(&spec.base_dir)?;
-    let session = build_session(environment, class, &graph)?;
-    if !session
+    let graph = Graph::load(environment, class, &graph, "ctc")?;
+    if !graph
         .inputs()
         .iter()
-        .any(|input| input.name() == options.graph_input)
+        .any(|input| input.name == options.graph_input)
     {
         return Err(EngineError::ManifestInvalid(format!(
             "CTC graph has no input {:?}",
             options.graph_input
         )));
     }
-    if !session
+    if !graph
         .outputs()
         .iter()
-        .any(|output| output.name() == options.graph_output)
+        .any(|output| output.name == options.graph_output)
     {
         return Err(EngineError::ManifestInvalid(format!(
             "CTC graph has no output {:?}",
@@ -79,7 +77,7 @@ pub(crate) fn load(
     let output_name = audio.output.clone();
     Ok(CtcOnnxSession {
         state: Mutex::new(CtcState {
-            session,
+            graph,
             tokenizer,
             graph_input: options.graph_input.clone(),
             graph_output: options.graph_output.clone(),
@@ -139,7 +137,7 @@ pub(crate) struct CtcOnnxSession {
 }
 
 struct CtcState {
-    session: Session,
+    graph: Graph,
     tokenizer: Tokenizer,
     graph_input: String,
     graph_output: String,
@@ -173,23 +171,23 @@ impl EngineSession for CtcOnnxSession {
             .state
             .lock()
             .map_err(|_| EngineError::Other("CTC state lock poisoned".into()))?;
-        let value = OrtTensor::from_array((vec![1usize, samples.len()], samples.clone()))
-            .map_err(|error| EngineError::Other(format!("CTC audio tensor: {error}")))?
-            .into_dyn();
         let graph_input = state.graph_input.clone();
         let graph_output = state.graph_output.clone();
         let (shape, logits) = {
-            let outputs = state
-                .session
-                .run(vec![(graph_input, value)])
-                .map_err(|error| EngineError::Other(format!("onnx CTC run: {error}")))?;
-            let (shape, logits) = outputs[graph_output.as_str()]
-                .try_extract_tensor::<f32>()
-                .map_err(|error| EngineError::Other(format!("CTC logits: {error}")))?;
-            (
-                shape.iter().map(|dim| *dim as usize).collect::<Vec<_>>(),
-                logits.to_vec(),
-            )
+            let value = Tensor::new(
+                graph_input.clone(),
+                vec![1, samples.len()],
+                TensorData::F32(samples.clone()),
+            )?;
+            let outputs = state.graph.run(vec![value])?;
+            let logits = outputs
+                .into_iter()
+                .find(|tensor| tensor.name == graph_output)
+                .ok_or_else(|| EngineError::Other("CTC logits missing".into()))?;
+            let TensorData::F32(values) = logits.data else {
+                return Err(EngineError::Other("CTC logits must be f32".into()));
+            };
+            (logits.shape, values)
         };
         let vocab = *shape
             .last()
