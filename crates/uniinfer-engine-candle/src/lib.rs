@@ -1,7 +1,8 @@
-//! Candle engine for Qwen3 GGUF and Safetensors models.
+//! Candle engine with a manifest-driven text family registry.
 
 mod cancel_io;
 mod qwen3;
+mod text;
 
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -15,17 +16,18 @@ use uniinfer_core::{
 
 const FORMATS: &[ModelFormat] = &[ModelFormat::Gguf, ModelFormat::Safetensors];
 const MODALITIES: &[Modality] = &[Modality::Text];
-const FAMILY: &str = "qwen3";
 
 /// Candle engine; the concrete device is chosen per session from the plan.
 pub struct CandleEngine {
     devices: Vec<DeviceClass>,
+    text: text::TextRegistry,
 }
 
 impl CandleEngine {
     pub fn new() -> Result<Self> {
         Ok(Self {
             devices: probe_devices(),
+            text: text::TextRegistry::new(),
         })
     }
 
@@ -103,10 +105,18 @@ impl InferenceEngine for CandleEngine {
 
     fn supported_quantizations(&self, format: ModelFormat) -> &[Quantization] {
         match format {
-            ModelFormat::Gguf => qwen3::GGUF_QUANTIZATIONS,
-            ModelFormat::Safetensors => qwen3::SAFETENSORS_QUANTIZATIONS,
+            ModelFormat::Gguf => text::GGUF_QUANTIZATIONS,
+            ModelFormat::Safetensors => text::SAFETENSORS_QUANTIZATIONS,
             _ => &[],
         }
+    }
+
+    fn supports_architecture(&self, manifest: &uniinfer_core::ModelManifest) -> bool {
+        manifest
+            .text
+            .as_ref()
+            .and_then(|text| text.family.as_deref())
+            .is_some_and(|family| self.text.supported(family))
     }
 
     fn supported_devices(&self) -> &[DeviceClass] {
@@ -147,25 +157,25 @@ impl InferenceEngine for CandleEngine {
             .text
             .as_ref()
             .ok_or_else(|| EngineError::ManifestInvalid("text config required".into()))?;
-        if text.family.as_deref() != Some(FAMILY) {
-            return Err(EngineError::UnsupportedEngine(format!(
-                "candle family {:?} is not implemented",
-                text.family
-            )));
-        }
-        let model = match spec.manifest.format {
-            ModelFormat::Gguf => {
-                let model_file = spec
-                    .manifest
-                    .files
-                    .first()
-                    .ok_or_else(|| EngineError::ManifestInvalid("files is empty".into()))?;
-                qwen3::load_gguf(&spec.base_dir.join(&model_file.path), &device, &spec.cancel)?
-            }
-            ModelFormat::Safetensors => {
-                let config_file = text.config_file.as_ref().ok_or_else(|| {
-                    EngineError::ManifestInvalid("text.config_file is required".into())
+        let family_name = text
+            .family
+            .as_deref()
+            .ok_or_else(|| EngineError::ManifestInvalid("text.family is required".into()))?;
+        let family =
+            self.text
+                .get(family_name)
+                .ok_or_else(|| EngineError::UnsupportedArchitecture {
+                    format: spec.manifest.format,
+                    architecture: family_name.to_owned(),
                 })?;
+        let model_paths = match spec.manifest.format {
+            ModelFormat::Gguf => spec
+                .manifest
+                .files
+                .first()
+                .map(|file| vec![spec.base_dir.join(&file.path)])
+                .ok_or_else(|| EngineError::ManifestInvalid("files is empty".into()))?,
+            ModelFormat::Safetensors => {
                 let shards = spec
                     .manifest
                     .files
@@ -181,21 +191,28 @@ impl InferenceEngine for CandleEngine {
                         "no .safetensors shards in files".into(),
                     ));
                 }
-                let dtype = match spec.manifest.quantization {
-                    Quantization::Bf16 => DType::BF16,
-                    Quantization::Fp16 => DType::F16,
-                    _ => DType::F32,
-                };
-                qwen3::load_safetensors(
-                    &shards,
-                    &spec.base_dir.join(config_file),
-                    dtype,
-                    &device,
-                    &spec.cancel,
-                )?
+                shards
             }
             _ => unreachable!(),
         };
+        let dtype = match spec.manifest.quantization {
+            Quantization::Bf16 => DType::BF16,
+            Quantization::Fp16 => DType::F16,
+            _ => DType::F32,
+        };
+        let config_path = spec.base_dir.join(
+            text.config_file
+                .as_deref()
+                .unwrap_or_else(|| std::path::Path::new("")),
+        );
+        let model = family.load(&text::LoadContext {
+            format: spec.manifest.format,
+            model_paths: &model_paths,
+            config_path: &config_path,
+            dtype,
+            device: &device,
+            cancel: &spec.cancel,
+        })?;
 
         if spec.cancel.is_cancelled() {
             return Err(EngineError::Cancelled);
@@ -229,7 +246,7 @@ impl InferenceEngine for CandleEngine {
 }
 
 struct CandleState {
-    model: qwen3::Model,
+    model: Box<dyn text::TextModel>,
     cached_ids: Vec<u32>,
 }
 

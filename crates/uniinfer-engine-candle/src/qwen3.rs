@@ -7,28 +7,7 @@ use candle_core::{DType, Device, Tensor};
 use candle_nn::VarBuilder;
 use candle_transformers::models::quantized_qwen3::ModelWeights;
 use candle_transformers::models::qwen3::{Config, ModelForCausalLM};
-use uniinfer_core::{CancelToken, EngineError, Quantization, Result};
-
-pub(crate) const GGUF_QUANTIZATIONS: &[Quantization] = &[
-    Quantization::Q4_0,
-    Quantization::Q4_1,
-    Quantization::Q5_0,
-    Quantization::Q5_1,
-    Quantization::Q8_0,
-    Quantization::Q2K,
-    Quantization::Q3KS,
-    Quantization::Q3KM,
-    Quantization::Q3KL,
-    Quantization::Q4KS,
-    Quantization::Q4KM,
-    Quantization::Q5KS,
-    Quantization::Q5KM,
-    Quantization::Q6K,
-    Quantization::Q8K,
-    Quantization::Q2KS,
-];
-pub(crate) const SAFETENSORS_QUANTIZATIONS: &[Quantization] =
-    &[Quantization::Bf16, Quantization::Fp16, Quantization::Fp32];
+use uniinfer_core::{CancelToken, EngineError, Result};
 
 pub(crate) enum Model {
     Quantized(ModelWeights),

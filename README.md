@@ -141,10 +141,10 @@ pub trait InferenceEngine: Send + Sync {
 | ONNX | 文本生成 / GenAI KV cache | `OnnxEngine` | 已实现 |
 | ONNX | 语音转写（Whisper encoder/decoder / CTC） | `OnnxEngine` ASR adapter registry | 已实现，批量 |
 | ONNX | 图像 / 逐帧视频 / 实时预览 | — | 计划 |
-| GGUF | 文本（Qwen3，含 IQ/MXFP4 可选 llama） | `CandleEngine` / `LlamaEngine` | 已实现 |
+| GGUF | 文本（Qwen2/Qwen3，含 IQ/MXFP4 可选 llama） | `CandleEngine` / `LlamaEngine` | 已实现 |
 | GGUF | 视觉语言 / 双工 | — | 计划 |
 | GGUF | 图像 / 视频生成 | — | 计划 |
-| Safetensors | 文本（Qwen3） | `CandleEngine` | 已实现 |
+| Safetensors | 文本（Qwen2/Qwen3） | `CandleEngine` | 已实现 |
 | Safetensors | 视觉语言 / 双工 / 图像 / 视频 | — | 计划 |
 | GGML | 语音转写（Whisper） | `WhisperEngine`（可选 feature） | 已实现，批量 |
 | 任意 | 实时 ASR → 文本响应 | `/v1/realtime` + ASR slot | 已实现 |
