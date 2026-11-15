@@ -191,17 +191,28 @@ impl AppState {
         task: tokio::task::JoinHandle<Result<T>>,
         cancel: CancelToken,
     ) -> Result<T> {
-        let joined = match self.model_load_timeout {
-            Some(timeout) => match tokio::time::timeout(timeout, task).await {
-                Ok(joined) => joined,
-                Err(_) => {
-                    cancel.cancel();
-                    return Err(EngineError::Timeout);
-                }
-            },
-            None => task.await,
+        let Some(timeout) = self.model_load_timeout else {
+            return task
+                .await
+                .map_err(|error| EngineError::Other(format!("model load task: {error}")))?;
         };
-        joined.map_err(|error| EngineError::Other(format!("model load task: {error}")))?
+        let started = std::time::Instant::now();
+        let joined = match tokio::time::timeout(timeout, task).await {
+            Ok(joined) => joined,
+            Err(_) => {
+                cancel.cancel();
+                return Err(EngineError::Timeout);
+            }
+        };
+        let loaded =
+            joined.map_err(|error| EngineError::Other(format!("model load task: {error}")))??;
+        // The deadline timer has ~1ms granularity, so a load can finish after the
+        // budget but before the timer fires. Discard it as timed out too.
+        if started.elapsed() > timeout {
+            cancel.cancel();
+            return Err(EngineError::Timeout);
+        }
+        Ok(loaded)
     }
 
     pub(crate) fn unload_text(&self, id: &str) -> bool {
@@ -254,6 +265,19 @@ mod tests {
         let cancel = CancelToken::new();
         let error = state
             .await_load(slow_load(), cancel.clone())
+            .await
+            .expect_err("timeout");
+        assert!(matches!(error, EngineError::Timeout));
+        assert!(cancel.is_cancelled());
+    }
+
+    #[tokio::test]
+    async fn load_finishing_after_budget_still_times_out() {
+        let state = state(std::time::Duration::from_nanos(1));
+        let cancel = CancelToken::new();
+        let task = tokio::task::spawn_blocking(|| -> Result<()> { Ok(()) });
+        let error = state
+            .await_load(task, cancel.clone())
             .await
             .expect_err("timeout");
         assert!(matches!(error, EngineError::Timeout));
