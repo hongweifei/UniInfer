@@ -146,7 +146,8 @@ pub trait InferenceEngine: Send + Sync {
 | GGUF | 图像 / 视频生成 | — | 计划 |
 | Safetensors | 文本（Qwen2/Qwen3） | `CandleEngine` | 已实现 |
 | Safetensors | 视觉语言（Qwen3-VL） | `CandleEngine` | 已实现（OpenAI 单图 content part） |
-| GGUF | 视觉语言（Qwen2.5-VL Q4 + mmproj） | `LlamaMtmdEngine` | 已实现（单图 forward） |
+| GGUF | 视觉语言（SmolVLM2-256M Q4 + mmproj） | `LlamaMtmdEngine` | 已实现（OpenAI 单图 content part） |
+| GGUF | 视觉语言（Qwen2.5-VL Q4 + mmproj） | `LlamaMtmdEngine` | 已实现（引擎级单图生成） |
 | Safetensors | 视觉语言 / 双工 / 图像 / 视频 | — | 计划 |
 | GGML | 语音转写（Whisper） | `WhisperEngine`（可选 feature） | 已实现，批量 |
 | 任意 | 实时 ASR → 文本响应 | `/v1/realtime` + ASR slot | 已实现 |
@@ -279,13 +280,15 @@ cargo run -p uniinfer-cli --features llama -- run \
   --prompt "你好" --max-tokens 32
 ```
 
-视觉 GGUF（Q4 主模型 + mmproj）需要 `llama-mtmd` feature：
+视觉 GGUF（Q4 主模型 + mmproj）需要 `llama-mtmd` feature。小尺寸量化闭环用 SmolVLM2-256M：
 
 ```bash
-models/fetch-qwen2.5-vl-gguf.sh
+models/fetch-smolvlm2-256m.sh
 cargo run -p uniinfer-cli --features llama-mtmd -- serve \
-  --manifest models/qwen2.5-vl-7b-gguf/manifest.toml
+  --manifest models/smolvlm2-256m-q4/manifest.toml
 ```
+
+`/v1/chat/completions` 的 `image_url` 会经 `LlamaMtmdSession::generate_text` 原生解码；Qwen2.5-VL 7B Q4 清单同样可用，但测试默认使用 256M 模型。
 
 构建前置条件：CMake、C++ 编译器（Windows 用 MSVC）和 `libclang`（bindgen 需要）。Windows 示例：
 
@@ -432,7 +435,7 @@ curl -N http://127.0.0.1:8080/v1/chat/completions \
 
 `stop` 接受字符串或字符串数组；流式与非流式共用字节级匹配器，跨 token 的停止串不会泄漏到输出。
 
-聊天请求支持 OpenAI `tools` / `tool_choice`、`role: "tool"`、assistant `tool_calls`，以及 `text` / `image_url` content parts。图像只接受 base64 `data:` URL、单请求单图、最大 20 MiB；模型清单必须有 `[vision]` 且引擎暴露 int64 token + uint8 image 输入，否则返回稳定 400：
+聊天请求支持 OpenAI `tools` / `tool_choice`、`role: "tool"`、assistant `tool_calls`，以及 `text` / `image_url` content parts。图像只接受 base64 `data:` URL、单请求单图、最大 20 MiB；模型清单必须有 `[vision]`，且引擎要么暴露 int64 token + uint8 image 输入，要么实现原生 token 解码（如 llama.cpp mtmd），否则返回稳定 400：
 
 ```bash
 curl http://127.0.0.1:8080/v1/chat/completions \

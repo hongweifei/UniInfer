@@ -264,7 +264,7 @@ pub(crate) async fn chat(
                 "vision.image_token is not configured for this model",
             ));
         }
-        if !slot.supports_image_prompt() {
+        if !slot.supports_image_prompt() && !slot.supports_native_generation() {
             return Err(ApiError::bad_request(
                 "unsupported_engine_image",
                 format!(

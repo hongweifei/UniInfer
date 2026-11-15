@@ -9,7 +9,10 @@ use uniinfer_backends::{
     ByteTokenizer, ChatMessage, ChatTemplate, GenerationOutput, GenerationSpec,
     HuggingFaceTokenizer, TextGenerator, Tokenizer, fallback_prompt,
 };
-use uniinfer_core::{Device, EngineError, EngineSession, ModelManifest, PlacementPlan, Result};
+use uniinfer_core::{
+    Device, EngineError, EngineSession, ModelManifest, NativeFinish, NativeTextRequest,
+    PlacementPlan, Result,
+};
 use uniinfer_registry::{EngineRegistry, EngineRoute, SessionLease};
 
 mod audio;
@@ -291,6 +294,12 @@ impl ModelSlot {
         }
     }
 
+    /// Whether the engine decodes tokens internally.
+    #[must_use]
+    pub fn supports_native_generation(&self) -> bool {
+        self.session().supports_native_generation()
+    }
+
     /// Whether the engine session accepts an image tensor alongside token ids.
     #[must_use]
     pub fn supports_image_prompt(&self) -> bool {
@@ -339,6 +348,33 @@ impl ModelSlot {
         spec: GenerationSpec,
         on_bytes: &mut dyn FnMut(&[u8]) -> bool,
     ) -> Result<GenerationOutput> {
+        spec.sampling.validate()?;
+        if let Some(output) = self.session().generate_text(
+            NativeTextRequest {
+                prompt,
+                images,
+                max_tokens: spec.max_tokens,
+                temperature: spec.sampling.temperature,
+                top_p: spec.sampling.top_p,
+                top_k: spec.sampling.top_k,
+                seed: spec.sampling.seed,
+                frequency_penalty: spec.sampling.frequency_penalty,
+                presence_penalty: spec.sampling.presence_penalty,
+                deadline: spec.deadline,
+                cancel,
+            },
+            on_bytes,
+        )? {
+            return Ok(GenerationOutput {
+                bytes: output.bytes,
+                tokens: output.tokens,
+                finish: match output.finish {
+                    NativeFinish::Eos => uniinfer_backends::FinishReason::Eos,
+                    NativeFinish::Length => uniinfer_backends::FinishReason::Length,
+                    NativeFinish::SinkClosed => uniinfer_backends::FinishReason::SinkClosed,
+                },
+            });
+        }
         self.generator
             .generate_with_images(self.session(), prompt, images, cancel, spec, on_bytes)
     }

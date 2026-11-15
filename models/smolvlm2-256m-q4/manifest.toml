@@ -1,0 +1,41 @@
+schema_version = 1
+id = "smolvlm2-256m-q4"
+format = "gguf"
+quantization = "q4_k_m"
+modalities = ["text", "image"]
+streaming_capable = false
+context_len = 4096
+tokenizer = "hf"
+min_vram = "1GiB"
+
+[placement]
+policy = "auto"
+prefer = ["gpu", "cpu"]
+allow_cpu_fallback = true
+
+[text]
+vocab_size = 49280
+eos_token = 49279
+family = "smolvlm2"
+tokenizer_file = "tokenizer.json"
+
+[vision]
+architecture = "llama_mtmd"
+mmproj_file = "mmproj-SmolVLM2-256M-Video-Instruct-Q8_0.gguf"
+image_token = "<__media__>"
+
+[[files]]
+path = "SmolVLM2-256M-Video-Instruct-Q4_K_M.gguf"
+sha256 = "159de7db92a9f5817c05ed2527fc7ca223939e7cca06589051fc34d5dca1cffa"
+
+[[files]]
+path = "mmproj-SmolVLM2-256M-Video-Instruct-Q8_0.gguf"
+sha256 = "05d5751132244a6ebd64cba9b34898c0d874b2cb78159d758e1d4da3aad91581"
+
+[[files]]
+path = "tokenizer.json"
+sha256 = "5ece781dc8d2b2f3e2f289ca0ae50b17cfc27dd27bfe7971bb8241e0b964331a"
+
+[[files]]
+path = "tokenizer_config.json"
+sha256 = "8b262ec2acb7773caac7b1e59edf921671cdb4c7c815a9c714242540d3fcb531"

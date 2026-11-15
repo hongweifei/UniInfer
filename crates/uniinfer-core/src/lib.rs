@@ -11,7 +11,10 @@ pub use cancel::CancelToken;
 pub use device::{
     Device, DeviceBudget, DeviceClass, KvCachePlacement, PlacementPlan, PlacementPolicy,
 };
-pub use engine::{EngineCapabilities, EngineLoadSpec, EngineSession, InferenceEngine};
+pub use engine::{
+    EngineCapabilities, EngineLoadSpec, EngineSession, InferenceEngine, NativeFinish,
+    NativeTextOutput, NativeTextRequest,
+};
 pub use error::{EngineError, Result};
 pub use manifest::{
     AudioConfig, Modality, ModelFile, ModelFormat, ModelManifest, PlacementConfig, Quantization,

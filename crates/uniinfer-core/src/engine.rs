@@ -29,6 +29,38 @@ pub struct EngineLoadSpec {
     pub cancel: CancelToken,
 }
 
+/// Stop reason reported by an engine that decodes tokens internally.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NativeFinish {
+    Eos,
+    Length,
+    SinkClosed,
+}
+
+/// Request for engines that own tokenization and decoding (llama.cpp, etc.).
+#[derive(Debug, Clone, Copy)]
+pub struct NativeTextRequest<'a> {
+    pub prompt: &'a str,
+    pub images: &'a [Vec<u8>],
+    pub max_tokens: usize,
+    pub temperature: f32,
+    pub top_p: f32,
+    pub top_k: usize,
+    pub seed: Option<u64>,
+    pub frequency_penalty: f32,
+    pub presence_penalty: f32,
+    pub deadline: Option<Instant>,
+    pub cancel: &'a CancelToken,
+}
+
+/// Bytes and accounting returned by native text generation.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NativeTextOutput {
+    pub bytes: Vec<u8>,
+    pub tokens: usize,
+    pub finish: NativeFinish,
+}
+
 /// A loaded model session.
 pub trait EngineSession: Send + Sync {
     fn inputs(&self) -> &[TensorSpec];
@@ -58,6 +90,24 @@ pub trait EngineSession: Send + Sync {
         let outputs = self.run(inputs)?;
         sink(outputs);
         Ok(())
+    }
+
+    /// Whether this session implements `generate_text`.
+    fn supports_native_generation(&self) -> bool {
+        false
+    }
+
+    /// Generate text inside the engine when it owns its own tokenizer/decoder.
+    ///
+    /// The default `None` keeps logits-based sessions on `TextGenerator`.
+    /// Returning `Some` opts into the native path, including streaming through
+    /// `on_bytes`.
+    fn generate_text(
+        &self,
+        _request: NativeTextRequest<'_>,
+        _on_bytes: &mut dyn FnMut(&[u8]) -> bool,
+    ) -> Result<Option<NativeTextOutput>> {
+        Ok(None)
     }
 
     /// Idempotent cancellation. Pending and subsequent runs return `Cancelled`.

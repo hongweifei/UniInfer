@@ -52,3 +52,66 @@ fn qwen2_5_vl_gguf_describes_image() {
     };
     assert!(!text.is_empty());
 }
+
+#[test]
+fn smolvlm_gguf_describes_image() {
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../models/smolvlm2-256m-q4");
+    if !dir.join("manifest.toml").is_file() {
+        eprintln!("skip: SmolVLM fixture is not downloaded");
+        return;
+    }
+    let manifest = ModelManifest::load(&dir.join("manifest.toml")).expect("manifest");
+    let inventory = DeviceInventory::probe();
+    let placement = inventory
+        .plan(&manifest, &[DeviceClass::Cpu])
+        .expect("placement");
+    let session = LlamaMtmdEngine::new()
+        .expect("engine")
+        .load_session(EngineLoadSpec {
+            manifest,
+            base_dir: dir.clone(),
+            manifest_path: Some(dir.join("manifest.toml")),
+            placement,
+            budget: DeviceBudget::default(),
+            cancel: CancelToken::new(),
+        })
+        .expect("load");
+
+    let mut image = image::RgbImage::new(64, 64);
+    for pixel in image.pixels_mut() {
+        *pixel = image::Rgb([220, 40, 40]);
+    }
+    let mut png = Vec::new();
+    image
+        .write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)
+        .expect("png");
+    let prompt =
+        "<|im_start|>User:<__media__>What color is this image?<end_of_utterance>\nAssistant:";
+    let mut bytes = Vec::new();
+    let output = session
+        .generate_text(
+            uniinfer_core::NativeTextRequest {
+                prompt,
+                images: &[png],
+                max_tokens: 16,
+                temperature: 0.0,
+                top_p: 1.0,
+                top_k: 0,
+                seed: None,
+                frequency_penalty: 0.0,
+                presence_penalty: 0.0,
+                deadline: None,
+                cancel: &CancelToken::new(),
+            },
+            &mut |chunk| {
+                bytes.extend_from_slice(chunk);
+                true
+            },
+        )
+        .expect("generate")
+        .expect("native");
+    let text = String::from_utf8_lossy(&bytes);
+    eprintln!("smolvlm: {text}");
+    assert!(!output.bytes.is_empty());
+    assert!(!text.trim().is_empty());
+}

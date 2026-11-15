@@ -9,11 +9,12 @@ use llama_cpp_2::llama_batch::LlamaBatch;
 use llama_cpp_2::model::LlamaModel;
 use llama_cpp_2::model::params::LlamaModelParams;
 use llama_cpp_2::mtmd::{MtmdBitmap, MtmdContext, MtmdContextParams, MtmdInputText};
-use llama_cpp_2::token::LlamaToken;
+use llama_cpp_2::sampling::LlamaSampler;
 use self_cell::self_cell;
 use uniinfer_core::{
     DeviceClass, EngineError, EngineLoadSpec, EngineSession, InferenceEngine, Modality,
-    ModelFormat, Quantization, Result, Tensor as CoreTensor, TensorData, TensorSpec,
+    ModelFormat, NativeFinish, NativeTextOutput, NativeTextRequest, Quantization, Result,
+    Tensor as CoreTensor, TensorData, TensorSpec,
 };
 
 const FORMATS: &[ModelFormat] = &[ModelFormat::Gguf];
@@ -238,77 +239,176 @@ impl EngineSession for LlamaMtmdSession {
                 TensorData::U8(bytes) => Some(bytes.clone()),
                 _ => None,
             });
+        let images = image.into_iter().collect::<Vec<_>>();
+        let output = self
+            .generate_text(
+                NativeTextRequest {
+                    prompt: &text,
+                    images: &images,
+                    max_tokens: 64,
+                    temperature: 0.0,
+                    top_p: 1.0,
+                    top_k: 0,
+                    seed: None,
+                    frequency_penalty: 0.0,
+                    presence_penalty: 0.0,
+                    deadline: None,
+                    cancel: &uniinfer_core::CancelToken::new(),
+                },
+                &mut |_| true,
+            )?
+            .ok_or_else(|| EngineError::Other("mtmd native generation unavailable".into()))?;
+        Ok(vec![CoreTensor::new(
+            "text",
+            vec![output.bytes.len()],
+            TensorData::U8(output.bytes),
+        )?])
+    }
+
+    fn supports_native_generation(&self) -> bool {
+        true
+    }
+
+    fn generate_text(
+        &self,
+        request: NativeTextRequest<'_>,
+        on_bytes: &mut dyn FnMut(&[u8]) -> bool,
+    ) -> Result<Option<NativeTextOutput>> {
+        if request.images.len() > 1 {
+            return Err(EngineError::Other(
+                "only one image per generation is supported".into(),
+            ));
+        }
+        if request.cancel.is_cancelled() {
+            return Err(EngineError::Cancelled);
+        }
+        if request.max_tokens == 0 {
+            return Ok(Some(NativeTextOutput {
+                bytes: Vec::new(),
+                tokens: 0,
+                finish: NativeFinish::Length,
+            }));
+        }
+
         let mut state = self
             .state
             .lock()
             .map_err(|_| EngineError::Other("mtmd state lock poisoned".into()))?;
-        let bitmap = match image {
-            Some(image) => Some(
-                MtmdBitmap::from_buffer(&state.mtmd, &image, false)
-                    .map_err(|error| EngineError::Other(format!("mtmd bitmap: {error}")))?,
-            ),
-            None => None,
-        };
+        let bitmap = request
+            .images
+            .first()
+            .map(|image| {
+                MtmdBitmap::from_buffer(&state.mtmd, image, false)
+                    .map_err(|error| EngineError::Other(format!("mtmd bitmap: {error}")))
+            })
+            .transpose()?;
         let bitmaps = bitmap.iter().collect::<Vec<_>>();
         let chunks = state
             .mtmd
             .tokenize(
                 MtmdInputText {
-                    text,
+                    text: request.prompt.to_owned(),
                     add_special: true,
                     parse_special: true,
                 },
                 &bitmaps,
             )
             .map_err(|error| EngineError::Other(format!("mtmd tokenize: {error}")))?;
-        let mut output = Vec::new();
+
         let MtmdState {
             model,
             context,
             mtmd,
         } = &mut *state;
+        let seed = request
+            .seed
+            .unwrap_or_else(clock_seed)
+            .try_into()
+            .unwrap_or(u32::MAX);
+        let mut samplers = Vec::new();
+        if request.frequency_penalty > 0.0 || request.presence_penalty > 0.0 {
+            samplers.push(LlamaSampler::penalties(
+                model.n_vocab(),
+                64,
+                1.0,
+                request.frequency_penalty,
+                request.presence_penalty,
+            ));
+        }
+        if request.temperature > 0.0 {
+            samplers.push(LlamaSampler::temp(request.temperature));
+            if request.top_k > 0 {
+                samplers.push(LlamaSampler::top_k(
+                    i32::try_from(request.top_k).unwrap_or(i32::MAX),
+                ));
+            }
+            if request.top_p < 1.0 {
+                samplers.push(LlamaSampler::top_p(request.top_p, 1));
+            }
+            samplers.push(LlamaSampler::dist(seed));
+        } else {
+            samplers.push(LlamaSampler::greedy());
+        }
+        let mut sampler = LlamaSampler::chain_simple(samplers);
+
+        let mut bytes = Vec::new();
+        let mut tokens = 0usize;
+        let mut finish = NativeFinish::Length;
         context.with_dependent_mut(|_, context| {
             context.clear_kv_cache();
             let n_batch = i32::try_from(context.n_batch()).unwrap_or(512);
-            let mut n_past = chunks
+            let n_past = chunks
                 .eval_chunks(mtmd, context, 0, 0, n_batch, true)
                 .map_err(|error| EngineError::Other(format!("mtmd eval: {error}")))?;
             let vocab = model.vocab();
-            for _ in 0..64 {
-                let token = argmax(context.get_logits());
+            let max_tokens = i32::try_from(request.max_tokens).unwrap_or(i32::MAX);
+            for position in n_past..n_past.saturating_add(max_tokens) {
+                if request
+                    .deadline
+                    .is_some_and(|deadline| std::time::Instant::now() >= deadline)
+                {
+                    return Err(EngineError::Timeout);
+                }
+                if request.cancel.is_cancelled() {
+                    return Err(EngineError::Cancelled);
+                }
+                let token = sampler.sample(context, -1);
                 if vocab.is_eog(token) {
+                    finish = NativeFinish::Eos;
                     break;
                 }
-                output.extend(vocab.token_to_piece(token, false, None));
+                let piece = vocab.token_to_piece(token, false, None);
+                tokens += 1;
+                bytes.extend_from_slice(&piece);
+                if !on_bytes(&piece) {
+                    finish = NativeFinish::SinkClosed;
+                    break;
+                }
+                sampler.accept(token);
                 let mut batch = LlamaBatch::new(1, 1);
                 batch
-                    .add(token, n_past, &[0], true)
+                    .add(token, position, &[0], true)
                     .map_err(|error| EngineError::Other(format!("mtmd batch: {error}")))?;
                 context
                     .decode(&mut batch)
                     .map_err(|error| EngineError::Other(format!("mtmd decode: {error}")))?;
-                n_past += 1;
             }
             Ok::<(), EngineError>(())
         })?;
-        Ok(vec![CoreTensor::new(
-            "text",
-            vec![output.len()],
-            TensorData::U8(output),
-        )?])
+        Ok(Some(NativeTextOutput {
+            bytes,
+            tokens,
+            finish,
+        }))
     }
 
     fn cancel(&self) {}
 }
 
-fn argmax(logits: &[f32]) -> LlamaToken {
-    let mut best = 0usize;
-    let mut best_value = f32::NEG_INFINITY;
-    for (index, value) in logits.iter().enumerate() {
-        if value.is_finite() && *value > best_value {
-            best_value = *value;
-            best = index;
-        }
-    }
-    LlamaToken(i32::try_from(best).unwrap_or(0))
+fn clock_seed() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0x9e37_79b9_7f4a_7c15, |duration| {
+            duration.as_nanos() as u64 ^ 0x9e37_79b9_7f4a_7c15
+        })
 }
