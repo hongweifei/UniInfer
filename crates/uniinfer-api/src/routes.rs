@@ -12,17 +12,22 @@ use crate::state::AppState;
 
 /// Build the HTTP router.
 pub fn router(state: AppState) -> Router {
+    let max_body_bytes = state.max_body_bytes;
     let router = Router::new()
         .route("/health", get(health))
         .route("/metrics", get(metrics))
         .route("/v1/models", get(models))
         .route("/v1/devices", get(devices))
         .route("/v1/chat/completions", post(chat))
+        .route(
+            "/v1/config",
+            get(crate::config::get).put(crate::config::put),
+        )
         .route("/v1/realtime", get(realtime))
         .route("/v1/sessions/{id}/cancel", post(cancel));
     let router = router.route("/v1/audio/transcriptions", post(crate::audio::transcribe));
     router
-        .layer(DefaultBodyLimit::max(32 * 1024 * 1024))
+        .layer(DefaultBodyLimit::max(max_body_bytes))
         .layer(middleware::from_fn_with_state(
             state.clone(),
             crate::auth::authorize,

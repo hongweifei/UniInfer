@@ -1,14 +1,19 @@
 use std::io::Write;
-use std::time::Duration;
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use uniinfer_api::ApiConfig;
+use uniinfer_config::{ConfigHandle, ModelEntry, UniInferConfig};
 use uniinfer_service::{CancelToken, Runtime};
 
 #[derive(Debug, Parser)]
 #[command(name = "uniinfer", version, about = "UniInfer local inference runtime")]
 struct Cli {
+    /// Durable TOML/JSON configuration used by serve; GUI edits the same file.
+    #[arg(long, global = true)]
+    config: Option<PathBuf>,
     #[command(subcommand)]
     command: Command,
 }
@@ -19,14 +24,16 @@ enum Command {
     Devices,
     /// Serve the OpenAI-compatible HTTP API.
     Serve {
-        /// Model manifest paths; repeat to serve multiple models.
-        #[arg(long = "manifest", required = true)]
-        manifests: Vec<std::path::PathBuf>,
-        #[arg(long, default_value = "127.0.0.1:8080")]
-        addr: std::net::SocketAddr,
-        #[arg(long, default_value_t = 30_000)]
-        queue_timeout_ms: u64,
-        /// Require `Authorization: Bearer <token>` on API requests.
+        /// Model manifest paths; when set, they replace config.models.
+        #[arg(long = "manifest")]
+        manifests: Vec<PathBuf>,
+        /// Override server.addr from the config file.
+        #[arg(long)]
+        addr: Option<std::net::SocketAddr>,
+        /// Override server.queue_timeout_ms from the config file.
+        #[arg(long)]
+        queue_timeout_ms: Option<u64>,
+        /// Override server.token from the config file.
         #[arg(long)]
         token: Option<String>,
     },
@@ -52,14 +59,19 @@ async fn main() -> Result<()> {
         .with_writer(std::io::stderr)
         .init();
 
-    match Cli::parse().command {
+    let cli = Cli::parse();
+    let config_path = cli
+        .config
+        .clone()
+        .or_else(|| std::env::var_os("UNIINFER_CONFIG").map(std::path::PathBuf::from));
+    match cli.command {
         Command::Devices => devices(),
         Command::Serve {
             manifests,
             addr,
             queue_timeout_ms,
             token,
-        } => serve(manifests, addr, queue_timeout_ms, token).await,
+        } => serve(config_path, manifests, addr, queue_timeout_ms, token).await,
         Command::Run {
             manifest,
             prompt,
@@ -69,15 +81,35 @@ async fn main() -> Result<()> {
 }
 
 async fn serve(
-    manifests: Vec<std::path::PathBuf>,
-    addr: std::net::SocketAddr,
-    queue_timeout_ms: u64,
+    config_path: Option<PathBuf>,
+    manifests: Vec<PathBuf>,
+    addr: Option<std::net::SocketAddr>,
+    queue_timeout_ms: Option<u64>,
     token: Option<String>,
 ) -> Result<()> {
-    let mut config = ApiConfig::new(manifests[0].clone()).with_manifests(manifests);
-    config.queue_timeout = Duration::from_millis(queue_timeout_ms);
-    config.token = token;
-    uniinfer_api::serve(config, addr)
+    let source = match &config_path {
+        Some(path) => ConfigHandle::load(path.clone())?,
+        None => ConfigHandle::new(UniInferConfig::default(), None),
+    };
+    let mut config = source.snapshot()?;
+    config.apply_env()?;
+    if !manifests.is_empty() {
+        config.models = manifests.into_iter().map(ModelEntry::new).collect();
+    }
+    if let Some(addr) = addr {
+        config.server.addr = addr;
+    }
+    if let Some(queue_timeout_ms) = queue_timeout_ms {
+        config.server.queue_timeout_ms = queue_timeout_ms;
+    }
+    if let Some(token) = token {
+        config.server.token = Some(token);
+    }
+    config.validate_for_serve()?;
+    let addr = config.server.addr;
+    let handle = Arc::new(ConfigHandle::new(config, config_path));
+    let api = ApiConfig::from_config(handle)?;
+    uniinfer_api::serve(api, addr)
         .await
         .context("serve HTTP API")
 }
@@ -100,7 +132,7 @@ fn devices() -> Result<()> {
     Ok(())
 }
 
-fn run(manifest_path: &std::path::Path, prompt: &str, max_tokens: usize) -> Result<()> {
+fn run(manifest_path: &Path, prompt: &str, max_tokens: usize) -> Result<()> {
     let runtime = Runtime::new().context("initialize runtime")?;
     let slot = runtime
         .load(manifest_path)

@@ -1,0 +1,13 @@
+schema_version = 1
+
+[server]
+addr = "127.0.0.1:8080"
+queue_timeout_ms = 30000
+max_body_bytes = 33554432
+# token = "change-me"
+
+[[models]]
+manifest = "models/tiny-onnx/manifest.toml"
+enabled = true
+name = "Tiny byte ONNX"
+tags = ["onnx", "text", "fixture"]

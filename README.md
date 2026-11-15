@@ -352,6 +352,33 @@ cargo run -p uniinfer-cli --release -- run \
   --max-tokens 64
 ```
 
+### 配置
+
+配置与 CLI 参数分离，GUI 将直接编辑同一份 `UniInferConfig`：
+
+```bash
+cp uniinfer.example.toml uniinfer.toml
+cargo run -p uniinfer-cli -- --config uniinfer.toml serve
+```
+
+```toml
+schema_version = 1
+
+[server]
+addr = "127.0.0.1:8080"
+queue_timeout_ms = 30000
+max_body_bytes = 33554432
+# token = "change-me"
+
+[[models]]
+manifest = "models/tiny-onnx/manifest.toml"
+enabled = true
+name = "Tiny byte ONNX"
+tags = ["onnx", "text", "fixture"]
+```
+
+优先级：默认值 < 配置文件（`--config` 或 `UNIINFER_CONFIG`） < `UNIINFER_*` 环境变量 < CLI 覆盖参数。模型路径相对配置文件解析；GUI 可通过 `GET/PUT /v1/config` 读取和保存配置，服务端返回 `restart_required: true`，由 GUI 决定重启或提示用户。
+
 ### 调用
 
 流式聊天：
@@ -441,6 +468,7 @@ sha256 = "9f8e6c1d0a4b7e2f5c8d1a3b6e9f0c2d4a7b1e8f3c6d9a2b5e0f4c7d1a8b3e6f"  # �
 | `/v1/videos/generations` | POST | 视频生成任务 |
 | `/v1/videos/generations/{id}` | GET | 任务查询 |
 | `/v1/realtime` | WS | 实时会话，text + audio VAD |
+| `/v1/config` | GET/PUT | 读取/保存 GUI 配置；保存后需要重启生效 |
 | `/v1/models` | GET | 已加载模型、能力矩阵与放置计划 |
 | `/v1/devices` | GET | 运行时设备清单与各模型放置/回退原因 |
 | `/v1/sessions/{id}/cancel` | POST | 取消生成 |
@@ -463,6 +491,7 @@ crates/
   uniinfer-core          # 枚举、Manifest schema、EngineError、Trait
   uniinfer-devices       # DeviceInventory、代价模型、PlacementPlan
   uniinfer-registry      # 格式+模态路由、预检、SessionLease、显存预算
+  uniinfer-config        # UniInferConfig、ConfigHandle、校验与环境变量覆盖
   uniinfer-service       # Runtime、文本/语音 Slot、统一 Permit 与 ModelView
   uniinfer-engine-set    # 默认引擎装配与 engine feature 收敛
   uniinfer-engine-onnx   # ort + GenAI KV cache + ONNX Whisper ASR；EP feature 门控

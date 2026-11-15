@@ -302,3 +302,56 @@ async fn audio_endpoint_reports_missing_model() {
     let body = body_json(response).await;
     assert_eq!(body["code"], "missing_model");
 }
+
+#[tokio::test]
+async fn config_endpoint_round_trips_and_saves() {
+    use std::sync::Arc;
+    use uniinfer_config::{ConfigHandle, ModelEntry, ServerConfig, UniInferConfig};
+
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("uniinfer.toml");
+    let mut config = UniInferConfig {
+        server: ServerConfig::default(),
+        ..UniInferConfig::default()
+    };
+    config.models = vec![ModelEntry::new("manifest.toml".into())];
+    let handle = Arc::new(ConfigHandle::new(config, Some(path.clone())));
+
+    let fixture = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../models/tiny-onnx");
+    let mut api = ApiConfig::new(fixture.join("manifest.toml"));
+    api = api.with_config(handle);
+    let app = routes::router(AppState::new(&api).expect("state"));
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/v1/config")
+                .body(Body::empty())
+                .expect("request"),
+        )
+        .await
+        .expect("response");
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = body_json(response).await;
+    assert_eq!(body["config"]["models"][0]["manifest"], "manifest.toml");
+
+    let next = json!({
+        "schema_version": 1,
+        "server": {"addr": "127.0.0.1:9091"},
+        "models": [{"manifest": "manifest.toml", "enabled": true}]
+    });
+    let request = Request::builder()
+        .method("PUT")
+        .uri("/v1/config")
+        .header("content-type", "application/json")
+        .body(Body::from(next.to_string()))
+        .expect("request");
+    let response = app.oneshot(request).await.expect("response");
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = body_json(response).await;
+    assert_eq!(body["saved"], true);
+    assert!(path.exists());
+    let saved = UniInferConfig::load(&path).expect("saved config");
+    assert_eq!(saved.server.addr.port(), 9091);
+}

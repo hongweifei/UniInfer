@@ -13,6 +13,7 @@ repository = "https://github.com/hongweifei/UniInfer"
 
 [workspace.dependencies]
 uniinfer-core = { version = "0.0.0", path = "crates/uniinfer-core" }
+uniinfer-config = { version = "0.0.0", path = "crates/uniinfer-config" }
 uniinfer-devices = { version = "0.0.0", path = "crates/uniinfer-devices" }
 uniinfer-registry = { version = "0.0.0", path = "crates/uniinfer-registry" }
 uniinfer-router = { version = "0.0.0", path = "crates/uniinfer-router" }

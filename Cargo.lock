@@ -2956,6 +2956,7 @@ dependencies = [
  "http-body-util",
  "serde",
  "serde_json",
+ "tempfile",
  "tokio",
  "tokio-stream",
  "tokio-tungstenite",
@@ -2963,6 +2964,7 @@ dependencies = [
  "tower-http",
  "tracing",
  "uniinfer-backends",
+ "uniinfer-config",
  "uniinfer-core",
  "uniinfer-router",
  "uniinfer-service",
@@ -3004,7 +3006,19 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "uniinfer-api",
+ "uniinfer-config",
  "uniinfer-service",
+]
+
+[[package]]
+name = "uniinfer-config"
+version = "0.0.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.21",
+ "toml",
 ]
 
 [[package]]

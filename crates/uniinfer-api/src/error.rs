@@ -2,6 +2,7 @@ use axum::Json;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use serde_json::json;
+use uniinfer_config::ConfigError;
 use uniinfer_router::RouterError;
 
 /// Error reply with a stable machine-readable code.
@@ -98,6 +99,25 @@ impl IntoResponse for ApiError {
             "fallback_reason": self.fallback_reason,
         });
         (self.status, Json(body)).into_response()
+    }
+}
+
+impl From<ConfigError> for ApiError {
+    fn from(error: ConfigError) -> Self {
+        let status = match &error {
+            ConfigError::Invalid(_) | ConfigError::Parse { .. } => StatusCode::BAD_REQUEST,
+            ConfigError::Read { .. }
+            | ConfigError::Write { .. }
+            | ConfigError::Serialize(_)
+            | ConfigError::NoPath
+            | ConfigError::LockPoisoned => StatusCode::INTERNAL_SERVER_ERROR,
+        };
+        Self {
+            status,
+            code: "config_error",
+            message: error.to_string(),
+            fallback_reason: None,
+        }
     }
 }
 

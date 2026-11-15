@@ -3,6 +3,7 @@
 mod audio;
 mod auth;
 mod chat;
+mod config;
 mod error;
 mod extract;
 mod realtime;
