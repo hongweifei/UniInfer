@@ -17,7 +17,7 @@
 
 ## 项目状态
 
-**M0 已交付，M1 已接通。** Trait、Manifest、Registry、ONNX CPU 引擎、字节级文本后端与 CLI 可运行；REST/SSE、会话取消、错误信封、`/v1/models`、`/metrics`、文本基线测量与 EP 编译矩阵均已接通。未接入的能力仍属目标契约。
+**M0 已交付，M1 已接通。** Trait、Manifest、Registry、ONNX CPU 引擎、字节级文本后端与 CLI 可运行；REST/SSE、会话取消、错误信封、`/v1/models`、`/metrics`、文本基线测量与 EP 编译矩阵均已接通。当前 `Runtime` 仅装配文本 Backend；ONNX 引擎保留多模态能力，音频/图像/视频需要后续 Backend 实现。
 
 ## 目录
 
@@ -78,11 +78,13 @@ flowchart TB
         R3["租约 · 抢占 · 取消"]
     end
 
-    subgraph Traits["模态 Backend"]
-        T1["TextGenerationBackend"]
-        T2["RealtimeVoiceBackend"]
-        T3["ImageGenerationBackend"]
-        T4["VideoGenerationBackend"]
+    subgraph Service["Service"]
+        S1["ModelSlot"]
+        S2["TextGenerator"]
+    end
+
+    subgraph Backends["Backends"]
+        B1["Tokenizer / UTF-8 / VAD"]
     end
 
     subgraph Registry["EngineRegistry"]
@@ -92,13 +94,13 @@ flowchart TB
 
     subgraph Placement["Placement"]
         P1["DeviceInventory · CPU/GPU/NPU"]
-        P2["PlacementPlan · T1–T4"]
+        P2["PlacementPlan"]
     end
 
     subgraph Engines["InferenceEngine"]
         E1["OnnxEngine · ort + GenAI KV cache"]
         E2["CandleEngine · GGUF / Safetensors"]
-        E3["可选引擎 · frink / mistral.rs"]
+        E3["可选 llama.cpp · GGUF"]
     end
 
     subgraph GUI["GUI · Tauri 2"]
@@ -106,7 +108,10 @@ flowchart TB
         U2["移动端"]
     end
 
-    API --> Router --> Traits --> Registry --> Placement --> Engines
+    API --> Router
+    Router --> Service
+    Service --> Backends
+    Service --> Registry --> Placement --> Engines
     GUI --> API
 ```
 
