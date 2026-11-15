@@ -27,3 +27,9 @@ models/cache
 
 # Whisper ONNX tokenizer sidecar
 /models/whisper-tiny.en-onnx/merges.txt
+
+# Qwen3-VL weights/tokenizer; fetch via models/fetch-qwen3-vl.sh
+/models/qwen3-vl-2b/*.safetensors
+/models/qwen3-vl-2b/*.json
+/models/qwen3-vl-2b/*.txt
+!/models/qwen3-vl-2b/manifest.toml

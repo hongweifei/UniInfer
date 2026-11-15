@@ -9,6 +9,7 @@ use uniinfer_core::{
 use crate::device::{device_for, probe_device_ids, probe_devices};
 use crate::session::CandleSession;
 use crate::text::{self, LoadContext, TextRegistry};
+use crate::vision;
 
 const FORMATS: &[ModelFormat] = &[ModelFormat::Gguf, ModelFormat::Safetensors];
 const MODALITIES: &[Modality] = &[Modality::Text];
@@ -43,7 +44,8 @@ impl InferenceEngine for CandleEngine {
 
     fn supported_modalities(&self, format: ModelFormat) -> &[Modality] {
         match format {
-            ModelFormat::Gguf | ModelFormat::Safetensors => MODALITIES,
+            ModelFormat::Gguf => MODALITIES,
+            ModelFormat::Safetensors => &[Modality::Text, Modality::Image],
             _ => &[],
         }
     }
@@ -57,11 +59,18 @@ impl InferenceEngine for CandleEngine {
     }
 
     fn supports_architecture(&self, manifest: &uniinfer_core::ModelManifest) -> bool {
-        manifest
+        let Some(family) = manifest
             .text
             .as_ref()
             .and_then(|text| text.family.as_deref())
-            .is_some_and(|family| self.text.supported(family))
+        else {
+            return false;
+        };
+        if manifest.modalities.contains(&Modality::Image) {
+            vision::supports(family)
+        } else {
+            self.text.supported(family)
+        }
     }
 
     fn supported_devices(&self) -> &[DeviceClass] {
@@ -106,13 +115,6 @@ impl InferenceEngine for CandleEngine {
             .family
             .as_deref()
             .ok_or_else(|| EngineError::ManifestInvalid("text.family is required".into()))?;
-        let family =
-            self.text
-                .get(family_name)
-                .ok_or_else(|| EngineError::UnsupportedArchitecture {
-                    format: spec.manifest.format,
-                    architecture: family_name.to_owned(),
-                })?;
         let model_paths = match spec.manifest.format {
             ModelFormat::Gguf => spec
                 .manifest
@@ -150,6 +152,24 @@ impl InferenceEngine for CandleEngine {
                 .as_deref()
                 .unwrap_or_else(|| std::path::Path::new("")),
         );
+        if vision::supports(family_name) {
+            vision::verify_safetensors(spec.manifest.format)?;
+            return vision::load(
+                &spec,
+                family_name,
+                dtype,
+                &device,
+                &config_path,
+                &model_paths,
+            );
+        }
+        let family =
+            self.text
+                .get(family_name)
+                .ok_or_else(|| EngineError::UnsupportedArchitecture {
+                    format: spec.manifest.format,
+                    architecture: family_name.to_owned(),
+                })?;
         let model = family.load(&LoadContext {
             format: spec.manifest.format,
             model_paths: &model_paths,

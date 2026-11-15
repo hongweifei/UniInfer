@@ -53,6 +53,7 @@ minijinja-contrib = { version = "3", features = ["pycompat"] }
 anyhow = "1"
 tempfile = "3"
 hound = "3.5.1"
+image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
 half = "2"
 rustfft = "6.4.1"
 

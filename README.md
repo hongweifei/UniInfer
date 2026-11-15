@@ -145,6 +145,7 @@ pub trait InferenceEngine: Send + Sync {
 | GGUF | 视觉语言 / 双工 | — | 计划 |
 | GGUF | 图像 / 视频生成 | — | 计划 |
 | Safetensors | 文本（Qwen2/Qwen3） | `CandleEngine` | 已实现 |
+| Safetensors | 视觉语言（Qwen3-VL） | `CandleEngine` | 已实现（单图 forward） |
 | Safetensors | 视觉语言 / 双工 / 图像 / 视频 | — | 计划 |
 | GGML | 语音转写（Whisper） | `WhisperEngine`（可选 feature） | 已实现，批量 |
 | 任意 | 实时 ASR → 文本响应 | `/v1/realtime` + ASR slot | 已实现 |

@@ -1,0 +1,37 @@
+schema_version = 1
+id = "qwen3-vl-2b"
+format = "safetensors"
+quantization = "bf16"
+modalities = ["text", "image"]
+streaming_capable = false
+context_len = 4096
+tokenizer = "hf"
+min_vram = "5GiB"
+
+[placement]
+policy = "auto"
+prefer = ["npu", "gpu", "cpu"]
+allow_cpu_fallback = true
+
+[text]
+vocab_size = 151936
+eos_token = 151645
+family = "qwen3_vl"
+config_file = "config.json"
+tokenizer_file = "tokenizer.json"
+
+[[files]]
+path = "model.safetensors"
+sha256 = "7de1838c87a5349b016c26a1c3f7d2bc400a3d485f95ef39a7059ffd734977a0"
+
+[[files]]
+path = "config.json"
+sha256 = "bec4b3d446efa05807365c9e1cec03ac590836879d02f3a6da879971154bdd3b"
+
+[[files]]
+path = "tokenizer.json"
+sha256 = "a5d85b6dcc535e6b93115a9ef287e6132fdbf30270da6218194ba742261173c7"
+
+[[files]]
+path = "preprocessor_config.json"
+sha256 = "27225450ac9c6529872ee1924fcb0962ff5634834f817040f444118116f4e516"

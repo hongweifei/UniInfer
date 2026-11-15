@@ -9,5 +9,6 @@ mod device;
 mod engine;
 mod session;
 mod text;
+mod vision;
 
 pub use engine::CandleEngine;
