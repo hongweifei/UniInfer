@@ -62,11 +62,13 @@ fn start_inner() -> Result<(ApiInfo, Arc<tokio::runtime::Runtime>), Box<dyn std:
     let handle = if let Some(path) = config_path {
         ConfigHandle::load(path)?
     } else {
-        let mut config = UniInferConfig::default();
-        config.models = manifest_paths()
-            .into_iter()
-            .map(ModelEntry::new)
-            .collect::<Vec<_>>();
+        let config = UniInferConfig {
+            models: manifest_paths()
+                .into_iter()
+                .map(ModelEntry::new)
+                .collect::<Vec<_>>(),
+            ..Default::default()
+        };
         ConfigHandle::new(config, Some(std::path::PathBuf::from("uniinfer.toml")))
     };
     let token = handle.snapshot()?.server.token.unwrap_or_else(random_token);
