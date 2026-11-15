@@ -10,6 +10,8 @@ use uniinfer_devices::DeviceInventory;
 use uniinfer_engine_candle::CandleEngine;
 #[cfg(feature = "llama")]
 use uniinfer_engine_llama::LlamaEngine;
+#[cfg(feature = "llama-mtmd")]
+use uniinfer_engine_llama::LlamaMtmdEngine;
 use uniinfer_engine_onnx::OnnxEngine;
 use uniinfer_engine_process::ProcessEngine;
 #[cfg(feature = "whisper")]
@@ -28,6 +30,8 @@ pub fn build_with_process(isolate_models: bool) -> Result<EngineRegistry> {
     let candle = CandleEngine::new()?;
     #[cfg(feature = "llama")]
     let llama = LlamaEngine::new()?;
+    #[cfg(feature = "llama-mtmd")]
+    let mtmd = LlamaMtmdEngine::new()?;
     #[cfg(feature = "whisper")]
     let whisper = WhisperEngine::new();
 
@@ -42,6 +46,10 @@ pub fn build_with_process(isolate_models: bool) -> Result<EngineRegistry> {
     for device in llama.probe_devices() {
         inventory.register(device);
     }
+    #[cfg(feature = "llama-mtmd")]
+    for device in mtmd.probe_devices() {
+        inventory.register(device);
+    }
     #[cfg(feature = "whisper")]
     for device in whisper.probe_devices() {
         inventory.register(device);
@@ -52,6 +60,8 @@ pub fn build_with_process(isolate_models: bool) -> Result<EngineRegistry> {
         registry.register(Arc::new(ProcessEngine::new()));
     }
     registry.register(Arc::new(onnx));
+    #[cfg(feature = "llama-mtmd")]
+    registry.register(Arc::new(mtmd));
     #[cfg(feature = "llama")]
     registry.register(Arc::new(llama));
     #[cfg(feature = "whisper")]

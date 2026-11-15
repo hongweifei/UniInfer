@@ -11,6 +11,7 @@ description = "llama.cpp engine for GGUF models"
 [features]
 default = []
 llama = ["dep:llama-cpp-2", "dep:uniinfer-core", "dep:self_cell", "dep:tracing"]
+mtmd = ["llama", "llama-cpp-2/mtmd"]
 vulkan = ["llama", "llama-cpp-2/vulkan"]
 cuda = ["llama", "llama-cpp-2/cuda"]
 rocm = ["llama", "llama-cpp-2/rocm"]
@@ -22,6 +23,10 @@ uniinfer-core = { workspace = true, optional = true }
 llama-cpp-2 = { version = "0.1.161", optional = true }
 self_cell = { version = "1", optional = true }
 tracing = { workspace = true, optional = true }
+
+[dev-dependencies]
+uniinfer-devices.workspace = true
+image.workspace = true
 
 [lints]
 workspace = true

@@ -3184,10 +3184,12 @@ dependencies = [
 name = "uniinfer-engine-llama"
 version = "0.0.0"
 dependencies = [
+ "image",
  "llama-cpp-2",
  "self_cell",
  "tracing",
  "uniinfer-core",
+ "uniinfer-devices",
 ]
 
 [[package]]

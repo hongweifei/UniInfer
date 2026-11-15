@@ -146,6 +146,7 @@ pub trait InferenceEngine: Send + Sync {
 | GGUF | 图像 / 视频生成 | — | 计划 |
 | Safetensors | 文本（Qwen2/Qwen3） | `CandleEngine` | 已实现 |
 | Safetensors | 视觉语言（Qwen3-VL） | `CandleEngine` | 已实现（单图 forward） |
+| GGUF | 视觉语言（Qwen2.5-VL Q4 + mmproj） | `LlamaMtmdEngine` | 已实现（单图 forward） |
 | Safetensors | 视觉语言 / 双工 / 图像 / 视频 | — | 计划 |
 | GGML | 语音转写（Whisper） | `WhisperEngine`（可选 feature） | 已实现，批量 |
 | 任意 | 实时 ASR → 文本响应 | `/v1/realtime` + ASR slot | 已实现 |
@@ -276,6 +277,14 @@ cargo run -p uniinfer-cli --features whisper -- serve \
 cargo run -p uniinfer-cli --features llama -- run \
   --manifest models/qwen3-0.6b/manifest.toml \
   --prompt "你好" --max-tokens 32
+```
+
+视觉 GGUF（Q4 主模型 + mmproj）需要 `llama-mtmd` feature：
+
+```bash
+models/fetch-qwen2.5-vl-gguf.sh
+cargo run -p uniinfer-cli --features llama-mtmd -- serve \
+  --manifest models/qwen2.5-vl-7b-gguf/manifest.toml
 ```
 
 构建前置条件：CMake、C++ 编译器（Windows 用 MSVC）和 `libclang`（bindgen 需要）。Windows 示例：

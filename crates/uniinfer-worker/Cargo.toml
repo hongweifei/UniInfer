@@ -11,6 +11,7 @@ description = "Isolated text model worker process"
 [features]
 default = []
 whisper = ["uniinfer-engine-set/whisper"]
+llama-mtmd = ["uniinfer-engine-set/llama-mtmd"]
 candle-cuda = ["uniinfer-engine-set/candle-cuda"]
 candle-metal = ["uniinfer-engine-set/candle-metal"]
 ep-cuda = ["uniinfer-engine-set/ep-cuda"]

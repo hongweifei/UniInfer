@@ -1,0 +1,25 @@
+schema_version = 1
+id = "qwen2.5-vl-7b-gguf"
+format = "gguf"
+quantization = "q4_k_m"
+modalities = ["text", "image"]
+streaming_capable = false
+context_len = 32768
+min_vram = "6GiB"
+
+[placement]
+policy = "auto"
+prefer = ["gpu", "cpu"]
+allow_cpu_fallback = true
+
+[vision]
+architecture = "llama_mtmd"
+mmproj_file = "mmproj-Qwen2.5-VL-7B-Instruct-Q8_0.gguf"
+
+[[files]]
+path = "Qwen2.5-VL-7B-Instruct-Q4_K_M.gguf"
+sha256 = "9258bf05b12686d097ff3b6b18d968ab393649780aa2b3cd67fec43d50554392"
+
+[[files]]
+path = "mmproj-Qwen2.5-VL-7B-Instruct-Q8_0.gguf"
+sha256 = "2ddb555391bae966e412deab9e07b58afa18bcc06930ba0f1c78a3695ab9e506"

@@ -14,8 +14,10 @@ use uniinfer_core::{
     Modality, ModelFormat, Quantization, Result, TensorDtype, TensorSpec,
 };
 
+mod mtmd;
 mod session;
 
+pub use mtmd::LlamaMtmdEngine;
 use session::LlamaSession;
 
 const BATCH_TOKENS: usize = 512;
