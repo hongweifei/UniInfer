@@ -8,8 +8,17 @@ repository.workspace = true
 publish.workspace = true
 description = "Isolated text model worker process"
 
+[features]
+default = []
+whisper = ["uniinfer-engine-set/whisper"]
+candle-cuda = ["uniinfer-engine-set/candle-cuda"]
+candle-metal = ["uniinfer-engine-set/candle-metal"]
+ep-cuda = ["uniinfer-engine-set/ep-cuda"]
+ep-directml = ["uniinfer-engine-set/ep-directml"]
+
 [dependencies]
 uniinfer-core.workspace = true
+uniinfer-engine-set.workspace = true
 uniinfer-engine-process.workspace = true
 uniinfer-service.workspace = true
 anyhow.workspace = true

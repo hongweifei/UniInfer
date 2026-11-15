@@ -234,6 +234,7 @@ impl InferenceEngine for ProcessEngine {
             ModelFormat::Onnx,
             ModelFormat::Gguf,
             ModelFormat::Safetensors,
+            ModelFormat::Ggml,
         ]
     }
 
@@ -241,7 +242,7 @@ impl InferenceEngine for ProcessEngine {
         match format {
             ModelFormat::Onnx => &[Modality::Text, Modality::Audio],
             ModelFormat::Gguf | ModelFormat::Safetensors => &[Modality::Text],
-            _ => &[],
+            ModelFormat::Ggml => &[Modality::Audio],
         }
     }
 

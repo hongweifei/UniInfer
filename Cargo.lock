@@ -3196,6 +3196,7 @@ dependencies = [
  "uniinfer-core",
  "uniinfer-devices",
  "uniinfer-engine-process",
+ "uniinfer-engine-set",
  "uniinfer-service",
 ]
 
