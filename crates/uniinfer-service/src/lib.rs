@@ -43,8 +43,13 @@ pub struct Runtime {
 impl Runtime {
     /// Assemble the default engine set and probe its devices.
     pub fn new() -> Result<Self> {
+        Self::new_with_process(false)
+    }
+
+    /// Assemble engines, optionally isolating text models in worker processes.
+    pub fn new_with_process(isolate_text: bool) -> Result<Self> {
         Ok(Self {
-            registry: uniinfer_engine_set::build()?,
+            registry: uniinfer_engine_set::build_with_process(isolate_text)?,
         })
     }
 
@@ -80,9 +85,8 @@ impl Runtime {
         manifest_path: &Path,
         cancel: CancelToken,
     ) -> Result<Arc<AudioSlot>> {
-        let manifest = ModelManifest::load(manifest_path)?;
-        let base_dir = ModelManifest::base_dir(manifest_path);
-        self.load_audio_manifest_cancellable(manifest, &base_dir, cancel)
+        let lease = Arc::new(self.registry.load_with_cancel(manifest_path, cancel)?);
+        Ok(Arc::new(AudioSlot::new(lease)?))
     }
 
     /// Load an in-memory audio manifest against a model directory.
@@ -126,9 +130,8 @@ impl Runtime {
         manifest_path: &Path,
         cancel: CancelToken,
     ) -> Result<Arc<ModelSlot>> {
-        let manifest = ModelManifest::load(manifest_path)?;
-        let base_dir = ModelManifest::base_dir(manifest_path);
-        self.load_manifest_cancellable(manifest, &base_dir, cancel)
+        let lease = Arc::new(self.registry.load_with_cancel(manifest_path, cancel)?);
+        self.build_text_slot(lease, manifest_path)
     }
 
     /// Load an in-memory text manifest against a model directory.
@@ -148,16 +151,28 @@ impl Runtime {
     ) -> Result<Arc<ModelSlot>> {
         // Backend dispatch is still text-only. Check before loading a session
         // so non-text manifests fail without allocating model weights.
-        let text = manifest.text.clone().ok_or_else(|| {
-            EngineError::ManifestInvalid(
+        if manifest.text.is_none() {
+            return Err(EngineError::ManifestInvalid(
                 "runtime currently supports text models; manifest has no [text] section".into(),
-            )
-        })?;
+            ));
+        }
         let lease = Arc::new(
             self.registry
                 .load_manifest_with_cancel(manifest, base_dir, cancel)?,
         );
+        self.build_text_slot(lease, base_dir)
+    }
+
+    fn build_text_slot(
+        &self,
+        lease: std::sync::Arc<SessionLease>,
+        base_dir: &Path,
+    ) -> Result<Arc<ModelSlot>> {
         let manifest = lease.manifest();
+        let text = manifest
+            .text
+            .as_ref()
+            .ok_or_else(|| EngineError::ManifestInvalid("manifest has no [text] section".into()))?;
         let tokenizer = manifest.tokenizer.as_deref().unwrap_or_default();
         let base = base_dir.to_path_buf();
         let tokenizer: Arc<dyn Tokenizer> = match tokenizer {

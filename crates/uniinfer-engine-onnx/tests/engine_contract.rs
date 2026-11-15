@@ -25,6 +25,7 @@ fn spec(manifest: ModelManifest, base_dir: &Path) -> EngineLoadSpec {
     EngineLoadSpec {
         manifest,
         base_dir: base_dir.to_path_buf(),
+        manifest_path: Some(base_dir.join("manifest.toml")),
         placement,
         budget: DeviceBudget::default(),
         cancel: CancelToken::new(),

@@ -180,7 +180,7 @@ impl TextGenerator {
                 )?);
             }
 
-            let outputs = session.run(tensors)?;
+            let outputs = session.run_with_deadline(tensors, deadline)?;
             if deadline.is_some_and(|deadline| Instant::now() >= deadline) {
                 return Err(EngineError::Timeout);
             }

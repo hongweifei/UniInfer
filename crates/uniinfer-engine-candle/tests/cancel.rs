@@ -23,6 +23,7 @@ fn cancelled_session_refuses_to_run() {
         .load_session(EngineLoadSpec {
             manifest,
             base_dir: dir,
+            manifest_path: None,
             placement,
             budget: DeviceBudget::default(),
             cancel: CancelToken::new(),
@@ -52,6 +53,7 @@ fn load_is_cancelled_midway() {
             .load_session(EngineLoadSpec {
                 manifest,
                 base_dir: dir,
+                manifest_path: None,
                 placement,
                 budget: DeviceBudget::default(),
                 cancel: task_cancel,

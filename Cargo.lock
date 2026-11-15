@@ -3085,6 +3085,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "uniinfer-engine-process"
+version = "0.0.0"
+dependencies = [
+ "half",
+ "serde",
+ "serde_json",
+ "uniinfer-core",
+]
+
+[[package]]
 name = "uniinfer-engine-set"
 version = "0.0.0"
 dependencies = [
@@ -3093,6 +3103,7 @@ dependencies = [
  "uniinfer-engine-candle",
  "uniinfer-engine-llama",
  "uniinfer-engine-onnx",
+ "uniinfer-engine-process",
  "uniinfer-engine-whisper",
  "uniinfer-registry",
 ]
@@ -3154,6 +3165,20 @@ dependencies = [
  "uniinfer-core",
  "uniinfer-engine-set",
  "uniinfer-registry",
+]
+
+[[package]]
+name = "uniinfer-worker"
+version = "0.0.0"
+dependencies = [
+ "anyhow",
+ "serde_json",
+ "tracing",
+ "tracing-subscriber",
+ "uniinfer-core",
+ "uniinfer-devices",
+ "uniinfer-engine-process",
+ "uniinfer-service",
 ]
 
 [[package]]

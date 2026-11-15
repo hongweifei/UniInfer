@@ -24,6 +24,7 @@ uniinfer-engine-candle = { version = "0.0.0", path = "crates/uniinfer-engine-can
 uniinfer-engine-llama = { version = "0.0.0", path = "crates/uniinfer-engine-llama" }
 uniinfer-engine-whisper = { version = "0.0.0", path = "crates/uniinfer-engine-whisper" }
 uniinfer-engine-set = { version = "0.0.0", path = "crates/uniinfer-engine-set" }
+uniinfer-engine-process = { version = "0.0.0", path = "crates/uniinfer-engine-process" }
 uniinfer-backends = { version = "0.0.0", path = "crates/uniinfer-backends" }
 uniinfer-api = { version = "0.0.0", path = "crates/uniinfer-api" }
 ort = { version = "=2.0.0-rc.15", default-features = false, features = ["std", "download-binaries", "api-31", "tracing", "tls-native", "copy-dylibs", "half"] }

@@ -1,4 +1,5 @@
 use std::path::PathBuf;
+use std::time::Instant;
 
 use crate::cancel::CancelToken;
 use crate::device::{DeviceBudget, DeviceClass, PlacementPlan};
@@ -20,6 +21,8 @@ pub struct EngineCapabilities {
 pub struct EngineLoadSpec {
     pub manifest: ModelManifest,
     pub base_dir: PathBuf,
+    /// On-disk manifest path, when the load originated from one.
+    pub manifest_path: Option<PathBuf>,
     pub placement: PlacementPlan,
     pub budget: DeviceBudget,
     /// Cooperative cancellation checked by engines during load.
@@ -33,6 +36,17 @@ pub trait EngineSession: Send + Sync {
 
     /// Run one forward pass.
     fn run(&self, inputs: Vec<Tensor>) -> Result<Vec<Tensor>>;
+
+    /// Run with an optional wall-clock deadline. Engines that cannot interrupt
+    /// a forward pass keep the default behavior and report elapsed deadlines
+    /// at the next generation-token boundary.
+    fn run_with_deadline(
+        &self,
+        inputs: Vec<Tensor>,
+        _deadline: Option<Instant>,
+    ) -> Result<Vec<Tensor>> {
+        self.run(inputs)
+    }
 
     /// Streaming entry point. The default yields the full result as one chunk;
     /// engines that can emit partial results override it.

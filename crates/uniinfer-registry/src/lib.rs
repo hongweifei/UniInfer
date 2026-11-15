@@ -60,9 +60,23 @@ impl EngineRegistry {
     /// Resolve the manifest to an engine, preflight the capability matrix and
     /// load a session held under a lease.
     pub fn load(&self, manifest_path: &Path) -> Result<SessionLease> {
+        self.load_with_cancel(manifest_path, CancelToken::new())
+    }
+
+    /// Load a manifest path with cooperative cancellation.
+    pub fn load_with_cancel(
+        &self,
+        manifest_path: &Path,
+        cancel: CancelToken,
+    ) -> Result<SessionLease> {
         let manifest = ModelManifest::load(manifest_path)?;
         let base_dir = ModelManifest::base_dir(manifest_path);
-        self.load_manifest(manifest, &base_dir)
+        self.load_manifest_inner(
+            manifest,
+            &base_dir,
+            Some(manifest_path.to_path_buf()),
+            cancel,
+        )
     }
 
     /// Load a manifest that was produced in memory (for example by the
@@ -78,11 +92,22 @@ impl EngineRegistry {
         base_dir: &Path,
         cancel: CancelToken,
     ) -> Result<SessionLease> {
+        self.load_manifest_inner(manifest, base_dir, None, cancel)
+    }
+
+    fn load_manifest_inner(
+        &self,
+        manifest: ModelManifest,
+        base_dir: &Path,
+        manifest_path: Option<std::path::PathBuf>,
+        cancel: CancelToken,
+    ) -> Result<SessionLease> {
         let (engine, placement) = self.resolve(&manifest)?;
         let lease_placement = placement.clone();
         let spec = EngineLoadSpec {
             manifest,
             base_dir: base_dir.to_path_buf(),
+            manifest_path,
             placement,
             budget: self.inventory.budget(),
             cancel,

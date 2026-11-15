@@ -34,6 +34,7 @@ uniinfer-core.workspace = true
 uniinfer-devices.workspace = true
 uniinfer-registry.workspace = true
 uniinfer-engine-onnx.workspace = true
+uniinfer-engine-process.workspace = true
 uniinfer-engine-candle.workspace = true
 uniinfer-engine-llama = { workspace = true, optional = true }
 uniinfer-engine-whisper = { workspace = true, optional = true }

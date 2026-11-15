@@ -11,12 +11,19 @@ use uniinfer_engine_candle::CandleEngine;
 #[cfg(feature = "llama")]
 use uniinfer_engine_llama::LlamaEngine;
 use uniinfer_engine_onnx::OnnxEngine;
+use uniinfer_engine_process::ProcessEngine;
 #[cfg(feature = "whisper")]
 use uniinfer_engine_whisper::WhisperEngine;
 use uniinfer_registry::EngineRegistry;
 
 /// Build the default engine registry and probe every engine's devices.
 pub fn build() -> Result<EngineRegistry> {
+    build_with_process(false)
+}
+
+/// Build the engine registry, optionally routing text models through an
+/// isolated worker process.
+pub fn build_with_process(isolate_text: bool) -> Result<EngineRegistry> {
     let onnx = OnnxEngine::new()?;
     let candle = CandleEngine::new()?;
     #[cfg(feature = "llama")]
@@ -41,6 +48,9 @@ pub fn build() -> Result<EngineRegistry> {
     }
 
     let mut registry = EngineRegistry::new(inventory);
+    if isolate_text {
+        registry.register(Arc::new(ProcessEngine::new()));
+    }
     registry.register(Arc::new(onnx));
     #[cfg(feature = "llama")]
     registry.register(Arc::new(llama));
