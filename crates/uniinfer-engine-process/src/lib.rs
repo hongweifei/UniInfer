@@ -24,6 +24,7 @@ pub enum WireData {
     F16(Vec<u16>),
     I64(Vec<i64>),
     U8(Vec<u8>),
+    Bool(Vec<bool>),
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -110,6 +111,7 @@ impl WireTensor {
             }
             TensorData::I64(values) => WireData::I64(values),
             TensorData::U8(values) => WireData::U8(values),
+            TensorData::Bool(values) => WireData::Bool(values),
         };
         Self {
             name: tensor.name,
@@ -126,6 +128,7 @@ impl WireTensor {
             }
             WireData::I64(values) => TensorData::I64(values),
             WireData::U8(values) => TensorData::U8(values),
+            WireData::Bool(values) => TensorData::Bool(values),
         };
         Tensor::new(self.name, self.shape, data)
     }

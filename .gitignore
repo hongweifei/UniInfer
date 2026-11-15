@@ -44,3 +44,8 @@ models/cache
 /models/smolvlm2-256m-q4/*.gguf
 /models/smolvlm2-256m-q4/*.json
 !/models/smolvlm2-256m-q4/manifest.toml
+
+# SmolVLM2 ONNX q4; fetch via models/fetch-smolvlm2-256m-onnx.sh
+/models/smolvlm2-256m-onnx-q4/*.onnx
+/models/smolvlm2-256m-onnx-q4/*.json
+!/models/smolvlm2-256m-onnx-q4/manifest.toml

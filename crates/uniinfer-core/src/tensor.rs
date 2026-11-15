@@ -11,6 +11,7 @@ pub enum TensorDtype {
     F16,
     I64,
     U8,
+    Bool,
 }
 
 /// Contiguous tensor payload.
@@ -20,6 +21,7 @@ pub enum TensorData {
     F16(Vec<f16>),
     I64(Vec<i64>),
     U8(Vec<u8>),
+    Bool(Vec<bool>),
 }
 
 impl TensorData {
@@ -30,6 +32,7 @@ impl TensorData {
             Self::F16(values) => values.len(),
             Self::I64(values) => values.len(),
             Self::U8(values) => values.len(),
+            Self::Bool(values) => values.len(),
         }
     }
 
@@ -45,6 +48,7 @@ impl TensorData {
             Self::F16(_) => TensorDtype::F16,
             Self::I64(_) => TensorDtype::I64,
             Self::U8(_) => TensorDtype::U8,
+            Self::Bool(_) => TensorDtype::Bool,
         }
     }
 }

@@ -15,6 +15,7 @@ mod genai;
 mod graph;
 mod io;
 mod session;
+mod vlm;
 
 use genai::{GenaiSpec, load_genai_config};
 use graph::Graph;
@@ -203,6 +204,15 @@ impl InferenceEngine for OnnxEngine {
             .map(|device| device.class)
             .ok_or_else(|| EngineError::PlacementUnsatisfiable("empty placement".into()))?;
         spec.manifest.verify_files(&spec.base_dir)?;
+
+        if spec
+            .manifest
+            .vision
+            .as_ref()
+            .is_some_and(|vision| vision.architecture == "onnx_smolvlm")
+        {
+            return vlm::load(&self.environment, &spec, class);
+        }
 
         let model_file = spec
             .manifest

@@ -23,6 +23,7 @@ pub(crate) fn convert_spec(outlet: &Outlet, kind: &str) -> Result<TensorSpec> {
         TensorElementType::Float16 => TensorDtype::F16,
         TensorElementType::Int64 => TensorDtype::I64,
         TensorElementType::Uint8 => TensorDtype::U8,
+        TensorElementType::Bool => TensorDtype::Bool,
         other => {
             return Err(EngineError::LoadFailed(format!(
                 "{kind} {} has unsupported dtype {other:?}",
@@ -54,6 +55,9 @@ pub(crate) fn to_ort(tensor: Tensor) -> Result<DynValue> {
             OrtTensor::from_array((shape, values)).map(ort::value::Value::into_dyn)
         }
         TensorData::U8(values) => {
+            OrtTensor::from_array((shape, values)).map(ort::value::Value::into_dyn)
+        }
+        TensorData::Bool(values) => {
             OrtTensor::from_array((shape, values)).map(ort::value::Value::into_dyn)
         }
     }
@@ -90,6 +94,13 @@ pub(crate) fn from_ort(spec: &TensorSpec, value: &DynValue) -> Result<Tensor> {
                 .map_err(|error| EngineError::Other(format!("extract {}: {error}", spec.name)))?;
             let shape = shape.iter().map(|dim| *dim as usize).collect();
             Tensor::new(spec.name.clone(), shape, TensorData::U8(slice.to_vec()))
+        }
+        TensorDtype::Bool => {
+            let (shape, slice) = value
+                .try_extract_tensor::<bool>()
+                .map_err(|error| EngineError::Other(format!("extract {}: {error}", spec.name)))?;
+            let shape = shape.iter().map(|dim| *dim as usize).collect();
+            Tensor::new(spec.name.clone(), shape, TensorData::Bool(slice.to_vec()))
         }
     }
 }

@@ -3199,6 +3199,7 @@ name = "uniinfer-engine-onnx"
 version = "0.0.0"
 dependencies = [
  "half",
+ "image",
  "ort",
  "rustfft",
  "serde",

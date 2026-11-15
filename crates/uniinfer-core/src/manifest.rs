@@ -243,7 +243,7 @@ pub struct TextConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct VisionConfig {
-    /// Family name, e.g. `qwen3_vl`, `llama_mtmd`, `onnx_vlm`.
+    /// Family name, e.g. `qwen3_vl`, `llama_mtmd`, `onnx_smolvlm`.
     pub architecture: String,
     #[serde(default)]
     pub mmproj_file: Option<PathBuf>,
@@ -252,13 +252,25 @@ pub struct VisionConfig {
     #[serde(default)]
     pub vision_graph: Option<PathBuf>,
     #[serde(default)]
+    pub embed_graph: Option<PathBuf>,
+    #[serde(default)]
     pub text_graph: Option<PathBuf>,
+    #[serde(default)]
+    pub config_file: Option<PathBuf>,
     #[serde(default)]
     pub pixel_input: Option<String>,
     #[serde(default)]
     pub grid_input: Option<String>,
     #[serde(default)]
     pub image_token: Option<String>,
+    #[serde(default)]
+    pub image_token_id: Option<u32>,
+    #[serde(default)]
+    pub image_seq_len: Option<usize>,
+    #[serde(default)]
+    pub global_image_token_id: Option<u32>,
+    #[serde(default)]
+    pub fake_image_token_id: Option<u32>,
 }
 
 /// Audio preprocessing contract shared by every speech adapter.

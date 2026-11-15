@@ -140,6 +140,7 @@ pub trait InferenceEngine: Send + Sync {
 | :--- | :--- | :--- | :--- |
 | ONNX | 文本生成 / GenAI KV cache | `OnnxEngine` | 已实现 |
 | ONNX | 语音转写（Whisper encoder/decoder / CTC） | `OnnxEngine` ASR adapter registry | 已实现，批量 |
+| ONNX | 视觉语言（SmolVLM2-256M int4 单图） | `OnnxEngine` VLM adapter | 已实现（OpenAI 单图） |
 | ONNX | 图像 / 逐帧视频 / 实时预览 | — | 计划 |
 | GGUF | 文本（Qwen2/Qwen3，含 IQ/MXFP4 可选 llama） | `CandleEngine` / `LlamaEngine` | 已实现 |
 | GGUF | 视觉语言 / 双工 | — | 计划 |
@@ -289,6 +290,16 @@ cargo run -p uniinfer-cli --features llama-mtmd -- serve \
 ```
 
 `/v1/chat/completions` 的 `image_url` 会经 `LlamaMtmdSession::generate_text` 原生解码；Qwen2.5-VL 7B Q4 清单同样可用，但测试默认使用 256M 模型。
+
+ONNX 视觉走分图 ONNX export（`vision_encoder` + `embed_tokens` + `decoder_model_merged`）：
+
+```bash
+models/fetch-smolvlm2-256m-onnx.sh
+cargo run -p uniinfer-cli -- serve \
+  --manifest models/smolvlm2-256m-onnx-q4/manifest.toml
+```
+
+当前 adapter 固定支持未分块的单图预处理（清单里 `preprocessor_config_512.json` 将 `do_image_splitting` 设为 `false`，512×512）。开启分块会在加载期返回明确的 `UnsupportedEngine`，不会静默算错。
 
 构建前置条件：CMake、C++ 编译器（Windows 用 MSVC）和 `libclang`（bindgen 需要）。Windows 示例：
 

@@ -227,6 +227,10 @@ impl TextGenerator {
                 })?;
             let row = last_row(logits, self.vocab_size, self.tokenizer.vocab_size())?;
             let next = sample(row, &sampling, &mut rng, &generated_tokens)?;
+            if self.eos_token == Some(next) {
+                finish = FinishReason::Eos;
+                break;
+            }
             let bytes = self.tokenizer.decode(next)?;
 
             generated.extend_from_slice(&bytes);
@@ -234,10 +238,6 @@ impl TextGenerator {
             tokens += 1;
             if !on_bytes(&bytes) {
                 finish = FinishReason::SinkClosed;
-                break;
-            }
-            if self.eos_token == Some(next) {
-                finish = FinishReason::Eos;
                 break;
             }
             ids.push(i64::from(next));
