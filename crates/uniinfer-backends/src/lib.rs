@@ -13,4 +13,6 @@ pub use chat_template::{ChatMessage, ChatTemplate, fallback_prompt};
 pub use sampling::Sampling;
 pub use text::{FinishReason, GenerationOutput, GenerationSpec, TextGenerator};
 pub use tokenizer::{ByteTokenizer, HuggingFaceTokenizer, Tokenizer};
-pub use tool_call::{ParsedToolCalls, ToolCall, parse as parse_tool_calls};
+pub use tool_call::{
+    ParsedToolCalls, ToolCall, ToolStream, ToolStreamEvent, parse as parse_tool_calls,
+};

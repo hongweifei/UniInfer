@@ -144,3 +144,163 @@ mod tests {
         assert_eq!(parsed.content.as_deref(), Some("hello"));
     }
 }
+
+#[derive(Debug, PartialEq)]
+pub enum ToolStreamEvent {
+    Text(String),
+    Calls(Vec<ToolCall>),
+}
+
+/// Incremental parser for Qwen-style `<tool_call>` blocks. Text is forwarded
+/// before the block so clients see reasoning as it arrives; tool calls are
+/// emitted as soon as their closing tag is seen.
+pub struct ToolStream {
+    pending: String,
+    inside: bool,
+    mistral: bool,
+    json_buffer: bool,
+    prefix: String,
+    next_call: usize,
+}
+
+impl ToolStream {
+    #[must_use]
+    pub fn new(prefix: impl Into<String>) -> Self {
+        Self {
+            pending: String::new(),
+            inside: false,
+            mistral: false,
+            json_buffer: false,
+            prefix: prefix.into(),
+            next_call: 0,
+        }
+    }
+
+    pub fn push(&mut self, text: &str) -> Vec<ToolStreamEvent> {
+        self.pending.push_str(text);
+        let mut events = Vec::new();
+        loop {
+            if self.mistral || self.json_buffer {
+                break;
+            }
+            if self.inside {
+                let Some(end) = self.pending.find("</tool_call>") else {
+                    break;
+                };
+                let raw = self.pending[..end].trim().to_owned();
+                self.pending = self.pending[end + "</tool_call>".len()..].to_owned();
+                self.inside = false;
+                let mut parsed = parse(&raw, &self.prefix);
+                for call in &mut parsed.calls {
+                    call.id = format!("call_{}_{}", self.prefix, self.next_call);
+                    self.next_call += 1;
+                }
+                if !parsed.calls.is_empty() {
+                    events.push(ToolStreamEvent::Calls(parsed.calls));
+                }
+                if let Some(content) = parsed.content {
+                    events.push(ToolStreamEvent::Text(content));
+                }
+                continue;
+            }
+            if let Some(start) = self.pending.find("<tool_call>") {
+                if start > 0 {
+                    events.push(ToolStreamEvent::Text(self.pending[..start].to_owned()));
+                }
+                self.pending = self.pending[start + "<tool_call>".len()..].to_owned();
+                self.inside = true;
+                continue;
+            }
+            if let Some(start) = self.pending.find("[TOOL_CALLS]") {
+                if start > 0 {
+                    events.push(ToolStreamEvent::Text(self.pending[..start].to_owned()));
+                }
+                self.pending = self.pending[start..].to_owned();
+                self.mistral = true;
+                break;
+            }
+            if self.pending.trim_start().starts_with('{') {
+                self.json_buffer = true;
+                break;
+            }
+            let keep = "<tool_call>".len().saturating_sub(1);
+            if self.pending.len() > keep {
+                let split = self.pending.len() - keep;
+                events.push(ToolStreamEvent::Text(self.pending[..split].to_owned()));
+                self.pending = self.pending[split..].to_owned();
+            }
+            break;
+        }
+        events
+    }
+
+    pub fn finish(mut self) -> Vec<ToolStreamEvent> {
+        let mut events = Vec::new();
+        if self.mistral || self.json_buffer {
+            let mut parsed = parse(&self.pending, &self.prefix);
+            for call in &mut parsed.calls {
+                call.id = format!("call_{}_{}", self.prefix, self.next_call);
+                self.next_call += 1;
+            }
+            if !parsed.calls.is_empty() {
+                events.push(ToolStreamEvent::Calls(parsed.calls));
+            }
+            if let Some(content) = parsed.content {
+                events.push(ToolStreamEvent::Text(content));
+            }
+        } else if !self.pending.is_empty() {
+            events.push(ToolStreamEvent::Text(self.pending));
+        }
+        events
+    }
+}
+
+#[cfg(test)]
+mod stream_tests {
+    use super::*;
+
+    #[test]
+    fn streams_text_then_call() {
+        let mut stream = ToolStream::new("s");
+        let first = stream.push("hello <tool_call>{\"name\":\"lookup\",\"arguments\":{}}");
+        assert_eq!(first, vec![ToolStreamEvent::Text("hello ".into())]);
+        let second = stream.push("</tool_call>");
+        assert!(matches!(
+            second.as_slice(),
+            [ToolStreamEvent::Calls(calls)] if calls[0].function.name == "lookup"
+        ));
+        assert!(stream.finish().is_empty());
+    }
+
+    #[test]
+    fn keeps_text_tail_for_split_tag() {
+        let mut stream = ToolStream::new("s");
+        let mut text = String::new();
+        for event in stream.push("hello <tool") {
+            if let ToolStreamEvent::Text(value) = event {
+                text.push_str(&value);
+            }
+        }
+        for event in stream.finish() {
+            if let ToolStreamEvent::Text(value) = event {
+                text.push_str(&value);
+            }
+        }
+        assert_eq!(text, "hello <tool");
+    }
+
+    #[test]
+    fn buffers_plain_json_until_end() {
+        let mut stream = ToolStream::new("s");
+        assert!(
+            stream
+                .push("{\"name\":\"ping\",\"arguments\":{}}")
+                .is_empty()
+        );
+        let events = stream.finish();
+        assert!(matches!(
+            events.as_slice(),
+            [ToolStreamEvent::Calls(calls)] if calls[0].function.name == "ping"
+        ));
+    }
+}
