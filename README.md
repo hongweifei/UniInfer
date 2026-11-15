@@ -238,6 +238,8 @@ curl -X POST http://127.0.0.1:8080/v1/audio/transcriptions \
 
 `OnnxEngine` 不包含具体 ASR 模型分支：清单 `[audio].architecture` 选择 adapter。`whisper` 走 encoder/decoder ASR，存在 `decoder_with_past_file` 时复用 KV cache；超过 30 秒的音频按 30 秒窗口、1 秒重叠分块，转写后按词级重叠去重拼接，不再静默截断。`ctc` 走单图 raw audio → logits + CTC 解码，tokenizer、graph 输入输出名与 blank id 都由清单声明。`/v1/audio/transcriptions` 和 `AudioSlot` 不依赖具体引擎。输入 WAV 支持单声道或立体声；立体声按帧平均下混，非清单采样率在解码期线性重采样。MP3/Opus 容器仍由客户端先转成 WAV。
 
+`response_format` 支持 `json`（默认）、`text`、`verbose_json`、`srt`、`vtt`。当前 ASR adapter 不返回词级时间戳，因此 `verbose_json`/字幕使用整段音频作为一个 segment。
+
 CTC 单图模型示例：
 
 ```toml

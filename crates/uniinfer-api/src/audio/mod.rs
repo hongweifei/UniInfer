@@ -1,20 +1,23 @@
 //! OpenAI-compatible audio transcription endpoint.
 
-use axum::Json;
 use axum::extract::{Multipart, State};
-use serde_json::{Value, json};
+use axum::response::{IntoResponse, Response};
 use uniinfer_backends::audio::decode_wav_mono;
 use uniinfer_core::EngineError;
 
 use crate::error::ApiError;
 use crate::state::AppState;
 
+mod response;
+use response::ResponseFormat;
+
 pub(crate) async fn transcribe(
     State(state): State<AppState>,
     mut multipart: Multipart,
-) -> Result<Json<Value>, ApiError> {
+) -> Result<Response, ApiError> {
     let mut model = None;
     let mut audio = None;
+    let mut format = ResponseFormat::Json;
     while let Some(field) = multipart
         .next_field()
         .await
@@ -26,6 +29,17 @@ pub(crate) async fn transcribe(
                     Some(field.text().await.map_err(|error| {
                         ApiError::bad_request("invalid_model", error.to_string())
                     })?);
+            }
+            "response_format" => {
+                let value = field.text().await.map_err(|error| {
+                    ApiError::bad_request("invalid_response_format", error.to_string())
+                })?;
+                format = ResponseFormat::parse(&value).ok_or_else(|| {
+                    ApiError::bad_request(
+                        "invalid_response_format",
+                        format!("unsupported response_format {value:?}"),
+                    )
+                })?;
             }
             "file" | "audio" => {
                 audio =
@@ -81,5 +95,5 @@ pub(crate) async fn transcribe(
             return Err(error.into());
         }
     };
-    Ok(Json(json!({"text": text})))
+    Ok(response::render(format, &text, audio_seconds).into_response())
 }
