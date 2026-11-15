@@ -2,6 +2,7 @@ use axum::Json;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use serde_json::json;
+use uniinfer_router::RouterError;
 
 /// Error reply with a stable machine-readable code.
 #[derive(Debug)]
@@ -26,6 +27,15 @@ impl ApiError {
         Self {
             status: StatusCode::NOT_FOUND,
             code,
+            message: message.into(),
+            fallback_reason: None,
+        }
+    }
+
+    pub fn busy(message: impl Into<String>) -> Self {
+        Self {
+            status: StatusCode::TOO_MANY_REQUESTS,
+            code: "busy",
             message: message.into(),
             fallback_reason: None,
         }
@@ -87,5 +97,24 @@ impl IntoResponse for ApiError {
             "fallback_reason": self.fallback_reason,
         });
         (self.status, Json(body)).into_response()
+    }
+}
+
+impl From<RouterError> for ApiError {
+    fn from(error: RouterError) -> Self {
+        match error {
+            RouterError::ModelNotFound(model) => {
+                Self::not_found("model_not_found", format!("model {model} is not loaded"))
+            }
+            RouterError::ContextOverflow { tokens, limit } => Self::bad_request(
+                "context_overflow",
+                format!("prompt uses {tokens} tokens, context_len is {limit}"),
+            ),
+            RouterError::InvalidMaxTokens => {
+                Self::bad_request("invalid_max_tokens", "max_tokens resolves to zero")
+            }
+            RouterError::Busy => Self::busy("model is serving another request"),
+            RouterError::Engine(error) => error.into(),
+        }
     }
 }

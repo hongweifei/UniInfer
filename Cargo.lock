@@ -2978,6 +2978,7 @@ dependencies = [
 name = "uniinfer-router"
 version = "0.0.0"
 dependencies = [
+ "thiserror 2.0.21",
  "tokio",
  "tracing",
  "uniinfer-core",
