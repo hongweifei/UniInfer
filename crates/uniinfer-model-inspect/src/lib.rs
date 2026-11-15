@@ -5,6 +5,7 @@
 
 mod error;
 mod files;
+mod gguf;
 mod inspect;
 mod inspection;
 mod metadata;

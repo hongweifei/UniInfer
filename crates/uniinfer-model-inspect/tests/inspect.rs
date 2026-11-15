@@ -42,3 +42,47 @@ fn detects_onnx_encoder_decoder_asr() {
     assert_eq!(audio.architecture.as_deref(), Some("whisper"));
     assert!(audio.options.is_some());
 }
+
+fn gguf_string(bytes: &mut Vec<u8>, value: &str) {
+    bytes.extend_from_slice(&(value.len() as u64).to_le_bytes());
+    bytes.extend_from_slice(value.as_bytes());
+}
+
+fn gguf_kv_string(bytes: &mut Vec<u8>, key: &str, value: &str) {
+    gguf_string(bytes, key);
+    bytes.extend_from_slice(&8u32.to_le_bytes());
+    gguf_string(bytes, value);
+}
+
+#[test]
+fn reads_gguf_metadata() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let mut bytes = Vec::new();
+    bytes.extend_from_slice(b"GGUF");
+    bytes.extend_from_slice(&3u32.to_le_bytes());
+    bytes.extend_from_slice(&0u64.to_le_bytes());
+    bytes.extend_from_slice(&4u64.to_le_bytes());
+    gguf_kv_string(&mut bytes, "general.architecture", "qwen3");
+    gguf_string(&mut bytes, "general.file_type");
+    bytes.extend_from_slice(&4u32.to_le_bytes());
+    bytes.extend_from_slice(&15u32.to_le_bytes());
+    gguf_string(&mut bytes, "general.context_length");
+    bytes.extend_from_slice(&4u32.to_le_bytes());
+    bytes.extend_from_slice(&40960u32.to_le_bytes());
+    gguf_string(&mut bytes, "tokenizer.ggml.tokens");
+    bytes.extend_from_slice(&9u32.to_le_bytes());
+    bytes.extend_from_slice(&8u32.to_le_bytes());
+    bytes.extend_from_slice(&3u64.to_le_bytes());
+    for token in ["a", "b", "c"] {
+        gguf_string(&mut bytes, token);
+    }
+    fs::write(dir.path().join("model.gguf"), bytes).expect("gguf");
+    fs::write(dir.path().join("tokenizer.json"), b"{}").expect("tokenizer");
+    let inspection = inspect(dir.path(), &InspectOptions::default()).expect("inspect");
+    assert_eq!(inspection.manifest.format, ModelFormat::Gguf);
+    assert_eq!(inspection.manifest.quantization.as_str(), "q4_k_m");
+    assert_eq!(inspection.manifest.context_len, 40960);
+    let text = inspection.manifest.text.expect("text");
+    assert_eq!(text.vocab_size, 3);
+    assert_eq!(text.family.as_deref(), Some("qwen3"));
+}

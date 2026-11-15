@@ -3,6 +3,7 @@ use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use serde_json::json;
 use uniinfer_config::ConfigError;
+use uniinfer_model_inspect::InspectError;
 use uniinfer_router::RouterError;
 
 /// Error reply with a stable machine-readable code.
@@ -115,6 +116,24 @@ impl From<ConfigError> for ApiError {
         Self {
             status,
             code: "config_error",
+            message: error.to_string(),
+            fallback_reason: None,
+        }
+    }
+}
+
+impl From<InspectError> for ApiError {
+    fn from(error: InspectError) -> Self {
+        let status = match &error {
+            InspectError::NotFound(_) | InspectError::Unsupported(_) => StatusCode::NOT_FOUND,
+            InspectError::Config { .. } | InspectError::Manifest(_) | InspectError::Gguf(_) => {
+                StatusCode::BAD_REQUEST
+            }
+            InspectError::Io { .. } => StatusCode::INTERNAL_SERVER_ERROR,
+        };
+        Self {
+            status,
+            code: "model_inspect_error",
             message: error.to_string(),
             fallback_reason: None,
         }

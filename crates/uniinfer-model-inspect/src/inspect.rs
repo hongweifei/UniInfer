@@ -9,6 +9,7 @@ use crate::files::{
     choose_primary, collect_files, extension, file_name, looks_like_whisper, model_id, relative,
     sha256, with_metadata,
 };
+use crate::gguf::read as read_gguf;
 use crate::inspection::Inspection;
 use crate::metadata::{
     ConfigJson, PreprocessorConfig, architecture_name, context_len, detect_quantization, read_json,
@@ -85,9 +86,19 @@ pub fn inspect(root: &Path, options: &InspectOptions) -> Result<Inspection> {
         None
     });
     let format = detected_format.ok_or_else(|| InspectError::Unsupported(root.to_path_buf()))?;
+    let gguf_meta = if format == ModelFormat::Gguf {
+        gguf.first().map(|path| read_gguf(path)).transpose()?
+    } else {
+        None
+    };
     let architecture = options
         .architecture
         .clone()
+        .or_else(|| {
+            gguf_meta
+                .as_ref()
+                .and_then(|meta| meta.architecture.clone())
+        })
         .or_else(|| config.as_ref().and_then(architecture_name))
         .or_else(|| {
             if format == ModelFormat::Ggml && looks_like_whisper(root) {
@@ -98,6 +109,7 @@ pub fn inspect(root: &Path, options: &InspectOptions) -> Result<Inspection> {
         });
     let quantization = options
         .quantization
+        .or_else(|| gguf_meta.as_ref().and_then(|meta| meta.quantization))
         .or_else(|| detect_quantization(&files, config.as_ref()))
         .unwrap_or(Quantization::Fp32);
     let mut warnings = Vec::new();
@@ -127,12 +139,26 @@ pub fn inspect(root: &Path, options: &InspectOptions) -> Result<Inspection> {
         ModelFormat::Gguf => {
             let primary = choose_primary(&gguf, "model.gguf");
             let selected = with_metadata(primary, tokenizer.as_deref(), config_path.as_deref());
-            let text = crate::metadata::text_config(
-                root,
-                config.as_ref(),
-                tokenizer.as_deref(),
-                config_path.as_deref(),
-            );
+            let vocab_size = gguf_meta
+                .as_ref()
+                .and_then(|meta| meta.vocab_size)
+                .or_else(|| config.as_ref().and_then(|config| config.vocab_size));
+            let text = match (vocab_size, tokenizer.as_deref()) {
+                (Some(vocab_size), Some(tokenizer)) => Some(uniinfer_core::TextConfig {
+                    vocab_size,
+                    eos_token: config.as_ref().and_then(|config| config.eos_token_id),
+                    family: architecture.clone(),
+                    config_file: config_path.as_deref().map(|path| relative(root, path)),
+                    tokenizer_file: Some(relative(root, tokenizer)),
+                }),
+                _ => {
+                    warnings.push(
+                        "GGUF model lacks tokenizer.json or vocab metadata; text loading may fail"
+                            .into(),
+                    );
+                    None
+                }
+            };
             (vec![Modality::Text], text, None, selected)
         }
         ModelFormat::Safetensors => {
@@ -162,7 +188,10 @@ pub fn inspect(root: &Path, options: &InspectOptions) -> Result<Inspection> {
         }
     };
 
-    let context_len = context_len(config.as_ref(), &modalities);
+    let context_len = gguf_meta
+        .as_ref()
+        .and_then(|meta| meta.context_len)
+        .unwrap_or_else(|| context_len(config.as_ref(), &modalities));
     let id = options.id.clone().unwrap_or_else(|| model_id(root));
     let files = selected
         .into_iter()

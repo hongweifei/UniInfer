@@ -480,6 +480,8 @@ sha256 = "9f8e6c1d0a4b7e2f5c8d1a3b6e9f0c2d4a7b1e8f3c6d9a2b5e0f4c7d1a8b3e6f"  # �
 | `/v1/videos/generations/{id}` | GET | 任务查询 |
 | `/v1/realtime` | WS | 实时会话，text + audio VAD |
 | `/v1/config` | GET/PUT | 读取/保存 GUI 配置；保存后需要重启生效 |
+| `/v1/models/inspect` | POST | 扫描模型目录并返回清单草稿 |
+| `/v1/models/import` | POST | 生成 manifest.toml 并加入应用配置 |
 | `/v1/models` | GET | 已加载模型、能力矩阵与放置计划 |
 | `/v1/devices` | GET | 运行时设备清单与各模型放置/回退原因 |
 | `/v1/sessions/{id}/cancel` | POST | 取消生成 |

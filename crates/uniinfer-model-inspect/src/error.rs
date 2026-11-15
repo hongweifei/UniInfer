@@ -18,6 +18,8 @@ pub enum InspectError {
     Unsupported(PathBuf),
     #[error("invalid manifest: {0}")]
     Manifest(String),
+    #[error("GGUF metadata: {0}")]
+    Gguf(String),
 }
 
 pub type Result<T, E = InspectError> = std::result::Result<T, E>;

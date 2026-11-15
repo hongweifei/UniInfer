@@ -355,3 +355,53 @@ async fn config_endpoint_round_trips_and_saves() {
     let saved = UniInferConfig::load(&path).expect("saved config");
     assert_eq!(saved.server.addr.port(), 9091);
 }
+
+#[tokio::test]
+async fn model_inspect_and_import_endpoints_work() {
+    use std::sync::Arc;
+    use uniinfer_config::{ConfigHandle, UniInferConfig};
+
+    let dir = tempfile::tempdir().expect("tempdir");
+    let model_dir = dir.path().join("model");
+    std::fs::create_dir(&model_dir).expect("model dir");
+    std::fs::write(model_dir.join("model.onnx"), b"onnx").expect("model");
+    std::fs::write(
+        model_dir.join("config.json"),
+        r#"{"architectures":["Qwen3ForCausalLM"],"vocab_size":16,"max_position_embeddings":64}"#,
+    )
+    .expect("config");
+    std::fs::write(model_dir.join("tokenizer.json"), b"{}").expect("tokenizer");
+
+    let config_path = dir.path().join("uniinfer.toml");
+    let handle = Arc::new(ConfigHandle::new(
+        UniInferConfig::default(),
+        Some(config_path.clone()),
+    ));
+    std::fs::write(&config_path, "schema_version = 1\n").expect("config file");
+    let fixture = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../models/tiny-onnx");
+    let api = ApiConfig::new(fixture.join("manifest.toml")).with_config(handle);
+    let app = routes::router(AppState::new(&api).expect("state"));
+
+    let body = json!({"path": model_dir.clone(), "id": "imported"}).to_string();
+    let response = app
+        .clone()
+        .oneshot(post("/v1/models/inspect", &body))
+        .await
+        .expect("response");
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = body_json(response).await;
+    assert_eq!(body["manifest"]["id"], "imported");
+    assert_eq!(body["manifest"]["format"], "onnx");
+
+    let response = app
+        .oneshot(post(
+            "/v1/models/import",
+            &json!({"path": model_dir, "id": "imported"}).to_string(),
+        ))
+        .await
+        .expect("response");
+    assert_eq!(response.status(), StatusCode::OK);
+    assert!(model_dir.join("manifest.toml").is_file());
+    let saved = UniInferConfig::load(&config_path).expect("saved config");
+    assert_eq!(saved.models.len(), 1);
+}

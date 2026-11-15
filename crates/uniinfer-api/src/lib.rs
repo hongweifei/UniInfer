@@ -7,6 +7,7 @@ mod chat;
 mod config;
 mod error;
 mod extract;
+mod models;
 mod realtime;
 pub mod routes;
 mod sse;

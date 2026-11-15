@@ -17,6 +17,8 @@ pub fn router(state: AppState) -> Router {
         .route("/health", get(health))
         .route("/metrics", get(metrics))
         .route("/v1/models", get(models))
+        .route("/v1/models/inspect", post(crate::models::inspect_model))
+        .route("/v1/models/import", post(crate::models::import_model))
         .route("/v1/devices", get(devices))
         .route("/v1/chat/completions", post(chat))
         .route(
