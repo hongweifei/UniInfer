@@ -44,6 +44,9 @@ pub struct ServerConfig {
     /// Model load timeout; `0` disables the deadline.
     #[serde(default)]
     pub model_load_timeout_ms: u64,
+    /// Route text models through `uniinfer-worker` child processes.
+    #[serde(default)]
+    pub isolate_text_models: bool,
 }
 
 fn default_addr() -> SocketAddr {
@@ -68,6 +71,7 @@ impl Default for ServerConfig {
             max_loaded_models: 0,
             request_timeout_ms: 0,
             model_load_timeout_ms: 0,
+            isolate_text_models: false,
         }
     }
 }

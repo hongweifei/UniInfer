@@ -42,7 +42,7 @@ impl AppState {
                 "no manifests configured".into(),
             ));
         }
-        let runtime = Arc::new(Runtime::new()?);
+        let runtime = Arc::new(Runtime::new_with_process(config.isolate_text_models)?);
         let mut manifest_paths = HashMap::new();
         let mut catalog = HashMap::new();
         for path in &config.manifests {

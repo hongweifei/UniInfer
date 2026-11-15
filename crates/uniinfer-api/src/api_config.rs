@@ -14,6 +14,7 @@ pub struct ApiConfig {
     pub max_loaded_models: usize,
     pub request_timeout: std::time::Duration,
     pub model_load_timeout: std::time::Duration,
+    pub isolate_text_models: bool,
     pub config: Option<Arc<ConfigHandle>>,
 }
 
@@ -28,6 +29,7 @@ impl ApiConfig {
             max_loaded_models: 0,
             request_timeout: std::time::Duration::ZERO,
             model_load_timeout: std::time::Duration::ZERO,
+            isolate_text_models: false,
             config: None,
         }
     }
@@ -51,6 +53,7 @@ impl ApiConfig {
             model_load_timeout: std::time::Duration::from_millis(
                 config.server.model_load_timeout_ms,
             ),
+            isolate_text_models: config.server.isolate_text_models,
             config: Some(handle),
         })
     }

@@ -32,6 +32,9 @@ pub(crate) fn apply(config: &mut UniInferConfig) -> Result<()> {
             ConfigError::Invalid(format!("UNIINFER_MODEL_LOAD_TIMEOUT_MS: {error}"))
         })?;
     }
+    if let Ok(value) = std::env::var("UNIINFER_ISOLATE_TEXT_MODELS") {
+        config.server.isolate_text_models = matches!(value.as_str(), "1" | "true" | "yes");
+    }
     if let Ok(value) = std::env::var("UNIINFER_TOKEN") {
         config.server.token = if value.is_empty() { None } else { Some(value) };
     }
