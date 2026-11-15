@@ -66,8 +66,10 @@ impl InferenceEngine for CandleEngine {
         else {
             return false;
         };
-        if manifest.modalities.contains(&Modality::Image) {
-            vision::supports(family)
+        if vision::supports(family) {
+            true
+        } else if manifest.modalities.contains(&Modality::Image) {
+            false
         } else {
             self.text.supported(family)
         }
