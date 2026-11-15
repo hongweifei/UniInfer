@@ -1,0 +1,199 @@
+use std::path::Path;
+
+use uniinfer_core::{
+    AudioConfig, Modality, ModelFile, ModelFormat, ModelManifest, PlacementConfig, Quantization,
+};
+
+use crate::error::{InspectError, Result};
+use crate::files::{
+    choose_primary, collect_files, extension, file_name, looks_like_whisper, model_id, relative,
+    sha256, with_metadata,
+};
+use crate::inspection::Inspection;
+use crate::metadata::{
+    ConfigJson, PreprocessorConfig, architecture_name, context_len, detect_quantization, read_json,
+};
+use crate::onnx::{OnnxInputs, onnx_layout};
+
+#[derive(Debug, Clone, Default)]
+pub struct InspectOptions {
+    pub id: Option<String>,
+    pub architecture: Option<String>,
+    pub format: Option<ModelFormat>,
+    pub quantization: Option<Quantization>,
+}
+
+pub fn inspect(root: &Path, options: &InspectOptions) -> Result<Inspection> {
+    if !root.is_dir() {
+        return Err(InspectError::NotFound(root.to_path_buf()));
+    }
+    let mut files = Vec::new();
+    collect_files(root, &mut files, 0)?;
+    let config_path = files
+        .iter()
+        .find(|path| file_name(path) == "config.json")
+        .cloned();
+    let config = config_path
+        .as_deref()
+        .map(read_json::<ConfigJson>)
+        .transpose()?;
+    let preprocessor = files
+        .iter()
+        .find(|path| file_name(path) == "preprocessor_config.json")
+        .cloned()
+        .map(|path| read_json::<PreprocessorConfig>(&path))
+        .transpose()?;
+    let tokenizer = files
+        .iter()
+        .find(|path| file_name(path) == "tokenizer.json")
+        .cloned();
+    let genai = files
+        .iter()
+        .find(|path| file_name(path) == "genai_config.json")
+        .cloned();
+
+    let onnx = files
+        .iter()
+        .filter(|path| extension(path) == Some("onnx"))
+        .cloned()
+        .collect::<Vec<_>>();
+    let gguf = files
+        .iter()
+        .filter(|path| extension(path) == Some("gguf"))
+        .cloned()
+        .collect::<Vec<_>>();
+    let safetensors = files
+        .iter()
+        .filter(|path| extension(path) == Some("safetensors"))
+        .cloned()
+        .collect::<Vec<_>>();
+    let ggml = files
+        .iter()
+        .filter(|path| extension(path) == Some("bin"))
+        .cloned()
+        .collect::<Vec<_>>();
+
+    let detected_format = options.format.or(if !onnx.is_empty() {
+        Some(ModelFormat::Onnx)
+    } else if !gguf.is_empty() {
+        Some(ModelFormat::Gguf)
+    } else if !safetensors.is_empty() {
+        Some(ModelFormat::Safetensors)
+    } else if !ggml.is_empty() {
+        Some(ModelFormat::Ggml)
+    } else {
+        None
+    });
+    let format = detected_format.ok_or_else(|| InspectError::Unsupported(root.to_path_buf()))?;
+    let architecture = options
+        .architecture
+        .clone()
+        .or_else(|| config.as_ref().and_then(architecture_name))
+        .or_else(|| {
+            if format == ModelFormat::Ggml && looks_like_whisper(root) {
+                Some("whisper".into())
+            } else {
+                None
+            }
+        });
+    let quantization = options
+        .quantization
+        .or_else(|| detect_quantization(&files, config.as_ref()))
+        .unwrap_or(Quantization::Fp32);
+    let mut warnings = Vec::new();
+
+    let (modalities, text, audio, selected) = match format {
+        ModelFormat::Onnx => {
+            let layout = onnx_layout(
+                &onnx,
+                OnnxInputs {
+                    root,
+                    config: config.as_ref(),
+                    tokenizer: tokenizer.as_deref(),
+                    config_path: config_path.as_deref(),
+                    genai: genai.as_deref(),
+                    architecture: architecture.as_deref(),
+                    preprocessor: preprocessor.as_ref(),
+                },
+                &mut warnings,
+            )?;
+            (
+                layout.modalities,
+                layout.text,
+                layout.audio,
+                layout.selected,
+            )
+        }
+        ModelFormat::Gguf => {
+            let primary = choose_primary(&gguf, "model.gguf");
+            let selected = with_metadata(primary, tokenizer.as_deref(), config_path.as_deref());
+            let text = crate::metadata::text_config(
+                root,
+                config.as_ref(),
+                tokenizer.as_deref(),
+                config_path.as_deref(),
+            );
+            (vec![Modality::Text], text, None, selected)
+        }
+        ModelFormat::Safetensors => {
+            let primary = choose_primary(&safetensors, "model.safetensors");
+            let selected = with_metadata(primary, tokenizer.as_deref(), config_path.as_deref());
+            let text = crate::metadata::text_config(
+                root,
+                config.as_ref(),
+                tokenizer.as_deref(),
+                config_path.as_deref(),
+            );
+            (vec![Modality::Text], text, None, selected)
+        }
+        ModelFormat::Ggml => {
+            let primary = choose_primary(&ggml, "ggml-model.bin");
+            let selected = with_metadata(primary, None, config_path.as_deref());
+            let audio = AudioConfig {
+                architecture: Some("whisper".into()),
+                sample_rate: preprocessor
+                    .as_ref()
+                    .and_then(|config| config.sampling_rate)
+                    .unwrap_or(16_000),
+                channels: 1,
+                ..AudioConfig::default()
+            };
+            (vec![Modality::Audio], None, Some(audio), selected)
+        }
+    };
+
+    let context_len = context_len(config.as_ref(), &modalities);
+    let id = options.id.clone().unwrap_or_else(|| model_id(root));
+    let files = selected
+        .into_iter()
+        .map(|path| {
+            Ok(ModelFile {
+                path: relative(root, &path),
+                sha256: sha256(&path)?,
+            })
+        })
+        .collect::<Result<Vec<_>>>()?;
+    let manifest = ModelManifest {
+        schema_version: 1,
+        id,
+        format,
+        quantization,
+        modalities,
+        streaming_capable: false,
+        context_len,
+        tokenizer: tokenizer.as_ref().map(|_| "hf".into()),
+        min_vram: None,
+        placement: PlacementConfig::default(),
+        files,
+        text,
+        audio,
+    };
+    manifest
+        .validate()
+        .map_err(|error| InspectError::Manifest(error.to_string()))?;
+    Ok(Inspection {
+        root: root.to_path_buf(),
+        manifest,
+        warnings,
+    })
+}
