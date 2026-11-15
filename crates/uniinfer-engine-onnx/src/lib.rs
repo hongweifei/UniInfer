@@ -198,10 +198,9 @@ impl InferenceEngine for OnnxEngine {
         // Encoder-decoder ASR manifests carry their own graph files. Keep the
         // dispatch here so ONNX stays the first choice for every ONNX model.
         if let Some(audio) = &spec.manifest.audio
-            && (audio.encoder_file.is_some() || audio.decoder_file.is_some())
+            && audio.architecture.is_some()
         {
-            return asr::load(&self.environment, &spec, class)
-                .map(|session| Box::new(session) as Box<dyn EngineSession>);
+            return asr::load(&self.environment, &spec, class);
         }
 
         let session = build_session(&self.environment, class, &model_path)?;

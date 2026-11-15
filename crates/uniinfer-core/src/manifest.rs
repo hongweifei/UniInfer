@@ -164,6 +164,20 @@ pub struct AudioConfig {
     pub input: String,
     #[serde(default = "default_audio_output")]
     pub output: String,
+    /// Adapter selected by the ONNX speech backend.
+    #[serde(default)]
+    pub architecture: Option<String>,
+    /// Single ONNX graph for CTC-style ASR models.
+    #[serde(default)]
+    pub graph_file: Option<PathBuf>,
+    #[serde(default = "default_graph_input")]
+    pub graph_input: String,
+    #[serde(default = "default_graph_output")]
+    pub graph_output: String,
+    #[serde(default = "default_frontend")]
+    pub frontend: String,
+    #[serde(default)]
+    pub blank_token: u32,
     /// Encoder graph for encoder-decoder ASR models.
     #[serde(default)]
     pub encoder_file: Option<PathBuf>,
@@ -200,6 +214,18 @@ fn default_audio_output() -> String {
     "text".into()
 }
 
+fn default_graph_input() -> String {
+    "input_values".into()
+}
+
+fn default_graph_output() -> String {
+    "logits".into()
+}
+
+fn default_frontend() -> String {
+    "raw".into()
+}
+
 impl Default for AudioConfig {
     fn default() -> Self {
         Self {
@@ -207,6 +233,12 @@ impl Default for AudioConfig {
             channels: default_channels(),
             input: default_audio_input(),
             output: default_audio_output(),
+            architecture: None,
+            graph_file: None,
+            graph_input: default_graph_input(),
+            graph_output: default_graph_output(),
+            frontend: default_frontend(),
+            blank_token: 0,
             encoder_file: None,
             decoder_file: None,
             decoder_with_past_file: None,
@@ -368,7 +400,13 @@ impl ModelManifest {
                     "audio.max_tokens must be positive".into(),
                 ));
             }
+            if audio.graph_input.is_empty() || audio.graph_output.is_empty() {
+                return Err(EngineError::ManifestInvalid(
+                    "audio graph tensor names must not be empty".into(),
+                ));
+            }
             for path in [
+                &audio.graph_file,
                 &audio.encoder_file,
                 &audio.decoder_file,
                 &audio.decoder_with_past_file,

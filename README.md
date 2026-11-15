@@ -144,7 +144,7 @@ pub trait InferenceEngine: Send + Sync {
 | Safetensors | 视频生成 | `CandleEngine`（candle-video / plakat） | — | batch |
 | ONNX | 实时预览帧 | `OnnxEngine` | — | realtime |
 | ONNX | 实时逐帧视频 | `OnnxEngine` + RAVE | — | realtime |
-| ONNX | 语音转写（Whisper encoder/decoder） | `OnnxEngine` ASR 适配器 | — | batch |
+| ONNX | 语音转写（Whisper encoder/decoder / CTC） | `OnnxEngine` ASR adapter registry | 可继续注册其他 architecture | batch |
 | GGML | 语音转写 | Registry 路由（当前 `WhisperEngine`） | — | batch |
 
 **量化**：ONNX 支持 FP32、FP16、INT8 与 INT4（如 Qwen3 ONNX int4 GenAI bundle）；GGUF 覆盖 Q2_K–Q8_0、Q4_0、Q8_0；FP8 在加载期返回 `UnsupportedQuantization` 并给出替代建议；IQ/MXFP4 由 `frink` 可选引擎覆盖。Safetensors 以 FP16/BF16 mmap 加载，FP8 的 ISQ 路径在 M11 评估。
@@ -233,7 +233,20 @@ curl -X POST http://127.0.0.1:8080/v1/audio/transcriptions \
   -F file=@hello.wav
 ```
 
-`OnnxEngine` 检测到清单中的 encoder/decoder 文件后使用 ONNX encoder/decoder ASR 适配器；存在 `decoder_with_past_file` 时复用 KV cache，否则回退到每步重算完整 decoder 前缀。`/v1/audio/transcriptions` 和 `AudioSlot` 不依赖具体引擎。输入 WAV 必须是清单 `[audio].sample_rate` 指定的采样率、单声道、PCM16。
+`OnnxEngine` 不包含具体 ASR 模型分支：清单 `[audio].architecture` 选择 adapter。`whisper` 走 encoder/decoder ASR，存在 `decoder_with_past_file` 时复用 KV cache；`ctc` 走单图 raw audio → logits + CTC 解码，tokenizer、graph 输入输出名与 blank id 都由清单声明。`/v1/audio/transcriptions` 和 `AudioSlot` 不依赖具体引擎。输入 WAV 必须是清单 `[audio].sample_rate` 指定的采样率、单声道、PCM16。
+
+CTC 单图模型示例：
+
+```toml
+[audio]
+architecture = "ctc"
+sample_rate = 16000
+graph_file = "model.onnx"
+graph_input = "input_values"
+graph_output = "logits"
+tokenizer_file = "tokenizer.json"
+blank_token = 0
+```
 
 可选 GGML 路径：
 
