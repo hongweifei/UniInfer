@@ -156,6 +156,7 @@ impl WireSpec {
 
 pub struct ProcessEngine {
     worker: PathBuf,
+    devices: Vec<DeviceClass>,
 }
 
 impl ProcessEngine {
@@ -168,15 +169,48 @@ impl ProcessEngine {
                     .map(|path| path.with_file_name(worker_name()))
             })
             .unwrap_or_else(|| PathBuf::from(worker_name()));
-        Self { worker }
+        let devices = std::env::var("UNIINFER_WORKER_DEVICES")
+            .ok()
+            .map(|value| parse_devices(&value))
+            .filter(|devices| !devices.is_empty())
+            .unwrap_or_else(|| vec![DeviceClass::Cpu]);
+        Self { worker, devices }
     }
 }
 
 impl ProcessEngine {
     #[must_use]
     pub fn with_worker(worker: PathBuf) -> Self {
-        Self { worker }
+        Self {
+            worker,
+            devices: vec![DeviceClass::Cpu],
+        }
     }
+
+    #[must_use]
+    pub fn with_worker_and_devices(worker: PathBuf, devices: Vec<DeviceClass>) -> Self {
+        Self { worker, devices }
+    }
+}
+
+fn parse_devices(value: &str) -> Vec<DeviceClass> {
+    let mut devices = Vec::new();
+    for part in value
+        .split(',')
+        .map(str::trim)
+        .filter(|part| !part.is_empty())
+    {
+        let class = match part.to_ascii_lowercase().as_str() {
+            "cpu" => DeviceClass::Cpu,
+            "gpu" => DeviceClass::Gpu,
+            "npu" => DeviceClass::Npu,
+            _ => continue,
+        };
+        if !devices.contains(&class) {
+            devices.push(class);
+        }
+    }
+    devices
 }
 
 impl Default for ProcessEngine {
@@ -259,7 +293,7 @@ impl InferenceEngine for ProcessEngine {
     }
 
     fn supported_devices(&self) -> &[DeviceClass] {
-        &[DeviceClass::Cpu]
+        &self.devices
     }
 
     fn load_session(&self, spec: EngineLoadSpec) -> Result<Box<dyn EngineSession>> {
@@ -269,11 +303,17 @@ impl InferenceEngine for ProcessEngine {
         let manifest_path = spec.manifest_path.as_ref().ok_or_else(|| {
             EngineError::LoadFailed("process isolation requires a manifest path".into())
         })?;
+        let class = spec
+            .placement
+            .devices
+            .first()
+            .map(|device| device.class)
+            .ok_or_else(|| EngineError::PlacementUnsatisfiable("empty placement".into()))?;
         let mut child = Command::new(&self.worker)
             .arg(manifest_path)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            .env("UNIINFER_WORKER_PLACEMENT", "cpu")
+            .env("UNIINFER_WORKER_PLACEMENT", class.to_string())
             .stderr(Stdio::inherit())
             .spawn()
             .map_err(|error| {
@@ -451,5 +491,18 @@ impl Drop for ProcessSession {
             let _ = io.child.kill();
             let _ = io.child.wait();
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_worker_devices() {
+        assert_eq!(
+            parse_devices("cpu,gpu,gpu,bogus"),
+            vec![DeviceClass::Cpu, DeviceClass::Gpu]
+        );
     }
 }

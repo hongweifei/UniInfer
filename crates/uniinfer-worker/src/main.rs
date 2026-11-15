@@ -39,10 +39,23 @@ fn main() -> anyhow::Result<()> {
         .nth(1)
         .ok_or_else(|| anyhow::anyhow!("usage: uniinfer-worker <manifest.toml>"))?;
     let mut manifest = ModelManifest::load(std::path::Path::new(&path))?;
-    if std::env::var("UNIINFER_WORKER_PLACEMENT").as_deref() == Ok("cpu") {
-        manifest.placement.policy = uniinfer_core::PlacementPolicy::Auto;
-        manifest.placement.prefer = vec![uniinfer_core::DeviceClass::Cpu];
-        manifest.placement.allow_cpu_fallback = true;
+    match std::env::var("UNIINFER_WORKER_PLACEMENT").as_deref() {
+        Ok("cpu") => {
+            manifest.placement.policy = uniinfer_core::PlacementPolicy::Auto;
+            manifest.placement.prefer = vec![uniinfer_core::DeviceClass::Cpu];
+            manifest.placement.allow_cpu_fallback = true;
+        }
+        Ok("gpu") => {
+            manifest.placement.policy = uniinfer_core::PlacementPolicy::Auto;
+            manifest.placement.prefer = vec![uniinfer_core::DeviceClass::Gpu];
+            manifest.placement.allow_cpu_fallback = true;
+        }
+        Ok("npu") => {
+            manifest.placement.policy = uniinfer_core::PlacementPolicy::Auto;
+            manifest.placement.prefer = vec![uniinfer_core::DeviceClass::Npu];
+            manifest.placement.allow_cpu_fallback = false;
+        }
+        _ => {}
     }
     let base_dir = std::path::Path::new(&path)
         .parent()
