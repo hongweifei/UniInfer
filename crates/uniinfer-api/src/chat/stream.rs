@@ -7,6 +7,7 @@ use axum::response::sse::{KeepAlive, Sse};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::mpsc;
+use uniinfer_backends::stop::StopMatcher;
 use uniinfer_backends::utf8::Utf8Decoder;
 use uniinfer_core::EngineError;
 
@@ -14,6 +15,17 @@ use crate::error::ApiError;
 use crate::sse::{self, StreamEvent};
 
 use super::{Generation, unix_seconds};
+
+fn send_text(tx: &mpsc::Sender<StreamEvent>, decoder: &mut Utf8Decoder, bytes: &[u8]) -> bool {
+    for &byte in bytes {
+        if let Some(text) = decoder.push(byte)
+            && tx.blocking_send(StreamEvent::Delta(text)).is_err()
+        {
+            return false;
+        }
+    }
+    true
+}
 
 pub(super) async fn stream_response(generation: Generation) -> Result<Response, ApiError> {
     let Generation {
@@ -23,6 +35,7 @@ pub(super) async fn stream_response(generation: Generation) -> Result<Response, 
         session_id,
         prompt,
         max_tokens,
+        stop,
         cancel,
         ..
     } = generation;
@@ -36,19 +49,24 @@ pub(super) async fn stream_response(generation: Generation) -> Result<Response, 
     tokio::task::spawn_blocking(move || {
         let _permit = permit;
         let _active = task_state.router.active_guard();
+        let mut matcher = StopMatcher::new(stop);
         let mut decoder = Utf8Decoder::new();
+        let mut open = true;
         let result = task_slot.generate(&prompt, max_tokens, &cancel, &mut |chunk| {
-            for &byte in chunk {
-                if let Some(text) = decoder.push(byte)
-                    && tx.blocking_send(StreamEvent::Delta(text)).is_err()
-                {
-                    return false;
+            matcher.push(chunk, &mut |safe| {
+                if open {
+                    open = send_text(&tx, &mut decoder, safe);
                 }
+            });
+            open && !matcher.is_matched()
+        });
+        matcher.finish(&mut |safe| {
+            if open {
+                open = send_text(&tx, &mut decoder, safe);
             }
-            true
         });
         let tail = decoder.finish();
-        if !tail.is_empty() {
+        if open && !tail.is_empty() {
             let _ = tx.blocking_send(StreamEvent::Delta(tail));
         }
         match result {

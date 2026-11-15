@@ -2,6 +2,7 @@
 
 use axum::Json;
 use axum::response::{IntoResponse, Response};
+use uniinfer_backends::stop::StopMatcher;
 
 use crate::error::ApiError;
 
@@ -16,6 +17,7 @@ pub(super) async fn complete_response(generation: Generation) -> Result<Response
         prompt,
         prompt_tokens,
         max_tokens,
+        stop,
         cancel,
     } = generation;
     let task_state = state.clone();
@@ -25,10 +27,11 @@ pub(super) async fn complete_response(generation: Generation) -> Result<Response
         let _permit = permit;
         let _active = task_state.router.active_guard();
         let mut bytes = Vec::new();
+        let mut matcher = StopMatcher::new(stop);
         let result = slot.generate(&prompt, max_tokens, &cancel, &mut |chunk| {
-            bytes.extend_from_slice(chunk);
-            true
+            matcher.push(chunk, &mut |safe| bytes.extend_from_slice(safe))
         });
+        matcher.finish(&mut |safe| bytes.extend_from_slice(safe));
         task_state.router.unregister(&task_session);
         (result, bytes)
     })

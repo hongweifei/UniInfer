@@ -234,3 +234,49 @@ async fn devices_endpoint_reports_runtime_plan() {
     assert!(!body["devices"].as_array().expect("devices").is_empty());
     assert_eq!(body["models"][0]["fallback_reason"], "engine_no_npu");
 }
+
+#[tokio::test]
+async fn stop_string_truncates_completion() {
+    let body = json!({
+        "model": "tiny-byte-onnx",
+        "messages": [{"role": "user", "content": "ab"}],
+        "max_tokens": 3,
+        "stop": "d"
+    })
+    .to_string();
+    let response = app()
+        .oneshot(post("/v1/chat/completions", &body))
+        .await
+        .expect("response");
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = body_json(response).await;
+    assert_eq!(body["choices"][0]["message"]["content"], "c");
+}
+
+#[tokio::test]
+async fn stop_array_truncates_streaming() {
+    let body = json!({
+        "model": "tiny-byte-onnx",
+        "messages": [{"role": "user", "content": "ab"}],
+        "max_tokens": 3,
+        "stream": true,
+        "stop": ["e", "zzz"]
+    })
+    .to_string();
+    let response = app()
+        .oneshot(post("/v1/chat/completions", &body))
+        .await
+        .expect("response");
+    assert_eq!(response.status(), StatusCode::OK);
+    let bytes = response
+        .into_body()
+        .collect()
+        .await
+        .expect("body")
+        .to_bytes();
+    let text = String::from_utf8_lossy(&bytes);
+    assert!(text.contains("\"content\":\"c\""));
+    assert!(text.contains("\"content\":\"d\""));
+    assert!(!text.contains("\"content\":\"e\""));
+    assert!(text.contains("[DONE]"));
+}

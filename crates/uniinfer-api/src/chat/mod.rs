@@ -27,6 +27,24 @@ pub(crate) struct ChatRequest {
     stream: bool,
     #[serde(default)]
     pub(super) max_tokens: Option<usize>,
+    #[serde(default)]
+    stop: Option<StopInput>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+enum StopInput {
+    One(String),
+    Many(Vec<String>),
+}
+
+impl StopInput {
+    fn into_vec(self) -> Vec<String> {
+        match self {
+            Self::One(sequence) => vec![sequence],
+            Self::Many(sequences) => sequences,
+        }
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -43,6 +61,7 @@ pub(super) struct Generation {
     pub(super) prompt: String,
     pub(super) prompt_tokens: usize,
     pub(super) max_tokens: usize,
+    pub(super) stop: Vec<String>,
     pub(super) cancel: CancelToken,
 }
 
@@ -65,6 +84,7 @@ pub(crate) async fn chat(
         })
         .collect::<Vec<_>>();
     let prompt = slot.render_chat(&messages).map_err(ApiError::from)?;
+    let stop = request.stop.map(StopInput::into_vec).unwrap_or_default();
     let prepared = state
         .router
         .prepare_text(&request.model, prompt, request.max_tokens)
@@ -89,6 +109,7 @@ pub(crate) async fn chat(
         prompt,
         prompt_tokens,
         max_tokens,
+        stop,
         cancel,
     };
 

@@ -2,6 +2,7 @@
 
 pub mod audio;
 pub mod chat_template;
+pub mod stop;
 pub mod text;
 pub mod tokenizer;
 pub mod utf8;
