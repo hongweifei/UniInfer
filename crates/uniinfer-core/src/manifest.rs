@@ -83,6 +83,46 @@ pub enum Quantization {
     Q5KM,
     #[serde(rename = "q6_k")]
     Q6K,
+    #[serde(rename = "q8_k")]
+    Q8K,
+    #[serde(rename = "q2_k_s")]
+    Q2KS,
+    #[serde(rename = "iq1_s")]
+    Iq1S,
+    #[serde(rename = "iq1_m")]
+    Iq1M,
+    #[serde(rename = "iq2_xxs")]
+    Iq2Xxs,
+    #[serde(rename = "iq2_xs")]
+    Iq2Xs,
+    #[serde(rename = "iq2_s")]
+    Iq2S,
+    #[serde(rename = "iq2_m")]
+    Iq2M,
+    #[serde(rename = "iq3_xxs")]
+    Iq3Xxs,
+    #[serde(rename = "iq3_xs")]
+    Iq3Xs,
+    #[serde(rename = "iq3_s")]
+    Iq3S,
+    #[serde(rename = "iq3_m")]
+    Iq3M,
+    #[serde(rename = "iq4_nl")]
+    Iq4Nl,
+    #[serde(rename = "iq4_xs")]
+    Iq4Xs,
+    #[serde(rename = "mxfp4")]
+    Mxfp4,
+    #[serde(rename = "nvfp4")]
+    Nvfp4,
+    #[serde(rename = "tq1_0")]
+    Tq1_0,
+    #[serde(rename = "tq2_0")]
+    Tq2_0,
+    #[serde(rename = "q1_0")]
+    Q1_0,
+    #[serde(rename = "q2_0")]
+    Q2_0,
 }
 
 impl Quantization {
@@ -109,6 +149,26 @@ impl Quantization {
             Self::Q5KS => "q5_k_s",
             Self::Q5KM => "q5_k_m",
             Self::Q6K => "q6_k",
+            Self::Q8K => "q8_k",
+            Self::Q2KS => "q2_k_s",
+            Self::Iq1S => "iq1_s",
+            Self::Iq1M => "iq1_m",
+            Self::Iq2Xxs => "iq2_xxs",
+            Self::Iq2Xs => "iq2_xs",
+            Self::Iq2S => "iq2_s",
+            Self::Iq2M => "iq2_m",
+            Self::Iq3Xxs => "iq3_xxs",
+            Self::Iq3Xs => "iq3_xs",
+            Self::Iq3S => "iq3_s",
+            Self::Iq3M => "iq3_m",
+            Self::Iq4Nl => "iq4_nl",
+            Self::Iq4Xs => "iq4_xs",
+            Self::Mxfp4 => "mxfp4",
+            Self::Nvfp4 => "nvfp4",
+            Self::Tq1_0 => "tq1_0",
+            Self::Tq2_0 => "tq2_0",
+            Self::Q1_0 => "q1_0",
+            Self::Q2_0 => "q2_0",
         }
     }
 }

@@ -147,7 +147,7 @@ pub trait InferenceEngine: Send + Sync {
 | ONNX | 语音转写（Whisper encoder/decoder / CTC） | `OnnxEngine` ASR adapter registry | 可继续注册其他 architecture | batch |
 | GGML | 语音转写 | Registry 路由（当前 `WhisperEngine`） | — | batch |
 
-**量化**：ONNX 支持 FP32、FP16、INT8 与 INT4（如 Qwen3 ONNX int4 GenAI bundle）；GGUF 覆盖 Q2_K、Q3_K_S/M/L、Q4_K_S/M、Q5_K_S/M、Q6_K、Q8_0、Q4_0/Q4_1、Q5_0/Q5_1；Whisper GGML 覆盖 FP32/FP16 与 Q4/Q5/Q8 常见量化；Safetensors 以 FP16/BF16 mmap 加载。FP8 在 ONNX/Safetensors 加载期返回 `UnsupportedQuantization`；IQ/MXFP4 由可选 llama/frink 路径覆盖。
+**量化**：ONNX 支持 FP32、FP16、INT8 与 INT4（如 Qwen3 ONNX int4 GenAI bundle）；GGUF 覆盖 Q2_K、Q3_K_S/M/L、Q4_K_S/M、Q5_K_S/M、Q6_K、Q8_0、Q4_0/Q4_1、Q5_0/Q5_1；Whisper GGML 覆盖 FP32/FP16 与 Q4/Q5/Q8 常见量化；Safetensors 以 FP16/BF16 mmap 加载。FP8 在 ONNX/Safetensors 加载期返回 `UnsupportedQuantization`；IQ1/IQ2/IQ3/IQ4、MXFP4、NVFP4、TQ 与 Q1/Q2 由可选 llama 路径覆盖，Candle 不支持的类型会在 probe/加载期明确拒绝。
 
 **设备类别与 EP**：
 

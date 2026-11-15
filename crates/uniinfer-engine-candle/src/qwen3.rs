@@ -24,6 +24,8 @@ pub(crate) const GGUF_QUANTIZATIONS: &[Quantization] = &[
     Quantization::Q5KS,
     Quantization::Q5KM,
     Quantization::Q6K,
+    Quantization::Q8K,
+    Quantization::Q2KS,
 ];
 pub(crate) const SAFETENSORS_QUANTIZATIONS: &[Quantization] =
     &[Quantization::Bf16, Quantization::Fp16, Quantization::Fp32];
