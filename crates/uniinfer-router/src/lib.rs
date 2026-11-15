@@ -28,6 +28,19 @@ pub enum RouterError {
     Engine(#[from] EngineError),
 }
 
+impl RouterError {
+    #[must_use]
+    pub fn code(&self) -> &'static str {
+        match self {
+            Self::ModelNotFound(_) => "model_not_found",
+            Self::ContextOverflow { .. } => "context_overflow",
+            Self::InvalidMaxTokens => "invalid_max_tokens",
+            Self::Busy => "busy",
+            Self::Engine(error) => error.code(),
+        }
+    }
+}
+
 /// A prepared text request holding its lease, permit and cancellation guard.
 pub struct PreparedText {
     pub slot: Arc<ModelSlot>,
@@ -72,12 +85,33 @@ impl ModelRouter {
     }
 
     /// Resolve a model, validate context, acquire its permit and register
-    /// cancellation. This is transport-independent request preparation.
+    /// cancellation. Waits up to the router's queue timeout.
     pub async fn prepare_text(
         &self,
         model: &str,
         prompt: String,
         requested: Option<usize>,
+    ) -> std::result::Result<PreparedText, RouterError> {
+        self.prepare_text_with(model, prompt, requested, Some(self.queue_timeout))
+            .await
+    }
+
+    /// Non-blocking variant used by realtime sessions.
+    pub async fn prepare_text_now(
+        &self,
+        model: &str,
+        prompt: String,
+        requested: Option<usize>,
+    ) -> std::result::Result<PreparedText, RouterError> {
+        self.prepare_text_with(model, prompt, requested, None).await
+    }
+
+    async fn prepare_text_with(
+        &self,
+        model: &str,
+        prompt: String,
+        requested: Option<usize>,
+        wait: Option<Duration>,
     ) -> std::result::Result<PreparedText, RouterError> {
         let slot = self
             .slot(model)
@@ -94,10 +128,10 @@ impl ModelRouter {
         if max_tokens == 0 {
             return Err(RouterError::InvalidMaxTokens);
         }
-        let permit = slot
-            .acquire(self.queue_timeout)
-            .await
-            .map_err(RouterError::from)?;
+        let permit = match wait {
+            Some(wait) => slot.acquire(wait).await.map_err(RouterError::from)?,
+            None => slot.try_acquire().ok_or(RouterError::Busy)?,
+        };
         let session_id = next_session_id();
         let cancel = CancelToken::new();
         let guard = self.register(&session_id, cancel.clone())?;

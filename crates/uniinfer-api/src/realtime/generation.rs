@@ -6,25 +6,30 @@ use std::sync::atomic::Ordering;
 use serde_json::{Value, json};
 use tokio::sync::mpsc;
 use uniinfer_backends::utf8::Utf8Decoder;
-use uniinfer_core::{CancelToken, EngineError};
-use uniinfer_service::ModelSlot;
+use uniinfer_core::EngineError;
+use uniinfer_router::{ModelRouter, PreparedText};
 
 use super::NEXT_RESPONSE;
 
 pub(super) fn spawn_response(
-    slot: Arc<ModelSlot>,
+    prepared: PreparedText,
     tx: mpsc::Sender<String>,
-    permit: tokio::sync::OwnedSemaphorePermit,
-    cancel: CancelToken,
-    prompt: String,
-    max_tokens: Option<usize>,
-    active: uniinfer_router::ActiveGuard,
+    router: Arc<ModelRouter>,
 ) {
     let response_id = format!("resp-{:x}", NEXT_RESPONSE.fetch_add(1, Ordering::Relaxed));
-    let max_tokens = max_tokens.unwrap_or(16);
     tokio::task::spawn_blocking(move || {
+        let PreparedText {
+            slot,
+            permit,
+            prompt,
+            max_tokens,
+            cancel,
+            guard,
+            ..
+        } = prepared;
         let _permit = permit;
-        let _active = active;
+        let _guard = guard;
+        let _active = router.active_guard();
         let mut decoder = Utf8Decoder::new();
         let send = |event: Value| -> bool { tx.blocking_send(event.to_string()).is_ok() };
         let result = slot.generate(&prompt, max_tokens, &cancel, &mut |chunk| {

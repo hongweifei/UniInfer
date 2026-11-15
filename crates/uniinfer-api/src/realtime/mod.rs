@@ -208,23 +208,22 @@ async fn handle_client(
                     .await
                     .map_err(|_| "channel closed".to_string());
             };
-            let Some(permit) = selected.try_acquire() else {
-                return tx
-                    .send(error_event("busy", "model is serving another request"))
-                    .await
-                    .map_err(|_| "channel closed".to_string());
+            let model = selected.manifest().id.clone();
+            let prepared = match state
+                .router
+                .prepare_text_now(&model, prompt, max_tokens)
+                .await
+            {
+                Ok(prepared) => prepared,
+                Err(error) => {
+                    return tx
+                        .send(error_event(error.code(), &error.to_string()))
+                        .await
+                        .map_err(|_| "channel closed".to_string());
+                }
             };
-            let token = CancelToken::new();
-            session.active = Some(token.clone());
-            spawn_response(
-                selected,
-                tx.clone(),
-                permit,
-                token,
-                prompt,
-                max_tokens,
-                state.router.active_guard(),
-            );
+            session.active = Some(prepared.cancel.clone());
+            spawn_response(prepared, tx.clone(), Arc::clone(&state.router));
             Ok(())
         }
         ClientEvent::ResponseCancel => {
