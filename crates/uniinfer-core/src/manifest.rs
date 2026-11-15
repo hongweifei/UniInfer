@@ -57,14 +57,32 @@ pub enum Quantization {
     Fp8,
     #[serde(rename = "q4_0")]
     Q4_0,
+    #[serde(rename = "q4_1")]
+    Q4_1,
+    #[serde(rename = "q5_0")]
+    Q5_0,
+    #[serde(rename = "q5_1")]
+    Q5_1,
+    #[serde(rename = "q8_0")]
+    Q8_0,
+    #[serde(rename = "q2_k")]
+    Q2K,
+    #[serde(rename = "q3_k_s")]
+    Q3KS,
+    #[serde(rename = "q3_k_m")]
+    Q3KM,
+    #[serde(rename = "q3_k_l")]
+    Q3KL,
+    #[serde(rename = "q4_k_s")]
+    Q4KS,
     #[serde(rename = "q4_k_m")]
     Q4KM,
+    #[serde(rename = "q5_k_s")]
+    Q5KS,
     #[serde(rename = "q5_k_m")]
     Q5KM,
     #[serde(rename = "q6_k")]
     Q6K,
-    #[serde(rename = "q8_0")]
-    Q8_0,
 }
 
 impl Quantization {
@@ -78,10 +96,19 @@ impl Quantization {
             Self::Int8 => "int8",
             Self::Fp8 => "fp8",
             Self::Q4_0 => "q4_0",
+            Self::Q4_1 => "q4_1",
+            Self::Q5_0 => "q5_0",
+            Self::Q5_1 => "q5_1",
+            Self::Q8_0 => "q8_0",
+            Self::Q2K => "q2_k",
+            Self::Q3KS => "q3_k_s",
+            Self::Q3KM => "q3_k_m",
+            Self::Q3KL => "q3_k_l",
+            Self::Q4KS => "q4_k_s",
             Self::Q4KM => "q4_k_m",
+            Self::Q5KS => "q5_k_s",
             Self::Q5KM => "q5_k_m",
             Self::Q6K => "q6_k",
-            Self::Q8_0 => "q8_0",
         }
     }
 }
@@ -437,6 +464,21 @@ sha256 = "0000000000000000000000000000000000000000000000000000000000000000"
         );
         let error = parse(&raw).validate().expect_err("must reject");
         assert!(error.to_string().contains("64 hex"));
+    }
+
+    #[test]
+    fn parses_all_supported_quantizations() {
+        for value in [
+            "fp32", "fp16", "bf16", "int4", "int8", "fp8", "q4_0", "q4_1", "q5_0", "q5_1", "q8_0",
+            "q2_k", "q3_k_s", "q3_k_m", "q3_k_l", "q4_k_s", "q4_k_m", "q5_k_s", "q5_k_m", "q6_k",
+        ] {
+            let raw = base().replace(
+                "quantization = \"fp32\"",
+                &format!("quantization = \"{value}\""),
+            );
+            let manifest = parse(&raw);
+            assert_eq!(manifest.quantization.as_str(), value);
+        }
     }
 
     #[test]

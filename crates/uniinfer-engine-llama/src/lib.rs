@@ -22,13 +22,23 @@ const BATCH_TOKENS: usize = 512;
 const FORMATS: &[ModelFormat] = &[ModelFormat::Gguf];
 const MODALITIES: &[Modality] = &[Modality::Text];
 const QUANTIZATIONS: &[Quantization] = &[
+    Quantization::Fp32,
     Quantization::Fp16,
     Quantization::Bf16,
     Quantization::Q4_0,
+    Quantization::Q4_1,
+    Quantization::Q5_0,
+    Quantization::Q5_1,
+    Quantization::Q8_0,
+    Quantization::Q2K,
+    Quantization::Q3KS,
+    Quantization::Q3KM,
+    Quantization::Q3KL,
+    Quantization::Q4KS,
     Quantization::Q4KM,
+    Quantization::Q5KS,
     Quantization::Q5KM,
     Quantization::Q6K,
-    Quantization::Q8_0,
 ];
 
 /// llama.cpp-backed GGUF engine.

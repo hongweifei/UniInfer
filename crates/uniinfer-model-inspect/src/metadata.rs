@@ -104,11 +104,20 @@ pub(crate) fn detect_quantization(
         .collect::<Vec<_>>()
         .join(" ");
     for (needle, quantization) in [
+        ("q3_k_s", Quantization::Q3KS),
+        ("q3_k_m", Quantization::Q3KM),
+        ("q3_k_l", Quantization::Q3KL),
+        ("q4_k_s", Quantization::Q4KS),
         ("q4_k_m", Quantization::Q4KM),
+        ("q5_k_s", Quantization::Q5KS),
         ("q5_k_m", Quantization::Q5KM),
+        ("q2_k", Quantization::Q2K),
         ("q6_k", Quantization::Q6K),
         ("q8_0", Quantization::Q8_0),
+        ("q4_1", Quantization::Q4_1),
         ("q4_0", Quantization::Q4_0),
+        ("q5_1", Quantization::Q5_1),
+        ("q5_0", Quantization::Q5_0),
         ("int4", Quantization::Int4),
         ("int8", Quantization::Int8),
         ("fp32", Quantization::Fp32),

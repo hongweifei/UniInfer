@@ -20,7 +20,15 @@ use whisper_rs::{
 
 const FORMATS: &[ModelFormat] = &[ModelFormat::Ggml];
 const MODALITIES: &[Modality] = &[Modality::Audio];
-const QUANTIZATIONS: &[Quantization] = &[Quantization::Fp16, Quantization::Fp32];
+const QUANTIZATIONS: &[Quantization] = &[
+    Quantization::Fp32,
+    Quantization::Fp16,
+    Quantization::Q4_0,
+    Quantization::Q4_1,
+    Quantization::Q5_0,
+    Quantization::Q5_1,
+    Quantization::Q8_0,
+];
 const DEVICES: &[DeviceClass] = &[DeviceClass::Cpu];
 
 /// whisper.cpp-backed engine.
