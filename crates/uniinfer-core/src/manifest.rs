@@ -362,6 +362,21 @@ impl ModelManifest {
         Ok(manifest)
     }
 
+    /// Render the manifest as canonical TOML.
+    pub fn to_toml(&self) -> Result<String> {
+        self.validate()?;
+        toml::to_string_pretty(self)
+            .map_err(|error| EngineError::ManifestInvalid(format!("serialize manifest: {error}")))
+    }
+
+    /// Validate and persist the manifest to its original path.
+    pub fn save(&self, path: &Path) -> Result<()> {
+        let raw = self.to_toml()?;
+        std::fs::write(path, raw).map_err(|error| {
+            EngineError::ManifestInvalid(format!("write {}: {error}", path.display()))
+        })
+    }
+
     /// Validate schema invariants independent of the filesystem.
     pub fn validate(&self) -> Result<()> {
         if self.schema_version != 1 {

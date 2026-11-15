@@ -149,25 +149,40 @@ impl InferenceEngine for CandleEngine {
                 text.family
             )));
         }
-        let model_file = spec
-            .manifest
-            .files
-            .first()
-            .ok_or_else(|| EngineError::ManifestInvalid("files is empty".into()))?;
-        let path = spec.base_dir.join(&model_file.path);
-
         let model = match spec.manifest.format {
-            ModelFormat::Gguf => qwen3::load_gguf(&path, &device)?,
+            ModelFormat::Gguf => {
+                let model_file = spec
+                    .manifest
+                    .files
+                    .first()
+                    .ok_or_else(|| EngineError::ManifestInvalid("files is empty".into()))?;
+                qwen3::load_gguf(&spec.base_dir.join(&model_file.path), &device)?
+            }
             ModelFormat::Safetensors => {
                 let config_file = text.config_file.as_ref().ok_or_else(|| {
                     EngineError::ManifestInvalid("text.config_file is required".into())
                 })?;
+                let shards = spec
+                    .manifest
+                    .files
+                    .iter()
+                    .map(|file| spec.base_dir.join(&file.path))
+                    .filter(|path| {
+                        path.extension()
+                            .is_some_and(|extension| extension == "safetensors")
+                    })
+                    .collect::<Vec<_>>();
+                if shards.is_empty() {
+                    return Err(EngineError::ManifestInvalid(
+                        "no .safetensors shards in files".into(),
+                    ));
+                }
                 let dtype = match spec.manifest.quantization {
                     Quantization::Bf16 => DType::BF16,
                     Quantization::Fp16 => DType::F16,
                     _ => DType::F32,
                 };
-                qwen3::load_safetensors(&path, &spec.base_dir.join(config_file), dtype, &device)?
+                qwen3::load_safetensors(&shards, &spec.base_dir.join(config_file), dtype, &device)?
             }
             _ => unreachable!(),
         };

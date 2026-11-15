@@ -17,6 +17,10 @@ pub fn router(state: AppState) -> Router {
         .route("/health", get(health))
         .route("/metrics", get(metrics))
         .route("/v1/models", get(models))
+        .route(
+            "/v1/models/{id}/manifest",
+            get(crate::manifest_api::get).put(crate::manifest_api::put),
+        )
         .route("/v1/models/inspect", post(crate::models::inspect_model))
         .route("/v1/models/import", post(crate::models::import_model))
         .route("/v1/devices", get(devices))
@@ -59,6 +63,7 @@ async fn metrics(State(state): State<AppState>) -> Json<Value> {
     Json(json!({
         "active_requests": state.router.active_count(),
         "loaded_sessions": state.runtime.active_sessions(),
+        "requests": state.router.metrics(),
     }))
 }
 

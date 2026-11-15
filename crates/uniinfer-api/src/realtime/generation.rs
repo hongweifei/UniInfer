@@ -25,14 +25,21 @@ pub(super) fn spawn_response(
             max_tokens,
             cancel,
             guard,
+            started,
             ..
         } = prepared;
         let _permit = permit;
         let _guard = guard;
         let _active = router.active_guard();
         let mut decoder = Utf8Decoder::new();
+        let metric_model = slot.manifest().id.clone();
+        let mut measured_ttft = false;
         let send = |event: Value| -> bool { tx.blocking_send(event.to_string()).is_ok() };
         let result = slot.generate(&prompt, max_tokens, &cancel, &mut |chunk| {
+            if !measured_ttft {
+                measured_ttft = true;
+                router.record_ttft(&metric_model, started.elapsed());
+            }
             for &byte in chunk {
                 if let Some(delta) = decoder.push(byte) {
                     let event = json!({
@@ -55,6 +62,10 @@ pub(super) fn spawn_response(
                 "delta": tail,
             }));
         }
+        router.record_completion(
+            &metric_model,
+            result.as_ref().map_or(0, |output| output.tokens),
+        );
         match result {
             Ok(_) => {
                 let _ = send(json!({"type": "response.done", "response_id": response_id}));

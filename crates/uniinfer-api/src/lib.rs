@@ -7,6 +7,7 @@ mod chat;
 mod config;
 mod error;
 mod extract;
+mod manifest_api;
 mod models;
 mod realtime;
 pub mod routes;

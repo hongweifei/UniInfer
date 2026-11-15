@@ -40,11 +40,13 @@ pub(super) async fn stream_response(generation: Generation) -> Result<Response, 
         sampling,
         prompt_tokens,
         include_usage,
+        started,
         cancel,
         ..
     } = generation;
     let (tx, rx) = mpsc::channel::<StreamEvent>(32);
     let model = slot.manifest().id.clone();
+    let metric_model = model.clone();
     let created = unix_seconds();
     let task_state = state.clone();
     let task_session = session_id.clone();
@@ -56,8 +58,15 @@ pub(super) async fn stream_response(generation: Generation) -> Result<Response, 
         let mut matcher = StopMatcher::new(stop);
         let mut decoder = Utf8Decoder::new();
         let mut open = true;
+        let mut measured_ttft = false;
         let result =
             task_slot.generate_with(&prompt, max_tokens, &cancel, &sampling, &mut |chunk| {
+                if !measured_ttft {
+                    measured_ttft = true;
+                    task_state
+                        .router
+                        .record_ttft(&metric_model, started.elapsed());
+                }
                 matcher.push(chunk, &mut |safe| {
                     if open {
                         open = send_text(&tx, &mut decoder, safe);
@@ -82,6 +91,9 @@ pub(super) async fn stream_response(generation: Generation) -> Result<Response, 
                 ("stop", 0)
             }
         };
+        task_state
+            .router
+            .record_completion(&metric_model, completion_tokens);
         let _ = tx.blocking_send(StreamEvent::Finish(finish));
         if include_usage {
             let _ = tx.blocking_send(StreamEvent::Usage {

@@ -7,11 +7,14 @@ use std::collections::HashMap;
 use std::sync::atomic::AtomicU64;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use thiserror::Error;
 use uniinfer_core::{CancelToken, EngineError, Result};
 use uniinfer_service::ModelSlot;
+
+mod metrics;
+pub use metrics::{MetricsSnapshot, ModelMetrics};
 
 /// Errors raised while preparing a text request.
 #[derive(Debug, Error)]
@@ -51,15 +54,25 @@ pub struct PreparedText {
     pub max_tokens: usize,
     pub cancel: CancelToken,
     pub guard: CancelGuard,
+    pub started: Instant,
 }
 
 static NEXT_SESSION: AtomicU64 = AtomicU64::new(1);
 
 /// Loaded models plus their request lifecycle state.
+type CancelTable = Arc<Mutex<HashMap<String, CancelEntry>>>;
+
+#[derive(Clone)]
+struct CancelEntry {
+    token: CancelToken,
+    model: Option<String>,
+}
+
 pub struct ModelRouter {
     slots: Arc<HashMap<String, Arc<ModelSlot>>>,
-    cancels: Arc<Mutex<HashMap<String, CancelToken>>>,
+    cancels: CancelTable,
     active: Arc<AtomicUsize>,
+    metrics: metrics::Metrics,
     queue_timeout: Duration,
 }
 
@@ -70,6 +83,7 @@ impl ModelRouter {
             slots: Arc::new(slots),
             cancels: Arc::new(Mutex::new(HashMap::new())),
             active: Arc::new(AtomicUsize::new(0)),
+            metrics: metrics::Metrics::default(),
             queue_timeout,
         }
     }
@@ -134,7 +148,9 @@ impl ModelRouter {
         };
         let session_id = next_session_id();
         let cancel = CancelToken::new();
-        let guard = self.register(&session_id, cancel.clone())?;
+        let model = slot.manifest().id.clone();
+        let guard = self.register_for(&session_id, cancel.clone(), Some(model.clone()))?;
+        self.metrics.begin(&model, prompt_tokens);
         Ok(PreparedText {
             slot,
             permit,
@@ -144,6 +160,7 @@ impl ModelRouter {
             max_tokens,
             cancel,
             guard,
+            started: Instant::now(),
         })
     }
 
@@ -159,10 +176,25 @@ impl ModelRouter {
 
     /// Register a request-scoped cancellation token.
     pub fn register(&self, id: &str, token: CancelToken) -> Result<CancelGuard> {
+        self.register_for(id, token, None)
+    }
+
+    fn register_for(
+        &self,
+        id: &str,
+        token: CancelToken,
+        model: Option<String>,
+    ) -> Result<CancelGuard> {
         self.cancels
             .lock()
             .map_err(|_| EngineError::Other("cancel table poisoned".into()))?
-            .insert(id.to_owned(), token.clone());
+            .insert(
+                id.to_owned(),
+                CancelEntry {
+                    token: token.clone(),
+                    model,
+                },
+            );
         Ok(CancelGuard {
             cancels: Arc::clone(&self.cancels),
             id: id.to_owned(),
@@ -180,17 +212,37 @@ impl ModelRouter {
     /// Cancel a registered request. Returns false when the id is unknown.
     #[must_use]
     pub fn cancel(&self, id: &str) -> bool {
-        let token = self
+        let entry = self
             .cancels
             .lock()
             .ok()
             .and_then(|guard| guard.get(id).cloned());
-        if let Some(token) = token {
-            token.cancel();
+        if let Some(entry) = entry {
+            entry.token.cancel();
+            if let Some(model) = entry.model {
+                self.metrics.cancelled(&model);
+            }
             true
         } else {
             false
         }
+    }
+
+    #[must_use]
+    pub fn metrics(&self) -> MetricsSnapshot {
+        self.metrics.snapshot()
+    }
+
+    pub fn record_completion(&self, model: &str, completion_tokens: usize) {
+        self.metrics.completion(model, completion_tokens);
+    }
+
+    pub fn record_ttft(&self, model: &str, elapsed: Duration) {
+        self.metrics.ttft(model, elapsed);
+    }
+
+    pub fn record_cancellation(&self, model: &str) {
+        self.metrics.cancelled(model);
     }
 
     #[must_use]
@@ -201,7 +253,7 @@ impl ModelRouter {
 
 /// Cancels and unregisters a request when the handler is dropped.
 pub struct CancelGuard {
-    cancels: Arc<Mutex<HashMap<String, CancelToken>>>,
+    cancels: CancelTable,
     id: String,
     token: CancelToken,
     armed: bool,

@@ -63,7 +63,7 @@ pub(crate) fn load_gguf(path: &Path, device: &Device) -> Result<Model> {
 
 #[allow(unsafe_code)] // mmap of a user-supplied, checksum-verified weight file.
 pub(crate) fn load_safetensors(
-    path: &Path,
+    paths: &[std::path::PathBuf],
     config_path: &Path,
     dtype: DType,
     device: &Device,
@@ -72,7 +72,11 @@ pub(crate) fn load_safetensors(
         .map_err(|error| EngineError::LoadFailed(format!("config: {error}")))?;
     let config: Config = serde_json::from_str(&raw)
         .map_err(|error| EngineError::LoadFailed(format!("config json: {error}")))?;
-    let builder = unsafe { VarBuilder::from_mmaped_safetensors(&[path], dtype, device) }
+    let paths = paths
+        .iter()
+        .map(std::path::PathBuf::as_path)
+        .collect::<Vec<_>>();
+    let builder = unsafe { VarBuilder::from_mmaped_safetensors(&paths, dtype, device) }
         .map_err(|error| EngineError::LoadFailed(format!("safetensors: {error}")))?;
     let model = ModelForCausalLM::new(&config, builder)
         .map_err(|error| EngineError::LoadFailed(format!("qwen3: {error}")))?;

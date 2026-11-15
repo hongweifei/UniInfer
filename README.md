@@ -150,7 +150,7 @@ pub trait InferenceEngine: Send + Sync {
 | 任意 | 实时 ASR → 文本响应 | `/v1/realtime` + ASR slot | 已实现 |
 | 任意 | 实时 TTS / `output.audio` / 图像/视频输入 | — | 计划 |
 
-**量化**：ONNX 支持 FP32、FP16、INT8 与 INT4（如 Qwen3 ONNX int4 GenAI bundle）；GGUF 覆盖 Q2_K、Q3_K_S/M/L、Q4_K_S/M、Q5_K_S/M、Q6_K、Q8_0、Q4_0/Q4_1、Q5_0/Q5_1；Whisper GGML 覆盖 FP32/FP16 与 Q4/Q5/Q8 常见量化；Safetensors 以 FP16/BF16 mmap 加载。FP8 在 ONNX/Safetensors 加载期返回 `UnsupportedQuantization`；IQ1/IQ2/IQ3/IQ4、MXFP4、NVFP4、TQ 与 Q1/Q2 由可选 llama 路径覆盖，Candle 不支持的类型会在 probe/加载期明确拒绝。
+**量化**：ONNX 支持 FP32、FP16、INT8 与 INT4（如 Qwen3 ONNX int4 GenAI bundle）；GGUF 覆盖 Q2_K、Q3_K_S/M/L、Q4_K_S/M、Q5_K_S/M、Q6_K、Q8_0、Q4_0/Q4_1、Q5_0/Q5_1；Whisper GGML 覆盖 FP32/FP16 与 Q4/Q5/Q8 常见量化；Safetensors 以 FP16/BF16 mmap 加载，清单中的多个 `.safetensors` 分片会一次性交给 Candle `VarBuilder`。FP8 在 ONNX/Safetensors 加载期返回 `UnsupportedQuantization`；IQ1/IQ2/IQ3/IQ4、MXFP4、NVFP4、TQ 与 Q1/Q2 由可选 llama 路径覆盖，Candle 不支持的类型会在 probe/加载期明确拒绝。
 
 **设备类别与 EP**：
 
@@ -409,9 +409,11 @@ curl -N http://127.0.0.1:8080/v1/chat/completions \
 
 `stop` 接受字符串或字符串数组；流式与非流式共用字节级匹配器，跨 token 的停止串不会泄漏到输出。
 
-采样参数：`temperature`（0–2，0 为 greedy）、`top_p`（0–1）、`top_k`（0–4096，0 表示不截断）与 `seed`。只传 `top_p`/`top_k`/`seed` 而未传 `temperature` 时默认 `temperature=1.0`；非法取值返回 `400 invalid_sampling`。
+采样参数：`temperature`（0–2，0 为 greedy）、`top_p`（0–1）、`top_k`（0–4096，0 表示不截断）、`seed`、`frequency_penalty` 与 `presence_penalty`（均 0–2）。只传采样字段而未传 `temperature` 时默认 `temperature=1.0`；非法取值返回 `400 invalid_sampling`。
 
 `finish_reason` 区分 `stop`（EOS 或 stop 串）与 `length`（达到 max_tokens）。流式请求可用 `stream_options.include_usage: true` 在 `[DONE]` 前收到包含 prompt/completion/total tokens 的 usage chunk。
+
+`/metrics` 暴露 active/loaded、请求数、prompt/completion tokens、TTFT 样本与均值，以及按模型的计数。
 
 图像、视频与 TTS 端点尚未实现。请求会得到稳定错误，而不是伪造结果：
 
@@ -472,6 +474,7 @@ sha256 = "9f8e6c1d0a4b7e2f5c8d1a3b6e9f0c2d4a7b1e8f3c6d9a2b5e0f4c7d1a8b3e6f"  # �
 | `/v1/config` | GET/PUT | 已实现 | 读取/保存 GUI 配置；token 读取时脱敏；保存后需要重启生效 |
 | `/v1/models/inspect` | POST | 已实现 | 扫描配置根目录内的模型目录并返回清单草稿 |
 | `/v1/models/import` | POST | 已实现 | 生成 manifest.toml 并加入应用配置 |
+| `/v1/models/{id}/manifest` | GET/PUT | 已实现 | 读取/替换已加载模型的清单；PUT 后需重启 |
 | `/v1/models` | GET | 已实现 | 已加载模型、能力矩阵与放置计划 |
 | `/v1/devices` | GET | 已实现 | 运行时设备清单与各模型放置/回退原因 |
 | `/v1/sessions/{id}/cancel` | POST | 已实现 | 取消生成 |

@@ -21,17 +21,27 @@ pub(super) async fn complete_response(generation: Generation) -> Result<Response
         stop,
         sampling,
         include_usage: _,
+        started,
         cancel,
     } = generation;
     let task_state = state.clone();
     let task_session = session_id.clone();
     let model = slot.manifest().id.clone();
+    let metric_model = model.clone();
+    let task_model = model.clone();
     let (result, bytes, finish, completion_tokens) = tokio::task::spawn_blocking(move || {
         let _permit = permit;
         let _active = task_state.router.active_guard();
         let mut bytes = Vec::new();
         let mut matcher = StopMatcher::new(stop);
+        let mut measured_ttft = false;
         let output = slot.generate_with(&prompt, max_tokens, &cancel, &sampling, &mut |chunk| {
+            if !measured_ttft {
+                measured_ttft = true;
+                task_state
+                    .router
+                    .record_ttft(&task_model, started.elapsed());
+            }
             matcher.push(chunk, &mut |safe| bytes.extend_from_slice(safe))
         });
         matcher.finish(&mut |safe| bytes.extend_from_slice(safe));
@@ -48,6 +58,9 @@ pub(super) async fn complete_response(generation: Generation) -> Result<Response
     if let Err(error) = result {
         return Err(error.into());
     }
+    state
+        .router
+        .record_completion(&metric_model, completion_tokens);
 
     let content = String::from_utf8_lossy(&bytes).into_owned();
     Ok(Json(serde_json::json!({

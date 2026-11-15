@@ -38,6 +38,10 @@ pub(crate) struct ChatRequest {
     #[serde(default)]
     seed: Option<u64>,
     #[serde(default)]
+    frequency_penalty: Option<f32>,
+    #[serde(default)]
+    presence_penalty: Option<f32>,
+    #[serde(default)]
     stream_options: Option<StreamOptions>,
 }
 
@@ -80,6 +84,7 @@ pub(super) struct Generation {
     pub(super) stop: Vec<String>,
     pub(super) sampling: Sampling,
     pub(super) include_usage: bool,
+    pub(super) started: std::time::Instant,
     pub(super) cancel: CancelToken,
 }
 
@@ -106,7 +111,9 @@ pub(crate) async fn chat(
     let sampling_requested = request.temperature.is_some()
         || request.top_p.is_some()
         || request.top_k.is_some()
-        || request.seed.is_some();
+        || request.seed.is_some()
+        || request.frequency_penalty.is_some()
+        || request.presence_penalty.is_some();
     let sampling = Sampling {
         temperature: request
             .temperature
@@ -114,6 +121,8 @@ pub(crate) async fn chat(
         top_p: request.top_p.unwrap_or(1.0),
         top_k: request.top_k.unwrap_or(0),
         seed: request.seed,
+        frequency_penalty: request.frequency_penalty.unwrap_or(0.0),
+        presence_penalty: request.presence_penalty.unwrap_or(0.0),
     };
     sampling.validate().map_err(ApiError::from)?;
     let prepared = state
@@ -130,6 +139,7 @@ pub(crate) async fn chat(
         max_tokens,
         cancel,
         mut guard,
+        started,
     } = prepared;
 
     let generation = Generation {
@@ -145,6 +155,7 @@ pub(crate) async fn chat(
         include_usage: request
             .stream_options
             .is_some_and(|options| options.include_usage),
+        started,
         cancel,
     };
 

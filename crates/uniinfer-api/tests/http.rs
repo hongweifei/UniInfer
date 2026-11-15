@@ -595,3 +595,80 @@ async fn streaming_usage_is_emitted_when_requested() {
     assert!(text.contains("\"usage\""));
     assert!(text.contains("\"completion_tokens\":3"));
 }
+
+#[tokio::test]
+async fn metrics_record_requests_ttft_and_tokens() {
+    let app = app();
+    let body = json!({
+        "model": "tiny-byte-onnx",
+        "messages": [{"role": "user", "content": "ab"}],
+        "max_tokens": 3
+    })
+    .to_string();
+    let response = app
+        .clone()
+        .oneshot(post("/v1/chat/completions", &body))
+        .await
+        .expect("chat");
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/metrics")
+                .body(Body::empty())
+                .expect("request"),
+        )
+        .await
+        .expect("metrics");
+    let body = body_json(response).await;
+    assert_eq!(body["requests"]["requests"], 1);
+    assert_eq!(body["requests"]["completion_tokens"], 3);
+    assert_eq!(body["requests"]["ttft_samples"], 1);
+    assert_eq!(
+        body["requests"]["models"]["tiny-byte-onnx"]["completion_tokens"],
+        3
+    );
+}
+
+#[tokio::test]
+async fn model_manifest_can_be_read_and_replaced() {
+    let fixture = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../models/tiny-onnx");
+    let dir = tempfile::tempdir().expect("tempdir");
+    std::fs::copy(
+        fixture.join("manifest.toml"),
+        dir.path().join("manifest.toml"),
+    )
+    .expect("manifest");
+    std::fs::copy(fixture.join("model.onnx"), dir.path().join("model.onnx")).expect("model");
+    let config = ApiConfig::new(dir.path().join("manifest.toml"));
+    let app = routes::router(AppState::new(&config).expect("state"));
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/v1/models/tiny-byte-onnx/manifest")
+                .body(Body::empty())
+                .expect("request"),
+        )
+        .await
+        .expect("response");
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = body_json(response).await;
+    assert_eq!(body["manifest"]["id"], "tiny-byte-onnx");
+
+    let mut manifest = body["manifest"].clone();
+    manifest["context_len"] = json!(32);
+    let request = Request::builder()
+        .method("PUT")
+        .uri("/v1/models/tiny-byte-onnx/manifest")
+        .header("content-type", "application/json")
+        .body(Body::from(manifest.to_string()))
+        .expect("request");
+    let response = app.oneshot(request).await.expect("response");
+    assert_eq!(response.status(), StatusCode::OK);
+    let saved = uniinfer_core::ModelManifest::load(&dir.path().join("manifest.toml"))
+        .expect("saved manifest");
+    assert_eq!(saved.context_len, 32);
+}

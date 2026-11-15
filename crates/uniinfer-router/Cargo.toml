@@ -11,6 +11,7 @@ description = "Model catalog, cancellation and session routing"
 [dependencies]
 uniinfer-core.workspace = true
 uniinfer-service.workspace = true
+serde.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 thiserror.workspace = true

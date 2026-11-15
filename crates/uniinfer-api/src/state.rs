@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use uniinfer_config::ConfigHandle;
@@ -17,6 +18,7 @@ pub struct AppState {
     pub(crate) token: Option<String>,
     pub(crate) max_body_bytes: usize,
     pub(crate) config: Option<Arc<ConfigHandle>>,
+    pub(crate) manifest_paths: Arc<HashMap<String, PathBuf>>,
 }
 
 impl AppState {
@@ -29,6 +31,7 @@ impl AppState {
         let runtime = Arc::new(Runtime::new()?);
         let mut slots = HashMap::new();
         let mut audio_slots = HashMap::new();
+        let mut manifest_paths = HashMap::new();
         for path in &config.manifests {
             let manifest = ModelManifest::load(path)?;
             let audio_only =
@@ -39,6 +42,7 @@ impl AppState {
                     "duplicate model id {id}"
                 )));
             }
+            manifest_paths.insert(manifest.id.clone(), path.clone());
             if audio_only {
                 let slot = runtime.load_audio(path)?;
                 if audio_slots.insert(id.clone(), slot).is_some() {
@@ -66,6 +70,7 @@ impl AppState {
             token: config.token.clone(),
             max_body_bytes: config.max_body_bytes,
             config: config.config.clone(),
+            manifest_paths: Arc::new(manifest_paths),
         })
     }
 }
