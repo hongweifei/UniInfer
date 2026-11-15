@@ -6,6 +6,7 @@ use std::sync::atomic::Ordering;
 use serde_json::{Value, json};
 use tokio::sync::mpsc;
 use uniinfer_backends::utf8::Utf8Decoder;
+use uniinfer_backends::{GenerationSpec, Sampling};
 use uniinfer_core::EngineError;
 use uniinfer_router::{ModelRouter, PreparedText};
 
@@ -15,6 +16,7 @@ pub(super) fn spawn_response(
     prepared: PreparedText,
     tx: mpsc::Sender<String>,
     router: Arc<ModelRouter>,
+    deadline: Option<std::time::Instant>,
 ) {
     let response_id = format!("resp-{:x}", NEXT_RESPONSE.fetch_add(1, Ordering::Relaxed));
     tokio::task::spawn_blocking(move || {
@@ -35,25 +37,34 @@ pub(super) fn spawn_response(
         let metric_model = slot.manifest().id.clone();
         let mut measured_ttft = false;
         let send = |event: Value| -> bool { tx.blocking_send(event.to_string()).is_ok() };
-        let result = slot.generate(&prompt, max_tokens, &cancel, &mut |chunk| {
-            if !measured_ttft {
-                measured_ttft = true;
-                router.record_ttft(&metric_model, started.elapsed());
-            }
-            for &byte in chunk {
-                if let Some(delta) = decoder.push(byte) {
-                    let event = json!({
-                        "type": "output.text.delta",
-                        "response_id": response_id,
-                        "delta": delta,
-                    });
-                    if !send(event) {
-                        return false;
+        let result = slot.generate_with(
+            &prompt,
+            &cancel,
+            GenerationSpec {
+                max_tokens,
+                sampling: Sampling::greedy(),
+                deadline,
+            },
+            &mut |chunk| {
+                if !measured_ttft {
+                    measured_ttft = true;
+                    router.record_ttft(&metric_model, started.elapsed());
+                }
+                for &byte in chunk {
+                    if let Some(delta) = decoder.push(byte) {
+                        let event = json!({
+                            "type": "output.text.delta",
+                            "response_id": response_id,
+                            "delta": delta,
+                        });
+                        if !send(event) {
+                            return false;
+                        }
                     }
                 }
-            }
-            true
-        });
+                true
+            },
+        );
         let tail = decoder.finish();
         if !tail.is_empty() {
             let _ = send(json!({
@@ -76,6 +87,9 @@ pub(super) fn spawn_response(
                 );
             }
             Err(error) => {
+                if matches!(error, uniinfer_core::EngineError::Timeout) {
+                    router.record_timeout(&metric_model);
+                }
                 let _ = send(json!({
                     "type": "error",
                     "code": error.code(),

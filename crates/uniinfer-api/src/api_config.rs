@@ -12,6 +12,7 @@ pub struct ApiConfig {
     pub token: Option<String>,
     pub max_body_bytes: usize,
     pub max_loaded_models: usize,
+    pub request_timeout: std::time::Duration,
     pub config: Option<Arc<ConfigHandle>>,
 }
 
@@ -24,6 +25,7 @@ impl ApiConfig {
             token: None,
             max_body_bytes: 32 * 1024 * 1024,
             max_loaded_models: 0,
+            request_timeout: std::time::Duration::ZERO,
             config: None,
         }
     }
@@ -43,6 +45,7 @@ impl ApiConfig {
             token: config.server.token.clone(),
             max_body_bytes: config.server.max_body_bytes,
             max_loaded_models: config.server.max_loaded_models,
+            request_timeout: std::time::Duration::from_millis(config.server.request_timeout_ms),
             config: Some(handle),
         })
     }

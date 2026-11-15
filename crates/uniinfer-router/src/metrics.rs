@@ -19,6 +19,7 @@ pub struct ModelMetrics {
     pub queue_samples: u64,
     pub generation_micros: u64,
     pub generation_samples: u64,
+    pub timeouts: u64,
     pub asr_requests: u64,
     pub asr_audio_seconds: f64,
     pub asr_compute_micros: u64,
@@ -36,6 +37,7 @@ pub struct MetricsSnapshot {
     pub queue_samples: u64,
     pub generation_micros: u64,
     pub generation_samples: u64,
+    pub timeouts: u64,
     pub asr_requests: u64,
     pub asr_audio_seconds: f64,
     pub asr_compute_micros: u64,
@@ -54,6 +56,7 @@ pub struct Metrics {
     queue_samples: AtomicU64,
     generation_micros: AtomicU64,
     generation_samples: AtomicU64,
+    timeouts: AtomicU64,
     asr_requests: AtomicU64,
     asr_audio_micros: AtomicU64,
     asr_compute_micros: AtomicU64,
@@ -102,6 +105,13 @@ impl Metrics {
             let entry = models.entry(model.to_owned()).or_default();
             entry.queue_micros += micros;
             entry.queue_samples += 1;
+        }
+    }
+
+    pub fn timeout(&self, model: &str) {
+        self.timeouts.fetch_add(1, Ordering::Relaxed);
+        if let Ok(mut models) = self.models.lock() {
+            models.entry(model.to_owned()).or_default().timeouts += 1;
         }
     }
 
@@ -156,6 +166,7 @@ impl Metrics {
             queue_samples: self.queue_samples.load(Ordering::Relaxed),
             generation_micros: self.generation_micros.load(Ordering::Relaxed),
             generation_samples: self.generation_samples.load(Ordering::Relaxed),
+            timeouts: self.timeouts.load(Ordering::Relaxed),
             asr_requests: self.asr_requests.load(Ordering::Relaxed),
             asr_audio_seconds: self.asr_audio_micros.load(Ordering::Relaxed) as f64 / 1_000_000.0,
             asr_compute_micros: self.asr_compute_micros.load(Ordering::Relaxed),
@@ -184,5 +195,7 @@ mod tests {
         assert_eq!(snapshot.queue_micros, 2_000);
         assert_eq!(snapshot.generation_samples, 1);
         assert_eq!(snapshot.generation_micros, 3_000);
+        metrics.timeout("whisper");
+        assert_eq!(metrics.snapshot().timeouts, 1);
     }
 }

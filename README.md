@@ -385,6 +385,9 @@ max_body_bytes = 33554432
 # token = "change-me"
 # 0 = 不限；1 表示每个类别最多保留一个已加载模型（LRU）
 max_loaded_models = 0
+# 0 = 不设截止时间；超时返回 504 timeout
+request_timeout_ms = 0
+# 也可用 UNIINFER_REQUEST_TIMEOUT_MS 覆盖
 
 [[models]]
 manifest = "models/tiny-onnx/manifest.toml"
@@ -415,9 +418,9 @@ curl -N http://127.0.0.1:8080/v1/chat/completions \
 
 采样参数：`temperature`（0–2，0 为 greedy）、`top_p`（0–1）、`top_k`（0–4096，0 表示不截断）、`seed`、`frequency_penalty` 与 `presence_penalty`（均 0–2）。只传采样字段而未传 `temperature` 时默认 `temperature=1.0`；非法取值返回 `400 invalid_sampling`。
 
-`finish_reason` 区分 `stop`（EOS 或 stop 串）与 `length`（达到 max_tokens）。流式请求可用 `stream_options.include_usage: true` 在 `[DONE]` 前收到包含 prompt/completion/total tokens 的 usage chunk。
+`request_timeout_ms` 非零时，文本生成在每个 token 边界检查截止时间；超时返回 `504 timeout`。客户端断开 SSE 流时，发送失败会取消生成。`finish_reason` 区分 `stop`（EOS 或 stop 串）与 `length`（达到 max_tokens）。流式请求可用 `stream_options.include_usage: true` 在 `[DONE]` 前收到包含 prompt/completion/total tokens 的 usage chunk。
 
-`/metrics` 暴露 active/loaded、已加载文本/音频模型数、请求数、队列等待、生成耗时、prompt/completion tokens、TTFT、ASR 音频时长/计算耗时，以及按模型的计数。
+`/metrics` 暴露 active/loaded、已加载文本/音频模型数、请求数、队列等待、生成耗时、超时/取消次数、prompt/completion tokens、TTFT、ASR 音频时长/计算耗时，以及按模型的计数。
 
 图像、视频与 TTS 端点尚未实现。请求会得到稳定错误，而不是伪造结果：
 

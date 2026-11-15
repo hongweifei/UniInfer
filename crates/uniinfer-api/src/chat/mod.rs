@@ -85,6 +85,7 @@ pub(super) struct Generation {
     pub(super) sampling: Sampling,
     pub(super) include_usage: bool,
     pub(super) started: std::time::Instant,
+    pub(super) deadline: Option<std::time::Instant>,
     pub(super) cancel: CancelToken,
 }
 
@@ -92,6 +93,9 @@ pub(crate) async fn chat(
     State(state): State<AppState>,
     ApiJson(request): ApiJson<ChatRequest>,
 ) -> Result<Response, ApiError> {
+    let deadline = state
+        .request_timeout
+        .map(|timeout| std::time::Instant::now() + timeout);
     if !state.catalog.contains_key(&request.model) {
         return Err(ApiError::not_found(
             "model_not_found",
@@ -160,6 +164,7 @@ pub(crate) async fn chat(
             .stream_options
             .is_some_and(|options| options.include_usage),
         started,
+        deadline,
         cancel,
     };
 

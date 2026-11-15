@@ -27,6 +27,7 @@ pub struct AppState {
     pub(crate) max_body_bytes: usize,
     pub(crate) config: Option<Arc<ConfigHandle>>,
     pub(crate) manifest_paths: Arc<HashMap<String, PathBuf>>,
+    pub(crate) request_timeout: Option<std::time::Duration>,
     pub(crate) catalog: Arc<HashMap<String, CatalogEntry>>,
     load_lock: Arc<AsyncMutex<()>>,
     audio_lru: Arc<Mutex<VecDeque<String>>>,
@@ -76,6 +77,8 @@ impl AppState {
             max_body_bytes: config.max_body_bytes,
             config: config.config.clone(),
             manifest_paths: Arc::new(manifest_paths),
+            request_timeout: (config.request_timeout > std::time::Duration::ZERO)
+                .then_some(config.request_timeout),
             catalog: Arc::new(catalog),
             load_lock: Arc::new(AsyncMutex::new(())),
             audio_lru: Arc::new(Mutex::new(VecDeque::new())),

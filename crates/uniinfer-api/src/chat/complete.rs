@@ -2,8 +2,8 @@
 
 use axum::Json;
 use axum::response::{IntoResponse, Response};
-use uniinfer_backends::FinishReason;
 use uniinfer_backends::stop::StopMatcher;
+use uniinfer_backends::{FinishReason, GenerationSpec};
 
 use crate::error::ApiError;
 
@@ -22,6 +22,7 @@ pub(super) async fn complete_response(generation: Generation) -> Result<Response
         sampling,
         include_usage: _,
         started,
+        deadline,
         cancel,
     } = generation;
     let task_state = state.clone();
@@ -35,15 +36,24 @@ pub(super) async fn complete_response(generation: Generation) -> Result<Response
         let mut bytes = Vec::new();
         let mut matcher = StopMatcher::new(stop);
         let mut measured_ttft = false;
-        let output = slot.generate_with(&prompt, max_tokens, &cancel, &sampling, &mut |chunk| {
-            if !measured_ttft {
-                measured_ttft = true;
-                task_state
-                    .router
-                    .record_ttft(&task_model, started.elapsed());
-            }
-            matcher.push(chunk, &mut |safe| bytes.extend_from_slice(safe))
-        });
+        let output = slot.generate_with(
+            &prompt,
+            &cancel,
+            GenerationSpec {
+                max_tokens,
+                sampling,
+                deadline,
+            },
+            &mut |chunk| {
+                if !measured_ttft {
+                    measured_ttft = true;
+                    task_state
+                        .router
+                        .record_ttft(&task_model, started.elapsed());
+                }
+                matcher.push(chunk, &mut |safe| bytes.extend_from_slice(safe))
+            },
+        );
         matcher.finish(&mut |safe| bytes.extend_from_slice(safe));
         task_state.router.unregister(&task_session);
         let finish = output
@@ -56,6 +66,9 @@ pub(super) async fn complete_response(generation: Generation) -> Result<Response
     .map_err(|_| ApiError::internal("generation task panicked"))?;
 
     if let Err(error) = result {
+        if matches!(error, uniinfer_core::EngineError::Timeout) {
+            state.router.record_timeout(&metric_model);
+        }
         return Err(error.into());
     }
     state

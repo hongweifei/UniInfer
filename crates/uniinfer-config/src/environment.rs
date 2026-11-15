@@ -22,6 +22,11 @@ pub(crate) fn apply(config: &mut UniInferConfig) -> Result<()> {
             ConfigError::Invalid(format!("UNIINFER_MAX_LOADED_MODELS: {error}"))
         })?;
     }
+    if let Ok(value) = std::env::var("UNIINFER_REQUEST_TIMEOUT_MS") {
+        config.server.request_timeout_ms = value.parse().map_err(|error| {
+            ConfigError::Invalid(format!("UNIINFER_REQUEST_TIMEOUT_MS: {error}"))
+        })?;
+    }
     if let Ok(value) = std::env::var("UNIINFER_TOKEN") {
         config.server.token = if value.is_empty() { None } else { Some(value) };
     }

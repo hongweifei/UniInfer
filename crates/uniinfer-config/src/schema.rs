@@ -38,6 +38,9 @@ pub struct ServerConfig {
     /// Maximum models kept loaded per category; `0` means unbounded.
     #[serde(default)]
     pub max_loaded_models: usize,
+    /// Per-request generation timeout; `0` disables the deadline.
+    #[serde(default)]
+    pub request_timeout_ms: u64,
 }
 
 fn default_addr() -> SocketAddr {
@@ -60,6 +63,7 @@ impl Default for ServerConfig {
             max_body_bytes: default_max_body_bytes(),
             token: None,
             max_loaded_models: 0,
+            request_timeout_ms: 0,
         }
     }
 }

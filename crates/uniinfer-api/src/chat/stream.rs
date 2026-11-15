@@ -7,9 +7,9 @@ use axum::response::sse::{KeepAlive, Sse};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::mpsc;
-use uniinfer_backends::FinishReason;
 use uniinfer_backends::stop::StopMatcher;
 use uniinfer_backends::utf8::Utf8Decoder;
+use uniinfer_backends::{FinishReason, GenerationSpec};
 use uniinfer_core::EngineError;
 
 use crate::error::ApiError;
@@ -41,6 +41,7 @@ pub(super) async fn stream_response(generation: Generation) -> Result<Response, 
         prompt_tokens,
         include_usage,
         started,
+        deadline,
         cancel,
         ..
     } = generation;
@@ -59,8 +60,15 @@ pub(super) async fn stream_response(generation: Generation) -> Result<Response, 
         let mut decoder = Utf8Decoder::new();
         let mut open = true;
         let mut measured_ttft = false;
-        let result =
-            task_slot.generate_with(&prompt, max_tokens, &cancel, &sampling, &mut |chunk| {
+        let result = task_slot.generate_with(
+            &prompt,
+            &cancel,
+            GenerationSpec {
+                max_tokens,
+                sampling,
+                deadline,
+            },
+            &mut |chunk| {
                 if !measured_ttft {
                     measured_ttft = true;
                     task_state
@@ -70,13 +78,20 @@ pub(super) async fn stream_response(generation: Generation) -> Result<Response, 
                 matcher.push(chunk, &mut |safe| {
                     if open {
                         open = send_text(&tx, &mut decoder, safe);
+                        if !open {
+                            cancel.cancel();
+                        }
                     }
                 });
                 open && !matcher.is_matched()
-            });
+            },
+        );
         matcher.finish(&mut |safe| {
             if open {
                 open = send_text(&tx, &mut decoder, safe);
+                if !open {
+                    cancel.cancel();
+                }
             }
         });
         let tail = decoder.finish();
@@ -87,6 +102,9 @@ pub(super) async fn stream_response(generation: Generation) -> Result<Response, 
             Ok(output) => (reason(output.finish), output.tokens),
             Err(EngineError::Cancelled) => ("stop", 0),
             Err(error) => {
+                if matches!(&error, EngineError::Timeout) {
+                    task_state.router.record_timeout(&metric_model);
+                }
                 let _ = tx.blocking_send(StreamEvent::Error(error.into()));
                 ("stop", 0)
             }

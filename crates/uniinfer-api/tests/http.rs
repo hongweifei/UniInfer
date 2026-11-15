@@ -805,3 +805,25 @@ async fn model_lifecycle_can_preload_and_unload() {
     let body = body_json(response).await;
     assert_eq!(body["unloaded"], true);
 }
+
+#[tokio::test]
+async fn request_timeout_returns_gateway_timeout() {
+    let manifest =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../models/tiny-onnx/manifest.toml");
+    let mut config = ApiConfig::new(manifest);
+    config.request_timeout = std::time::Duration::from_nanos(1);
+    let app = routes::router(AppState::new(&config).expect("state"));
+    let body = json!({
+        "model": "tiny-byte-onnx",
+        "messages": [{"role": "user", "content": "ab"}],
+        "max_tokens": 3
+    })
+    .to_string();
+    let response = app
+        .oneshot(post("/v1/chat/completions", &body))
+        .await
+        .expect("response");
+    assert_eq!(response.status(), StatusCode::GATEWAY_TIMEOUT);
+    let body = body_json(response).await;
+    assert_eq!(body["code"], "timeout");
+}

@@ -315,7 +315,10 @@ async fn start_response(
         }
     };
     session.active = Some(prepared.cancel.clone());
-    spawn_response(prepared, tx.clone(), Arc::clone(&state.router));
+    let deadline = state
+        .request_timeout
+        .map(|timeout| std::time::Instant::now() + timeout);
+    spawn_response(prepared, tx.clone(), Arc::clone(&state.router), deadline);
     Ok(())
 }
 

@@ -339,6 +339,10 @@ impl ModelRouter {
         self.metrics.generation(model, elapsed);
     }
 
+    pub fn record_timeout(&self, model: &str) {
+        self.metrics.timeout(model);
+    }
+
     #[must_use]
     pub fn active_guard(&self) -> ActiveGuard {
         ActiveGuard::new(Arc::clone(&self.active))
