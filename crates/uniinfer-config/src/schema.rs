@@ -157,6 +157,11 @@ impl UniInferConfig {
                 "server.token must not be empty; omit it to disable auth".into(),
             ));
         }
+        if !self.server.addr.ip().is_loopback() && self.server.token.is_none() {
+            return Err(ConfigError::Invalid(
+                "server.token is required when server.addr is not loopback".into(),
+            ));
+        }
         let mut manifests = HashSet::new();
         for model in &self.models {
             if model.manifest.as_os_str().is_empty() {
@@ -209,6 +214,27 @@ mod tests {
         let loaded = UniInferConfig::load(&path).expect("load");
         assert_eq!(loaded.server.addr.port(), 9090);
         assert_eq!(loaded.models.len(), 1);
+    }
+
+    #[test]
+    fn non_loopback_serve_requires_token() {
+        let config = UniInferConfig {
+            server: ServerConfig {
+                addr: "0.0.0.0:8080".parse().expect("addr"),
+                ..ServerConfig::default()
+            },
+            ..UniInferConfig::default()
+        };
+        assert!(matches!(config.validate(), Err(ConfigError::Invalid(_))));
+        let with_token = UniInferConfig {
+            server: ServerConfig {
+                addr: "0.0.0.0:8080".parse().expect("addr"),
+                token: Some("secret".into()),
+                ..ServerConfig::default()
+            },
+            ..UniInferConfig::default()
+        };
+        assert!(with_token.validate().is_ok());
     }
 
     #[test]

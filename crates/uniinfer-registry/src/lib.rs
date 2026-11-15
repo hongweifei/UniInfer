@@ -62,12 +62,17 @@ impl EngineRegistry {
     pub fn load(&self, manifest_path: &Path) -> Result<SessionLease> {
         let manifest = ModelManifest::load(manifest_path)?;
         let base_dir = ModelManifest::base_dir(manifest_path);
+        self.load_manifest(manifest, &base_dir)
+    }
 
+    /// Load a manifest that was produced in memory (for example by the
+    /// inspector) without requiring a manifest file on disk.
+    pub fn load_manifest(&self, manifest: ModelManifest, base_dir: &Path) -> Result<SessionLease> {
         let (engine, placement) = self.resolve(&manifest)?;
         let lease_placement = placement.clone();
         let spec = EngineLoadSpec {
             manifest,
-            base_dir,
+            base_dir: base_dir.to_path_buf(),
             placement,
             budget: self.inventory.budget(),
         };

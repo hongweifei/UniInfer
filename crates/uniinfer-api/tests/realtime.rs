@@ -145,3 +145,28 @@ async fn audio_frames_emit_vad_events() {
     assert_eq!(stopped["type"], "input.speech.stopped");
     server.abort();
 }
+
+#[tokio::test]
+async fn missing_asr_model_is_reported_at_session_start() {
+    let (url, server) = start().await;
+    let (mut socket, _) = tokio_tungstenite::connect_async(url)
+        .await
+        .expect("connect");
+    socket
+        .send(Message::Text(
+            json!({
+                "type": "session.start",
+                "model": "tiny-byte-onnx",
+                "channels": ["text", "audio"],
+                "asr_model": "missing"
+            })
+            .to_string()
+            .into(),
+        ))
+        .await
+        .expect("start");
+    let error = next_json(&mut socket).await;
+    assert_eq!(error["type"], "error");
+    assert_eq!(error["code"], "asr_model_unavailable");
+    server.abort();
+}

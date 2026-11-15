@@ -3,6 +3,7 @@
 mod qwen3;
 
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use candle_core::{DType, Device, Tensor};
 use uniinfer_core::{
@@ -183,6 +184,7 @@ impl InferenceEngine for CandleEngine {
                 model,
                 cached_ids: Vec::new(),
             }),
+            cancelled: AtomicBool::new(false),
             device,
             inputs: vec![TensorSpec {
                 name: "input_ids".into(),
@@ -205,6 +207,7 @@ struct CandleState {
 
 struct CandleSession {
     state: Mutex<CandleState>,
+    cancelled: AtomicBool,
     device: Device,
     inputs: Vec<TensorSpec>,
     outputs: Vec<TensorSpec>,
@@ -220,6 +223,9 @@ impl EngineSession for CandleSession {
     }
 
     fn run(&self, inputs: Vec<CoreTensor>) -> Result<Vec<CoreTensor>> {
+        if self.cancelled.load(Ordering::SeqCst) {
+            return Err(EngineError::Cancelled);
+        }
         let ids = inputs
             .iter()
             .find(|tensor| tensor.name == "input_ids")
@@ -238,6 +244,9 @@ impl EngineSession for CandleSession {
             .state
             .lock()
             .map_err(|_| EngineError::Other("candle state lock poisoned".into()))?;
+        if self.cancelled.load(Ordering::SeqCst) {
+            return Err(EngineError::Cancelled);
+        }
         let incremental = state.cached_ids.len() + 1 == ids.len()
             && ids.starts_with(&state.cached_ids)
             && !state.cached_ids.is_empty();
@@ -255,6 +264,9 @@ impl EngineSession for CandleSession {
             .model
             .forward(&input, offset)
             .map_err(|error| EngineError::Other(format!("candle forward: {error}")))?;
+        if self.cancelled.load(Ordering::SeqCst) {
+            return Err(EngineError::Cancelled);
+        }
         let logits = logits
             .to_dtype(DType::F32)
             .map_err(|error| EngineError::Other(format!("logits dtype: {error}")))?;
@@ -271,5 +283,7 @@ impl EngineSession for CandleSession {
         )?])
     }
 
-    fn cancel(&self) {}
+    fn cancel(&self) {
+        self.cancelled.store(true, Ordering::SeqCst);
+    }
 }

@@ -3008,6 +3008,7 @@ dependencies = [
  "tracing-subscriber",
  "uniinfer-api",
  "uniinfer-config",
+ "uniinfer-core",
  "uniinfer-model-inspect",
  "uniinfer-service",
 ]
@@ -3053,6 +3054,7 @@ dependencies = [
  "thiserror 2.0.21",
  "tracing",
  "uniinfer-core",
+ "uniinfer-devices",
 ]
 
 [[package]]

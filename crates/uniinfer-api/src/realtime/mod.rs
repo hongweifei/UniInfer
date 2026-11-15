@@ -11,7 +11,7 @@ use serde::Deserialize;
 use serde_json::json;
 use tokio::sync::mpsc;
 use uniinfer_core::CancelToken;
-use uniinfer_service::ModelSlot;
+use uniinfer_service::{AudioSlot, ModelSlot};
 
 use crate::state::AppState;
 
@@ -44,6 +44,8 @@ enum ClientEvent {
         model: String,
         #[serde(default)]
         channels: Vec<String>,
+        #[serde(default)]
+        asr_model: Option<String>,
     },
     #[serde(rename = "input.text")]
     InputText { text: String },
@@ -60,8 +62,11 @@ pub(super) struct SessionState {
     id: String,
     prompt: Option<String>,
     slot: Option<Arc<ModelSlot>>,
+    pub(super) asr_slot: Option<Arc<AudioSlot>>,
     pub(super) active: Option<CancelToken>,
     pub(super) audio_enabled: bool,
+    pub(super) speaking: bool,
+    pub(super) audio_buffer: Vec<f32>,
     pub(super) vad: EnergyVad,
 }
 
@@ -71,8 +76,11 @@ impl Default for SessionState {
             id: String::new(),
             prompt: None,
             slot: None,
+            asr_slot: None,
             active: None,
             audio_enabled: false,
+            speaking: false,
+            audio_buffer: Vec::new(),
             vad: EnergyVad::new(500.0),
         }
     }
@@ -96,7 +104,7 @@ async fn session(socket: WebSocket, state: AppState) {
                         }
                     }
                     Some(Ok(Message::Binary(frame))) => {
-                        if let Err(error) = handle_audio(&tx, &mut session, &frame).await {
+                        if let Err(error) = handle_audio(&state, &tx, &mut session, &frame).await {
                             let _ = tx.send(error_json(&error)).await;
                         }
                     }
@@ -131,7 +139,11 @@ async fn handle_client(
 ) -> Result<(), String> {
     let event: ClientEvent = serde_json::from_str(text).map_err(|error| error.to_string())?;
     match event {
-        ClientEvent::SessionStart { model, channels } => {
+        ClientEvent::SessionStart {
+            model,
+            channels,
+            asr_model,
+        } => {
             let Some(selected) = state.router.slot(&model) else {
                 return tx
                     .send(error_event(
@@ -155,16 +167,33 @@ async fn handle_client(
                     .map_err(|_| "channel closed".to_string());
             }
             let audio = channels.iter().any(|channel| channel == "audio");
+            let asr_slot = if audio {
+                match select_asr(state, asr_model.as_deref()) {
+                    Ok(slot) => slot,
+                    Err(message) => {
+                        return tx
+                            .send(error_event("asr_model_unavailable", &message))
+                            .await
+                            .map_err(|_| "channel closed".to_string());
+                    }
+                }
+            } else {
+                None
+            };
             session.id = new_session_id();
             session.prompt = None;
             session.slot = Some(selected);
+            session.asr_slot = asr_slot;
             session.audio_enabled = audio;
+            session.speaking = false;
+            session.audio_buffer.clear();
             session.vad = EnergyVad::new(500.0);
             let payload = json!({
                 "type": "session.started",
                 "session_id": session.id,
                 "model": model_id,
                 "channels": if audio { vec!["text", "audio"] } else { vec!["text"] },
+                "asr": session.asr_slot.as_ref().map(|slot| slot.manifest().id.clone()),
             });
             tx.send(payload.to_string())
                 .await
@@ -178,53 +207,7 @@ async fn handle_client(
                 .map_err(|_| "channel closed".to_string())
         }
         ClientEvent::ResponseCreate { max_tokens } => {
-            if session.id.is_empty() {
-                return tx
-                    .send(error_event(
-                        "session_not_started",
-                        "send session.start first",
-                    ))
-                    .await
-                    .map_err(|_| "channel closed".to_string());
-            }
-            if session.active.is_some() {
-                return tx
-                    .send(error_event("busy", "a response is already running"))
-                    .await
-                    .map_err(|_| "channel closed".to_string());
-            }
-            let Some(selected) = session.slot.clone() else {
-                return tx
-                    .send(error_event(
-                        "session_not_started",
-                        "send session.start first",
-                    ))
-                    .await
-                    .map_err(|_| "channel closed".to_string());
-            };
-            let Some(prompt) = session.prompt.clone() else {
-                return tx
-                    .send(error_event("invalid_request", "send input.text first"))
-                    .await
-                    .map_err(|_| "channel closed".to_string());
-            };
-            let model = selected.manifest().id.clone();
-            let prepared = match state
-                .router
-                .prepare_text_now(&model, prompt, max_tokens)
-                .await
-            {
-                Ok(prepared) => prepared,
-                Err(error) => {
-                    return tx
-                        .send(error_event(error.code(), &error.to_string()))
-                        .await
-                        .map_err(|_| "channel closed".to_string());
-                }
-            };
-            session.active = Some(prepared.cancel.clone());
-            spawn_response(prepared, tx.clone(), Arc::clone(&state.router));
-            Ok(())
+            start_response(state, tx, session, max_tokens).await
         }
         ClientEvent::ResponseCancel => {
             if let Some(token) = session.active.take() {
@@ -236,6 +219,77 @@ async fn handle_client(
             Ok(())
         }
     }
+}
+
+fn select_asr(state: &AppState, requested: Option<&str>) -> Result<Option<Arc<AudioSlot>>, String> {
+    if let Some(model) = requested {
+        return state
+            .audio_slots
+            .get(model)
+            .cloned()
+            .map(Some)
+            .ok_or_else(|| format!("ASR model {model} is not loaded"));
+    }
+    match state.audio_slots.len() {
+        0 => Ok(None),
+        1 => Ok(state.audio_slots.values().next().cloned()),
+        _ => Err("multiple ASR models are loaded; set asr_model explicitly".into()),
+    }
+}
+
+async fn start_response(
+    state: &AppState,
+    tx: &mpsc::Sender<String>,
+    session: &mut SessionState,
+    max_tokens: Option<usize>,
+) -> Result<(), String> {
+    if session.id.is_empty() {
+        return tx
+            .send(error_event(
+                "session_not_started",
+                "send session.start first",
+            ))
+            .await
+            .map_err(|_| "channel closed".to_string());
+    }
+    if session.active.is_some() {
+        return tx
+            .send(error_event("busy", "a response is already running"))
+            .await
+            .map_err(|_| "channel closed".to_string());
+    }
+    let Some(selected) = session.slot.clone() else {
+        return tx
+            .send(error_event(
+                "session_not_started",
+                "send session.start first",
+            ))
+            .await
+            .map_err(|_| "channel closed".to_string());
+    };
+    let Some(prompt) = session.prompt.clone() else {
+        return tx
+            .send(error_event("invalid_request", "send input.text first"))
+            .await
+            .map_err(|_| "channel closed".to_string());
+    };
+    let model = selected.manifest().id.clone();
+    let prepared = match state
+        .router
+        .prepare_text_now(&model, prompt, max_tokens)
+        .await
+    {
+        Ok(prepared) => prepared,
+        Err(error) => {
+            return tx
+                .send(error_event(error.code(), &error.to_string()))
+                .await
+                .map_err(|_| "channel closed".to_string());
+        }
+    };
+    session.active = Some(prepared.cancel.clone());
+    spawn_response(prepared, tx.clone(), Arc::clone(&state.router));
+    Ok(())
 }
 
 fn error_json(error: &str) -> String {

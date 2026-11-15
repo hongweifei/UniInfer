@@ -72,6 +72,16 @@ impl Runtime {
     /// Load an audio model for transcription.
     pub fn load_audio(&self, manifest_path: &Path) -> Result<Arc<AudioSlot>> {
         let manifest = ModelManifest::load(manifest_path)?;
+        let base_dir = ModelManifest::base_dir(manifest_path);
+        self.load_audio_manifest(manifest, &base_dir)
+    }
+
+    /// Load an in-memory audio manifest against a model directory.
+    pub fn load_audio_manifest(
+        &self,
+        manifest: ModelManifest,
+        base_dir: &Path,
+    ) -> Result<Arc<AudioSlot>> {
         if !manifest
             .modalities
             .contains(&uniinfer_core::Modality::Audio)
@@ -80,27 +90,34 @@ impl Runtime {
                 "audio runtime requires the audio modality".into(),
             ));
         }
-        let lease = Arc::new(self.registry.load(manifest_path)?);
+        let lease = Arc::new(self.registry.load_manifest(manifest, base_dir)?);
         Ok(Arc::new(AudioSlot::new(lease)?))
     }
 
     /// Load one model and validate the text-generation contract.
     pub fn load(&self, manifest_path: &Path) -> Result<Arc<ModelSlot>> {
+        let manifest = ModelManifest::load(manifest_path)?;
+        let base_dir = ModelManifest::base_dir(manifest_path);
+        self.load_manifest(manifest, &base_dir)
+    }
+
+    /// Load an in-memory text manifest against a model directory.
+    pub fn load_manifest(
+        &self,
+        manifest: ModelManifest,
+        base_dir: &Path,
+    ) -> Result<Arc<ModelSlot>> {
         // Backend dispatch is still text-only. Check before loading a session
         // so non-text manifests fail without allocating model weights.
-        let manifest = ModelManifest::load(manifest_path)?;
-        let text = manifest.text.as_ref().ok_or_else(|| {
+        let text = manifest.text.clone().ok_or_else(|| {
             EngineError::ManifestInvalid(
                 "runtime currently supports text models; manifest has no [text] section".into(),
             )
         })?;
-        let lease = Arc::new(self.registry.load(manifest_path)?);
+        let lease = Arc::new(self.registry.load_manifest(manifest, base_dir)?);
         let manifest = lease.manifest();
         let tokenizer = manifest.tokenizer.as_deref().unwrap_or_default();
-        let base = manifest_path.parent().map_or_else(
-            || std::path::PathBuf::from("."),
-            std::path::Path::to_path_buf,
-        );
+        let base = base_dir.to_path_buf();
         let tokenizer: Arc<dyn Tokenizer> = match tokenizer {
             "bytes" => Arc::new(ByteTokenizer::new(text.vocab_size)?),
             "hf" => {

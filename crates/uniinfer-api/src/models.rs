@@ -22,8 +22,9 @@ pub(crate) async fn inspect_model(
     State(state): State<AppState>,
     ApiJson(request): ApiJson<InspectRequest>,
 ) -> Result<Json<Value>, ApiError> {
+    let path = sandboxed_path(&state, &request.path)?;
     let inspection = inspect(
-        &request.path,
+        &path,
         &InspectOptions {
             id: request.id,
             ..InspectOptions::default()
@@ -59,8 +60,9 @@ pub(crate) async fn import_model(
         .config
         .as_ref()
         .ok_or_else(|| ApiError::not_found("config_not_available", "server has no config file"))?;
+    let path = sandboxed_path(&state, &request.path)?;
     let inspection = inspect(
-        &request.path,
+        &path,
         &InspectOptions {
             id: request.id,
             ..InspectOptions::default()
@@ -83,4 +85,42 @@ pub(crate) async fn import_model(
         "config": handle.path(),
         "restart_required": true,
     })))
+}
+
+/// Restrict model directory scans to the configuration root (or the process
+/// working directory when no config file is attached).
+fn sandboxed_path(
+    state: &AppState,
+    requested: &std::path::Path,
+) -> Result<std::path::PathBuf, ApiError> {
+    let root = state
+        .config
+        .as_ref()
+        .map_or_else(std::env::current_dir, |handle| {
+            std::env::current_dir().map(|cwd| cwd.join(handle.base_dir()))
+        })
+        .map_err(|error| ApiError::internal(format!("resolve sandbox root: {error}")))?;
+    let root = root.canonicalize().map_err(|error| {
+        ApiError::internal(format!(
+            "canonicalize sandbox root {}: {error}",
+            root.display()
+        ))
+    })?;
+    let target = requested.canonicalize().map_err(|error| {
+        ApiError::bad_request(
+            "invalid_model_path",
+            format!("cannot resolve {}: {error}", requested.display()),
+        )
+    })?;
+    if !target.starts_with(&root) {
+        return Err(ApiError::forbidden(
+            "path_not_allowed",
+            format!(
+                "{} is outside the configured model root {}",
+                target.display(),
+                root.display()
+            ),
+        ));
+    }
+    Ok(target)
 }

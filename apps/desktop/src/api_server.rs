@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use serde::Serialize;
+use uniinfer_config::{ConfigHandle, ModelEntry, UniInferConfig};
 
 #[derive(Clone, Serialize)]
 pub(crate) struct ApiInfo {
@@ -57,11 +58,19 @@ pub(crate) fn start() -> ApiStartup {
 }
 
 fn start_inner() -> Result<(ApiInfo, Arc<tokio::runtime::Runtime>), Box<dyn std::error::Error>> {
-    let token = random_token();
-    let manifests = manifest_paths();
-    let config = uniinfer_api::ApiConfig::new(manifests[0].clone())
-        .with_manifests(manifests)
-        .with_token(token.clone());
+    let config_path = std::env::var_os("UNIINFER_CONFIG").map(std::path::PathBuf::from);
+    let handle = if let Some(path) = config_path {
+        ConfigHandle::load(path)?
+    } else {
+        let mut config = UniInferConfig::default();
+        config.models = manifest_paths()
+            .into_iter()
+            .map(ModelEntry::new)
+            .collect::<Vec<_>>();
+        ConfigHandle::new(config, Some(std::path::PathBuf::from("uniinfer.toml")))
+    };
+    let token = handle.snapshot()?.server.token.unwrap_or_else(random_token);
+    let config = uniinfer_api::ApiConfig::from_config(Arc::new(handle))?.with_token(token.clone());
     let state = uniinfer_api::AppState::new(&config)?;
     let app = uniinfer_api::routes::router(state);
 

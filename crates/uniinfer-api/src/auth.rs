@@ -1,7 +1,9 @@
 use axum::extract::{Request, State};
 use axum::http::Method;
+use axum::http::header::{AUTHORIZATION, CONTENT_TYPE};
 use axum::middleware::Next;
 use axum::response::Response;
+use tower_http::cors::AllowOrigin;
 
 use crate::error::ApiError;
 use crate::state::AppState;
@@ -30,7 +32,27 @@ pub(crate) async fn authorize(
 
 pub(crate) fn cors() -> tower_http::cors::CorsLayer {
     tower_http::cors::CorsLayer::new()
-        .allow_origin(tower_http::cors::Any)
-        .allow_methods(tower_http::cors::Any)
-        .allow_headers(tower_http::cors::Any)
+        .allow_origin(AllowOrigin::predicate(|origin, _| {
+            origin.to_str().ok().is_some_and(allowed_browser_origin)
+        }))
+        .allow_methods([Method::GET, Method::POST, Method::PUT, Method::OPTIONS])
+        .allow_headers([CONTENT_TYPE, AUTHORIZATION])
+        .max_age(std::time::Duration::from_secs(600))
+}
+
+fn allowed_browser_origin(origin: &str) -> bool {
+    if origin.starts_with("tauri://") {
+        return true;
+    }
+    let Some(rest) = origin
+        .strip_prefix("http://")
+        .or_else(|| origin.strip_prefix("https://"))
+    else {
+        return false;
+    };
+    let host = rest.split(':').next().unwrap_or_default();
+    matches!(
+        host,
+        "localhost" | "127.0.0.1" | "[::1]" | "tauri.localhost"
+    )
 }

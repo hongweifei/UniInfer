@@ -406,3 +406,133 @@ async fn model_inspect_and_import_endpoints_work() {
     let saved = UniInferConfig::load(&config_path).expect("saved config");
     assert_eq!(saved.models.len(), 1);
 }
+
+#[tokio::test]
+async fn planned_generation_endpoints_return_not_implemented() {
+    for (method, uri) in [
+        ("POST", "/v1/audio/speech"),
+        ("POST", "/v1/images/generations"),
+        ("POST", "/v1/images/edits"),
+        ("POST", "/v1/videos/generations"),
+        ("GET", "/v1/videos/generations/job"),
+    ] {
+        let response = app()
+            .oneshot(
+                Request::builder()
+                    .method(method)
+                    .uri(uri)
+                    .header("content-type", "application/json")
+                    .body(Body::from("{}"))
+                    .expect("request"),
+            )
+            .await
+            .expect("response");
+        assert_eq!(response.status(), StatusCode::NOT_IMPLEMENTED, "{uri}");
+        let body = body_json(response).await;
+        assert_eq!(body["code"], "not_implemented", "{uri}");
+    }
+}
+
+#[tokio::test]
+async fn cors_only_allows_local_and_tauri_origins() {
+    let request = |origin: &str| {
+        Request::builder()
+            .method("OPTIONS")
+            .uri("/v1/models")
+            .header("origin", origin)
+            .header("access-control-request-method", "GET")
+            .body(Body::empty())
+            .expect("request")
+    };
+    let allowed = app()
+        .oneshot(request("http://localhost:5173"))
+        .await
+        .expect("response");
+    assert_eq!(allowed.status(), StatusCode::OK);
+    assert!(
+        allowed
+            .headers()
+            .contains_key("access-control-allow-origin")
+    );
+
+    let denied = app()
+        .oneshot(request("https://evil.example"))
+        .await
+        .expect("response");
+    assert!(!denied.headers().contains_key("access-control-allow-origin"));
+}
+
+#[tokio::test]
+async fn config_get_redacts_token_and_put_preserves_it() {
+    use std::sync::Arc;
+    use uniinfer_config::{ConfigHandle, ModelEntry, ServerConfig, UniInferConfig};
+
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("uniinfer.toml");
+    let mut durable = UniInferConfig {
+        server: ServerConfig {
+            token: Some("secret".into()),
+            ..ServerConfig::default()
+        },
+        ..UniInferConfig::default()
+    };
+    durable.models = vec![ModelEntry::new("manifest.toml".into())];
+    durable.save(&path).expect("save");
+    let handle = Arc::new(ConfigHandle::load(path.clone()).expect("load"));
+    let fixture = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../models/tiny-onnx");
+    let api = ApiConfig::new(fixture.join("manifest.toml")).with_config(handle);
+    let app = routes::router(AppState::new(&api).expect("state"));
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/v1/config")
+                .body(Body::empty())
+                .expect("request"),
+        )
+        .await
+        .expect("response");
+    let body = body_json(response).await;
+    assert_eq!(body["token_configured"], true);
+    assert_eq!(body["config"]["server"]["token"], "<redacted>");
+
+    let mut next = body["config"].clone();
+    next["server"]["addr"] = json!("127.0.0.1:9092");
+    next["server"]["token"] = json!("<redacted>");
+    let request = Request::builder()
+        .method("PUT")
+        .uri("/v1/config")
+        .header("content-type", "application/json")
+        .body(Body::from(next.to_string()))
+        .expect("request");
+    let response = app.oneshot(request).await.expect("response");
+    assert_eq!(response.status(), StatusCode::OK);
+    let saved = UniInferConfig::load(&path).expect("saved");
+    assert_eq!(saved.server.token.as_deref(), Some("secret"));
+}
+
+#[tokio::test]
+async fn model_inspect_rejects_paths_outside_config_root() {
+    use std::sync::Arc;
+    use uniinfer_config::ConfigHandle;
+
+    let root = tempfile::tempdir().expect("root");
+    let outside = tempfile::tempdir().expect("outside");
+    std::fs::write(outside.path().join("model.onnx"), b"onnx").expect("model");
+    let config_path = root.path().join("uniinfer.toml");
+    std::fs::write(&config_path, "schema_version = 1\n").expect("config");
+    let handle = Arc::new(ConfigHandle::load(config_path).expect("load"));
+    let fixture = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../models/tiny-onnx");
+    let api = ApiConfig::new(fixture.join("manifest.toml")).with_config(handle);
+    let app = routes::router(AppState::new(&api).expect("state"));
+
+    let body = json!({"path": outside.path()}).to_string();
+    let response = app
+        .oneshot(post("/v1/models/inspect", &body))
+        .await
+        .expect("response");
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    let body = body_json(response).await;
+    assert_eq!(body["code"], "path_not_allowed");
+}

@@ -17,7 +17,7 @@
 
 ## 项目状态
 
-**M0 已交付，M1 已接通，M3 的 ASR 切片已落地。** Trait、Manifest、Registry、ONNX CPU 引擎、字节级文本后端与 CLI 可运行；REST/SSE、会话取消、错误信封、`/v1/models`、`/metrics`、文本基线测量与 EP 编译矩阵均已接通。语音转写是统一的 `audio` F32 → `text` U8 引擎契约，由 Registry 按格式 + 模态选择：ONNX 引擎优先注册，`whisper` feature 只是当前 GGML 引擎实现，不是转写能力的边界；实时 ASR/TTS 编排仍属于 M3 后续。
+**当前实现边界：ONNX/Candle/llama 的文本生成、ONNX Whisper/CTC 与 GGML Whisper 批量转写、实时文本与 VAD 打断、实时 ASR → 文本响应闭环。** Trait、Manifest、Registry、REST/SSE、会话取消、错误信封、`/v1/models`、`/metrics`、CLI 与 EP 编译矩阵均已接通。TTS、图像生成、视频生成与四通道双工仍是计划项：对应端点显式返回 `501 not_implemented`，不以占位实现伪装支持。
 
 ## 目录
 
@@ -52,9 +52,12 @@
 
 ## 核心特性
 
+> 以下「设计目标」描述目标架构；「当前状态」以本页支持矩阵和 API 表为准。
+
 - **三格式统一接入**：ONNX 走 `ort` + GenAI KV cache；GGUF 与 Safetensors 走 `CandleEngine` 或可选的 `llama.cpp` 引擎，同一 `InferenceEngine` 契约。
-- **实时双工**：`/v1/realtime` 支持文本、音频、图像、视频四通道；打断级联在 3 帧内生效，取消语义跨层传播。
-- **生成能力**：图像覆盖 SD 1.5/2.1、SDXL、SD 3/3.5、FLUX.1-dev、PixArt-Σ、Stable Cascade，支持 img2img、inpaint、LoRA/DoRA 堆叠与 AnimateDiff；视频覆盖 LTX-Video 2B/13B 与 AnimateDiff。
+- **实时语音（当前）**：`/v1/realtime` 支持文本与 16 kHz PCM16 音频输入；能量 VAD 检测语音起止，可选 ASR 模型把语音转写为文本并自动触发文本响应，语音起始会打断当前响应。
+- **实时双工（计划）**：图像、视频输入与 `output.audio` 尚未接入；`image`/`video` 通道返回 `unsupported_channel`。
+- **生成能力（计划）**：图像与视频生成、img2img/inpaint、LoRA/DoRA、AnimateDiff、LTX-Video 等尚无引擎 adapter 和 API 实现。
 - **显式能力声明**：格式、量化、模态、设备类别、EP 的支持状态同时来自模型清单与 `capabilities()`；降级路径附带稳定 `fallback_reason`。
 - **加载期预检**：量化、EP、显存与放置可行性四项在 `load_session` 前校验，错误在请求入口返回，推理循环保持干净。
 - **取消与租约**：`CancellationToken` + RAII `SessionLease`，客户端断开、任务取消、模型驱逐共用一条释放路径，覆盖 CPU/GPU/NPU 资源。
@@ -133,19 +136,19 @@ pub trait InferenceEngine: Send + Sync {
 
 ## 支持矩阵
 
-| 格式 | 模态 | 默认引擎 | 可选引擎 | 通道 |
-| :--- | :--- | :--- | :--- | :--- |
-| ONNX | 文本 / 嵌入 / 双工 / 图像 / 逐帧视频 | `OnnxEngine` | — | realtime + batch |
-| GGUF | 文本（Qwen3 量化）/ 视觉语言 / 双工 | `CandleEngine` | `frink` | realtime + batch |
-| GGUF | 图像生成 | `CandleEngine`（plakat） | — | batch |
-| GGUF | 视频生成 | `CandleEngine`（candle-video / plakat） | — | batch |
-| Safetensors | 文本 / 视觉语言 / 双工 | `CandleEngine` | `mistral.rs` | realtime + batch |
-| Safetensors | 图像生成 | `CandleEngine`（plakat） | — | batch |
-| Safetensors | 视频生成 | `CandleEngine`（candle-video / plakat） | — | batch |
-| ONNX | 实时预览帧 | `OnnxEngine` | — | realtime |
-| ONNX | 实时逐帧视频 | `OnnxEngine` + RAVE | — | realtime |
-| ONNX | 语音转写（Whisper encoder/decoder / CTC） | `OnnxEngine` ASR adapter registry | 可继续注册其他 architecture | batch |
-| GGML | 语音转写 | Registry 路由（当前 `WhisperEngine`） | — | batch |
+| 格式 | 能力 | 默认引擎 | 状态 |
+| :--- | :--- | :--- | :--- |
+| ONNX | 文本生成 / GenAI KV cache | `OnnxEngine` | 已实现 |
+| ONNX | 语音转写（Whisper encoder/decoder / CTC） | `OnnxEngine` ASR adapter registry | 已实现，批量 |
+| ONNX | 图像 / 逐帧视频 / 实时预览 | — | 计划 |
+| GGUF | 文本（Qwen3，含 IQ/MXFP4 可选 llama） | `CandleEngine` / `LlamaEngine` | 已实现 |
+| GGUF | 视觉语言 / 双工 | — | 计划 |
+| GGUF | 图像 / 视频生成 | — | 计划 |
+| Safetensors | 文本（Qwen3） | `CandleEngine` | 已实现 |
+| Safetensors | 视觉语言 / 双工 / 图像 / 视频 | — | 计划 |
+| GGML | 语音转写（Whisper） | `WhisperEngine`（可选 feature） | 已实现，批量 |
+| 任意 | 实时 ASR → 文本响应 | `/v1/realtime` + ASR slot | 已实现 |
+| 任意 | 实时 TTS / `output.audio` / 图像/视频输入 | — | 计划 |
 
 **量化**：ONNX 支持 FP32、FP16、INT8 与 INT4（如 Qwen3 ONNX int4 GenAI bundle）；GGUF 覆盖 Q2_K、Q3_K_S/M/L、Q4_K_S/M、Q5_K_S/M、Q6_K、Q8_0、Q4_0/Q4_1、Q5_0/Q5_1；Whisper GGML 覆盖 FP32/FP16 与 Q4/Q5/Q8 常见量化；Safetensors 以 FP16/BF16 mmap 加载。FP8 在 ONNX/Safetensors 加载期返回 `UnsupportedQuantization`；IQ1/IQ2/IQ3/IQ4、MXFP4、NVFP4、TQ 与 Q1/Q2 由可选 llama 路径覆盖，Candle 不支持的类型会在 probe/加载期明确拒绝。
 
@@ -406,29 +409,12 @@ curl -N http://127.0.0.1:8080/v1/chat/completions \
 
 `stop` 接受字符串或字符串数组；流式与非流式共用字节级匹配器，跨 token 的停止串不会泄漏到输出。
 
-图像生成：
+图像、视频与 TTS 端点尚未实现。请求会得到稳定错误，而不是伪造结果：
 
 ```bash
-curl http://127.0.0.1:8080/v1/images/generations \
-  -H 'Content-Type: application/json' \
-  -d '{
-    "model": "flux.1-dev-q5_k_m",
-    "prompt": "雨夜的霓虹街道，电影感，35mm",
-    "size": "1024x1024",
-    "steps": 20,
-    "seed": 42
-  }'
-```
-
-视频生成走异步任务：
-
-```bash
-curl http://127.0.0.1:8080/v1/videos/generations \
-  -H 'Content-Type: application/json' \
-  -d '{"model": "ltx-video-2b-distilled", "prompt": "海浪拍打礁石，日出", "duration": 2}'
-# → {"id": "job_7f3c", "status": "queued"}
-
-curl http://127.0.0.1:8080/v1/videos/generations/job_7f3c
+curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:8080/v1/images/generations \
+  -H 'Content-Type: application/json' -d '{"model":"flux","prompt":"test"}'
+# 501
 ```
 
 ### 桌面端
@@ -437,7 +423,7 @@ curl http://127.0.0.1:8080/v1/videos/generations/job_7f3c
 cargo run -p uniinfer-desktop
 ```
 
-应用在进程内启动 loopback API（随机端口 + 一次性 bearer token），窗口通过 Tauri command 获取地址与 token。默认加载 `models/tiny-onnx/manifest.toml`；`UNIINFER_MANIFEST` 指定单个清单，`UNIINFER_MANIFESTS`（分号分隔）加载多个模型并在标题栏切换。使用 WebView2，Windows 11 已内置。
+应用在进程内启动 loopback API（随机端口 + bearer token），窗口通过 Tauri command 获取地址与 token。服务端读取 `UNIINFER_CONFIG` 指定的持久配置；未设置时使用工作目录下的 `uniinfer.toml`，并以 `UNIINFER_MANIFEST` / `UNIINFER_MANIFESTS`（分号分隔）作为初始模型列表。首次启动会把随机 token 写入配置，后续复用；`GET/PUT /v1/config` 可读写同一份配置。使用 WebView2，Windows 11 已内置。
 
 ## 模型清单
 
@@ -469,32 +455,32 @@ sha256 = "9f8e6c1d0a4b7e2f5c8d1a3b6e9f0c2d4a7b1e8f3c6d9a2b5e0f4c7d1a8b3e6f"  # �
 
 ## API 一览
 
-| 端点 | 方法 | 用途 |
-| :--- | :--- | :--- |
-| `/v1/chat/completions` | POST | 文本生成，`stream: true` 走 SSE |
-| `/v1/audio/transcriptions` | POST | 语音转写；WAV + 清单 `[audio]` 契约，按 Registry 路由引擎 |
-| `/v1/audio/speech` | POST | 语音合成 |
-| `/v1/images/generations` | POST | 文生图 |
-| `/v1/images/edits` | POST | img2img / inpaint / outpaint |
-| `/v1/videos/generations` | POST | 视频生成任务 |
-| `/v1/videos/generations/{id}` | GET | 任务查询 |
-| `/v1/realtime` | WS | 实时会话，text + audio VAD |
-| `/v1/config` | GET/PUT | 读取/保存 GUI 配置；保存后需要重启生效 |
-| `/v1/models/inspect` | POST | 扫描模型目录并返回清单草稿 |
-| `/v1/models/import` | POST | 生成 manifest.toml 并加入应用配置 |
-| `/v1/models` | GET | 已加载模型、能力矩阵与放置计划 |
-| `/v1/devices` | GET | 运行时设备清单与各模型放置/回退原因 |
-| `/v1/sessions/{id}/cancel` | POST | 取消生成 |
+| 端点 | 方法 | 状态 | 用途 |
+| :--- | :--- | :--- | :--- |
+| `/v1/chat/completions` | POST | 已实现 | 文本生成，`stream: true` 走 SSE |
+| `/v1/audio/transcriptions` | POST | 已实现 | 语音转写；WAV + 清单 `[audio]` 契约，按 Registry 路由引擎 |
+| `/v1/audio/speech` | POST | 计划（501） | 语音合成 |
+| `/v1/images/generations` | POST | 计划（501） | 文生图 |
+| `/v1/images/edits` | POST | 计划（501） | img2img / inpaint / outpaint |
+| `/v1/videos/generations` | POST | 计划（501） | 视频生成任务 |
+| `/v1/videos/generations/{id}` | GET | 计划（501） | 任务查询 |
+| `/v1/realtime` | WS | 已实现 | 实时会话，text + audio 输入 + VAD + ASR→text |
+| `/v1/config` | GET/PUT | 已实现 | 读取/保存 GUI 配置；token 读取时脱敏；保存后需要重启生效 |
+| `/v1/models/inspect` | POST | 已实现 | 扫描配置根目录内的模型目录并返回清单草稿 |
+| `/v1/models/import` | POST | 已实现 | 生成 manifest.toml 并加入应用配置 |
+| `/v1/models` | GET | 已实现 | 已加载模型、能力矩阵与放置计划 |
+| `/v1/devices` | GET | 已实现 | 运行时设备清单与各模型放置/回退原因 |
+| `/v1/sessions/{id}/cancel` | POST | 已实现 | 取消生成 |
 
 实时会话以 JSON 文本帧承载控制事件，以 20ms PCM16 二进制帧承载音频：
 
 ```json
-{"type": "session.start", "model": "moshi-duplex-8bit", "channels": ["text", "audio"]}
-{"type": "input_audio_buffer.append"}
-{"type": "response.create"}
+{"type": "session.start", "model": "qwen3-0.6b", "channels": ["text", "audio"], "asr_model": "whisper-tiny.en-onnx"}
+{"type": "input.text", "text": "hello"}
+{"type": "response.create", "max_tokens": 64}
 ```
 
-当前实现 text 与 audio 通道：客户端发送 `session.start`、`input.text`、`response.create`、`response.cancel`，音频以 20ms / 16kHz / PCM16（640 字节）二进制帧上传。服务端返回 `session.started`、`input.text.accepted`、`input.speech.started`、`input.speech.stopped`、`output.text.delta`、`response.cancelled`、`response.done`。能量 VAD 检测到语音时会取消当前响应（打断）。ASR/TTS 尚未接入，`image`、`video` 通道返回 `unsupported_channel`。
+当前实现 text 与 audio 输入：音频以 20ms / 16kHz / PCM16（640 字节）二进制帧上传。服务端返回 `session.started`（含实际 `asr` 模型）、`input.text.accepted`、`input.speech.started`、`input.speech.stopped`、`conversation.item.input_audio_transcription.completed`、`output.text.delta`、`response.cancelled`、`response.done`。能量 VAD 检测到语音时会取消当前响应；语音结束后若配置了 ASR slot，服务端转写文本并自动触发文本响应。`output.audio`、TTS、`image`、`video` 通道仍未实现，`image`/`video` 返回 `unsupported_channel`。
 
 ## 项目结构
 
@@ -582,7 +568,13 @@ cargo run -p uniinfer-bench -- compare \
 
 ## 安全
 
-模型权重携带各自的许可证与使用条款，分发与商用前请核对上游模型卡片。安全问题请通过仓库的 Security Advisory 私下报告，附复现步骤与影响范围。
+- 默认只绑定 loopback；`server.addr` 非 loopback 时必须配置 `server.token`，否则配置校验失败。
+- 配置读取会把 `server.token` 脱敏为 `<redacted>`；回写 `<redacted>` 会保留原 token。
+- CORS 只允许 `localhost`、`127.0.0.1`、`[::1]`、`tauri.localhost` 与 `tauri://` 来源。
+- `/v1/models/inspect` 与 `/v1/models/import` 只接受配置根目录内的路径，越界返回 `403 path_not_allowed`。
+- 模型权重携带各自的许可证与使用条款，分发与商用前请核对上游模型卡片。
+
+安全问题请通过仓库的 Security Advisory 私下报告，附复现步骤与影响范围。
 
 ## 致谢
 

@@ -1,4 +1,4 @@
-use axum::extract::{DefaultBodyLimit, Path, State};
+use axum::extract::{DefaultBodyLimit, OriginalUri, Path, State};
 use axum::middleware;
 use axum::routing::{get, post};
 use axum::{Json, Router};
@@ -27,7 +27,13 @@ pub fn router(state: AppState) -> Router {
         )
         .route("/v1/realtime", get(realtime))
         .route("/v1/sessions/{id}/cancel", post(cancel));
-    let router = router.route("/v1/audio/transcriptions", post(crate::audio::transcribe));
+    let router = router
+        .route("/v1/audio/transcriptions", post(crate::audio::transcribe))
+        .route("/v1/audio/speech", post(planned))
+        .route("/v1/images/generations", post(planned))
+        .route("/v1/images/edits", post(planned))
+        .route("/v1/videos/generations", post(planned))
+        .route("/v1/videos/generations/{id}", get(planned));
     router
         .layer(DefaultBodyLimit::max(max_body_bytes))
         .layer(middleware::from_fn_with_state(
@@ -40,6 +46,13 @@ pub fn router(state: AppState) -> Router {
 
 async fn health() -> &'static str {
     "ok"
+}
+
+async fn planned(OriginalUri(uri): OriginalUri) -> Result<Json<Value>, ApiError> {
+    Err(ApiError::not_implemented(format!(
+        "{} is planned but not implemented",
+        uri.path()
+    )))
 }
 
 async fn metrics(State(state): State<AppState>) -> Json<Value> {

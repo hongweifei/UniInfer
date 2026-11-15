@@ -15,6 +15,7 @@ tauri-build = { version = "2.7.4" }
 
 [dependencies]
 uniinfer-api = { path = "../../crates/uniinfer-api" }
+uniinfer-config = { path = "../../crates/uniinfer-config" }
 tauri = { version = "2.12.5" }
 tokio = { version = "1.54.1", features = ["rt-multi-thread"] }
 serde = { version = "1.0.229", features = ["derive"] }
