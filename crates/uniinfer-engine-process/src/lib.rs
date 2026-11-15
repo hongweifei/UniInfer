@@ -313,7 +313,7 @@ impl InferenceEngine for ProcessEngine {
                 Err(RecvTimeoutError::Disconnected) => {
                     let _ = child.kill();
                     let _ = child.wait();
-                    return Err(EngineError::LoadFailed("worker exited before ready".into()));
+                    return Err(EngineError::ProcessExited);
                 }
             }
         };

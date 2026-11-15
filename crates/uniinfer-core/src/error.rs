@@ -35,6 +35,8 @@ pub enum EngineError {
     Cancelled,
     #[error("request timed out")]
     Timeout,
+    #[error("isolated worker exited")]
+    ProcessExited,
     #[error("resource busy")]
     Busy,
     #[error("placement unsatisfiable: {0}")]
@@ -66,6 +68,7 @@ impl EngineError {
             Self::LoadFailed(_) => "load_failed",
             Self::Cancelled => "cancelled",
             Self::Timeout => "timeout",
+            Self::ProcessExited => "process_exited",
             Self::Busy => "busy",
             Self::PlacementUnsatisfiable(_) => "placement_unsatisfiable",
             Self::Io(_) => "io_error",

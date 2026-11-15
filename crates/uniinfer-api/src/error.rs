@@ -100,6 +100,7 @@ impl From<uniinfer_core::EngineError> for ApiError {
             EngineError::Busy => StatusCode::TOO_MANY_REQUESTS,
             EngineError::Cancelled => StatusCode::from_u16(499).unwrap_or(StatusCode::BAD_REQUEST),
             EngineError::Timeout => StatusCode::GATEWAY_TIMEOUT,
+            EngineError::ProcessExited => StatusCode::BAD_GATEWAY,
             EngineError::Io(_) | EngineError::LoadFailed(_) | EngineError::Other(_) => {
                 StatusCode::INTERNAL_SERVER_ERROR
             }

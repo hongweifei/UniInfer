@@ -69,9 +69,14 @@ pub(super) async fn complete_response(generation: Generation) -> Result<Response
     if let Err(error) = result {
         if matches!(error, uniinfer_core::EngineError::Timeout) {
             state.router.record_timeout(&metric_model);
-            if process_isolated {
-                state.unload_text(&metric_model);
-            }
+        }
+        if process_isolated
+            && matches!(
+                error,
+                uniinfer_core::EngineError::Timeout | uniinfer_core::EngineError::ProcessExited
+            )
+        {
+            state.unload_text(&metric_model);
         }
         return Err(error.into());
     }

@@ -90,11 +90,15 @@ pub(super) fn spawn_response(
             Err(error) => {
                 if matches!(error, uniinfer_core::EngineError::Timeout) {
                     router.record_timeout(&metric_model);
-                    if process_isolated {
-                        // The worker process was killed by the deadline. Drop
-                        // the dead parent-side slot so the next request reloads.
-                        router.remove_slot(&metric_model);
-                    }
+                }
+                if process_isolated
+                    && matches!(
+                        error,
+                        uniinfer_core::EngineError::Timeout
+                            | uniinfer_core::EngineError::ProcessExited
+                    )
+                {
+                    router.remove_slot(&metric_model);
                 }
                 let _ = send(json!({
                     "type": "error",
