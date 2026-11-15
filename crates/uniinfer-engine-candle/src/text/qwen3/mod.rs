@@ -3,8 +3,9 @@
 use candle_core::Tensor;
 use uniinfer_core::{EngineError, ModelFormat, Result};
 
+mod model;
+
 use super::{LoadContext, TextFamily, TextModel};
-use crate::qwen3;
 
 pub(crate) struct Qwen3Family;
 
@@ -20,9 +21,9 @@ impl TextFamily for Qwen3Family {
                     .model_paths
                     .first()
                     .ok_or_else(|| EngineError::ManifestInvalid("files is empty".into()))?;
-                qwen3::load_gguf(path, ctx.device, ctx.cancel)?
+                model::load_gguf(path, ctx.device, ctx.cancel)?
             }
-            ModelFormat::Safetensors => qwen3::load_safetensors(
+            ModelFormat::Safetensors => model::load_safetensors(
                 ctx.model_paths,
                 ctx.config_path,
                 ctx.dtype,
@@ -35,7 +36,7 @@ impl TextFamily for Qwen3Family {
     }
 }
 
-struct Qwen3Model(qwen3::Model);
+struct Qwen3Model(model::Model);
 
 impl TextModel for Qwen3Model {
     fn forward(&mut self, input: &Tensor, offset: usize) -> candle_core::Result<Tensor> {
