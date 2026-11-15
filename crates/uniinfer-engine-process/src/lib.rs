@@ -49,7 +49,6 @@ pub enum WorkerRequest {
 #[derive(Debug, Serialize, Deserialize)]
 pub enum WorkerResponse {
     Ready {
-        protocol: u32,
         inputs: Vec<WireSpec>,
         outputs: Vec<WireSpec>,
     },
@@ -61,8 +60,6 @@ pub enum WorkerResponse {
         message: String,
     },
 }
-
-pub const PROTOCOL_VERSION: u32 = 1;
 
 const MAX_FRAME_BYTES: usize = 512 * 1024 * 1024;
 
@@ -366,24 +363,12 @@ impl InferenceEngine for ProcessEngine {
             let _ = child.wait();
             EngineError::LoadFailed(format!("worker ready: {error}"))
         })?;
-        let WorkerResponse::Ready {
-            protocol,
-            inputs,
-            outputs,
-        } = ready
-        else {
+        let WorkerResponse::Ready { inputs, outputs } = ready else {
             let _ = child.kill();
             return Err(EngineError::LoadFailed(
                 "worker sent an invalid ready".into(),
             ));
         };
-        if protocol != PROTOCOL_VERSION {
-            let _ = child.kill();
-            let _ = child.wait();
-            return Err(EngineError::LoadFailed(format!(
-                "worker protocol {protocol}, expected {PROTOCOL_VERSION}"
-            )));
-        }
         Ok(Box::new(ProcessSession {
             io: std::sync::Mutex::new(ProcessIo {
                 child,

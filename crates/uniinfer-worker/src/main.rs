@@ -7,8 +7,7 @@ use std::sync::Arc;
 
 use uniinfer_core::{EngineSession, ModelManifest};
 use uniinfer_engine_process::{
-    PROTOCOL_VERSION, WireSpec, WireTensor, WorkerRequest, WorkerResponse, decode_frame,
-    read_frame, write_frame,
+    WireSpec, WireTensor, WorkerRequest, WorkerResponse, decode_frame, read_frame, write_frame,
 };
 use uniinfer_service::{AudioSlot, ModelSlot, Runtime};
 
@@ -70,7 +69,6 @@ fn main() -> anyhow::Result<()> {
 
     let mut stdout = std::io::stdout().lock();
     let ready = WorkerResponse::Ready {
-        protocol: PROTOCOL_VERSION,
         inputs: session.inputs().iter().map(WireSpec::from).collect(),
         outputs: session.outputs().iter().map(WireSpec::from).collect(),
     };
