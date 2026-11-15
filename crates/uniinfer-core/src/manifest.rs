@@ -239,6 +239,28 @@ pub struct TextConfig {
     pub tokenizer_file: Option<PathBuf>,
 }
 
+/// Vision / multimodal model configuration.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct VisionConfig {
+    /// Family name, e.g. `qwen3_vl`, `llama_mtmd`, `onnx_vlm`.
+    pub architecture: String,
+    #[serde(default)]
+    pub mmproj_file: Option<PathBuf>,
+    #[serde(default)]
+    pub preprocessor_file: Option<PathBuf>,
+    #[serde(default)]
+    pub vision_graph: Option<PathBuf>,
+    #[serde(default)]
+    pub text_graph: Option<PathBuf>,
+    #[serde(default)]
+    pub pixel_input: Option<String>,
+    #[serde(default)]
+    pub grid_input: Option<String>,
+    #[serde(default)]
+    pub image_token: Option<String>,
+}
+
 /// Audio preprocessing contract shared by every speech adapter.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -347,6 +369,8 @@ pub struct ModelManifest {
     pub text: Option<TextConfig>,
     #[serde(default)]
     pub audio: Option<AudioConfig>,
+    #[serde(default)]
+    pub vision: Option<VisionConfig>,
 }
 
 impl ModelManifest {

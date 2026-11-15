@@ -33,3 +33,9 @@ models/cache
 /models/qwen3-vl-2b/*.json
 /models/qwen3-vl-2b/*.txt
 !/models/qwen3-vl-2b/manifest.toml
+
+# Qwen2.5-VL GGUF; fetch via models/fetch-qwen2.5-vl-gguf.sh
+/models/qwen2.5-vl-7b-gguf/*.gguf
+/models/qwen2.5-vl-7b-gguf/*.gguf.*
+/models/qwen2.5-vl-7b-gguf/*.json
+/models/qwen2.5-vl-7b-gguf/*.md

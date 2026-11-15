@@ -35,3 +35,7 @@ sha256 = "a5d85b6dcc535e6b93115a9ef287e6132fdbf30270da6218194ba742261173c7"
 [[files]]
 path = "preprocessor_config.json"
 sha256 = "27225450ac9c6529872ee1924fcb0962ff5634834f817040f444118116f4e516"
+
+[vision]
+architecture = "qwen3_vl"
+preprocessor_file = "preprocessor_config.json"

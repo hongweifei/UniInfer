@@ -216,6 +216,7 @@ pub fn inspect(root: &Path, options: &InspectOptions) -> Result<Inspection> {
         files,
         text,
         audio,
+        vision: None,
     };
     manifest
         .validate()
