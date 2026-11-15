@@ -1,5 +1,6 @@
 //! ONNX tensor conversion helpers.
 
+use half::f16;
 use ort::value::{DynValue, Outlet, Tensor as OrtTensor, TensorElementType, ValueType};
 use uniinfer_core::{EngineError, Result, Tensor, TensorData, TensorDtype, TensorSpec};
 
@@ -19,6 +20,7 @@ pub(crate) fn convert_spec(outlet: &Outlet, kind: &str) -> Result<TensorSpec> {
     };
     let dtype = match *ty {
         TensorElementType::Float32 => TensorDtype::F32,
+        TensorElementType::Float16 => TensorDtype::F16,
         TensorElementType::Int64 => TensorDtype::I64,
         TensorElementType::Uint8 => TensorDtype::U8,
         other => {
@@ -45,6 +47,9 @@ pub(crate) fn to_ort(tensor: Tensor) -> Result<DynValue> {
         TensorData::F32(values) => {
             OrtTensor::from_array((shape, values)).map(ort::value::Value::into_dyn)
         }
+        TensorData::F16(values) => {
+            OrtTensor::from_array((shape, values)).map(ort::value::Value::into_dyn)
+        }
         TensorData::I64(values) => {
             OrtTensor::from_array((shape, values)).map(ort::value::Value::into_dyn)
         }
@@ -64,6 +69,13 @@ pub(crate) fn from_ort(spec: &TensorSpec, value: &DynValue) -> Result<Tensor> {
                 .map_err(|error| EngineError::Other(format!("extract {}: {error}", spec.name)))?;
             let shape = shape.iter().map(|dim| *dim as usize).collect();
             Tensor::new(spec.name.clone(), shape, TensorData::F32(slice.to_vec()))
+        }
+        TensorDtype::F16 => {
+            let (shape, slice) = value
+                .try_extract_tensor::<f16>()
+                .map_err(|error| EngineError::Other(format!("extract {}: {error}", spec.name)))?;
+            let shape = shape.iter().map(|dim| *dim as usize).collect();
+            Tensor::new(spec.name.clone(), shape, TensorData::F16(slice.to_vec()))
         }
         TensorDtype::I64 => {
             let (shape, slice) = value

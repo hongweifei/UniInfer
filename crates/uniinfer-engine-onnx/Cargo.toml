@@ -15,7 +15,7 @@ thiserror.workspace = true
 tracing.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-half = "2"
+half.workspace = true
 tokenizers.workspace = true
 rustfft.workspace = true
 

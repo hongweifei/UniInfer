@@ -1,8 +1,7 @@
 //! ONNX Runtime engine.
 
 use std::path::Path;
-use std::sync::atomic::AtomicBool;
-use std::sync::{LazyLock, Mutex};
+use std::sync::LazyLock;
 
 use ort::environment::Environment;
 use ort::session::Session;
@@ -17,9 +16,9 @@ mod graph;
 mod io;
 mod session;
 
-use genai::{GenaiSpec, GenaiState, load_genai_config};
+use genai::{GenaiSpec, load_genai_config};
 use graph::Graph;
-use session::{OnnxSession, OnnxState, PlainOnnxSession};
+use session::{GenaiOnnxSession, PlainOnnxSession};
 
 const FORMATS: &[ModelFormat] = &[ModelFormat::Onnx];
 static DEVICES: LazyLock<Vec<DeviceClass>> = LazyLock::new(|| {
@@ -208,9 +207,10 @@ impl InferenceEngine for OnnxEngine {
 
         let genai_config = load_genai_config(&spec.base_dir)?;
         if let Some(config) = genai_config {
-            let genai = GenaiSpec::from_config(&config, &session)?;
-            let inputs = genai.input_specs(&session)?;
-            let outputs = genai.output_specs(&session)?;
+            let graph = Graph::from_session(session, "onnx genai")?;
+            let genai = GenaiSpec::from_config(&config, &graph)?;
+            let inputs = genai.input_specs(&graph)?;
+            let outputs = genai.output_specs(&graph)?;
             tracing::debug!(
                 model = %spec.manifest.id,
                 path = %model_path.display(),
@@ -219,16 +219,7 @@ impl InferenceEngine for OnnxEngine {
                 genai = true,
                 "onnx genai session loaded"
             );
-            return Ok(Box::new(OnnxSession {
-                state: Mutex::new(OnnxState {
-                    session,
-                    genai: Some(GenaiState::new(genai)),
-                }),
-                inputs,
-                outputs,
-                cancelled: AtomicBool::new(false),
-                active: Mutex::new(None),
-            }));
+            return Ok(Box::new(GenaiOnnxSession::new(graph, genai)?));
         }
 
         let graph = Graph::from_session(session, "onnx")?;

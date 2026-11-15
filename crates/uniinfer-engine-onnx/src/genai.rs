@@ -1,16 +1,15 @@
 //! ONNX Runtime GenAI metadata and KV-cache generation.
+//!
+//! Cache values are ordinary `Tensor`s (F32 or F16), so GenAI uses the same
+//! `Graph` execution, output conversion and cancellation path as other ONNX
+//! sessions.
 
 use std::path::Path;
-use std::sync::atomic::{AtomicBool, Ordering};
 
-use half::f16;
-use ort::session::{NoSelectedOutputs, RunOptions, Session, SessionInputValue};
-use ort::value::{DynValue, Tensor as OrtTensor, TensorElementType, ValueType};
 use serde::Deserialize;
 use uniinfer_core::{EngineError, Result, Tensor, TensorData, TensorDtype, TensorSpec};
 
-use crate::io::{convert_spec, from_ort, to_ort};
-use crate::session::OnnxState;
+use crate::graph::Graph;
 
 #[derive(Debug, Deserialize)]
 pub(crate) struct GenaiConfig {
@@ -55,11 +54,11 @@ pub(crate) struct GenaiSpec {
     present_order: Vec<String>,
     kv_heads: usize,
     head_size: usize,
-    past_dtype: TensorElementType,
+    past_dtype: TensorDtype,
 }
 
 impl GenaiSpec {
-    pub(crate) fn from_config(config: &GenaiConfig, session: &Session) -> Result<Self> {
+    pub(crate) fn from_config(config: &GenaiConfig, graph: &Graph) -> Result<Self> {
         let decoder = &config.model.decoder;
         if decoder.num_hidden_layers == 0
             || decoder.num_key_value_heads == 0
@@ -78,38 +77,32 @@ impl GenaiSpec {
         let past_values = names(&decoder.inputs.past_value_names);
         let present_keys = names(&decoder.outputs.present_key_names);
         let present_values = names(&decoder.outputs.present_value_names);
-        let past_dtype = session
+        let past_dtype = graph
             .inputs()
             .iter()
-            .find(|outlet| outlet.name() == past_keys[0])
-            .and_then(|outlet| match outlet.dtype() {
-                ValueType::Tensor { ty, .. } => Some(*ty),
-                _ => None,
-            })
+            .find(|spec| spec.name == past_keys[0])
+            .map(|spec| spec.dtype)
             .ok_or_else(|| {
                 EngineError::ManifestInvalid(format!(
                     "genai past input {} is missing",
                     past_keys[0]
                 ))
             })?;
-        if !matches!(
-            past_dtype,
-            TensorElementType::Float32 | TensorElementType::Float16
-        ) {
+        if !matches!(past_dtype, TensorDtype::F32 | TensorDtype::F16) {
             return Err(EngineError::LoadFailed(format!(
                 "unsupported genai KV dtype {past_dtype:?}"
             )));
         }
-        let past_order = session
+        let past_order = graph
             .inputs()
             .iter()
-            .map(|outlet| outlet.name().to_owned())
+            .map(|spec| spec.name.clone())
             .filter(|name| past_keys.contains(name) || past_values.contains(name))
             .collect::<Vec<_>>();
-        let present_order = session
+        let present_order = graph
             .outputs()
             .iter()
-            .map(|outlet| outlet.name().to_owned())
+            .map(|spec| spec.name.clone())
             .filter(|name| present_keys.contains(name) || present_values.contains(name))
             .collect::<Vec<_>>();
         if past_order.len() != decoder.num_hidden_layers * 2
@@ -131,14 +124,14 @@ impl GenaiSpec {
         })
     }
 
-    pub(crate) fn input_specs(&self, session: &Session) -> Result<Vec<TensorSpec>> {
+    pub(crate) fn input_specs(&self, graph: &Graph) -> Result<Vec<TensorSpec>> {
         let wanted = [&self.input_ids, &self.attention_mask];
-        let filtered = session
+        let filtered = graph
             .inputs()
             .iter()
-            .filter(|outlet| wanted.contains(&&outlet.name().to_owned()))
-            .map(|outlet| convert_spec(outlet, "input"))
-            .collect::<Result<Vec<_>>>()?;
+            .filter(|spec| wanted.contains(&&spec.name))
+            .cloned()
+            .collect::<Vec<_>>();
         if filtered.len() != 2 {
             return Err(EngineError::ManifestInvalid(
                 "genai input_ids/attention_mask are missing".into(),
@@ -147,13 +140,13 @@ impl GenaiSpec {
         Ok(filtered)
     }
 
-    pub(crate) fn output_specs(&self, session: &Session) -> Result<Vec<TensorSpec>> {
-        let filtered = session
+    pub(crate) fn output_specs(&self, graph: &Graph) -> Result<Vec<TensorSpec>> {
+        let filtered = graph
             .outputs()
             .iter()
-            .filter(|outlet| outlet.name() == self.logits)
-            .map(|outlet| convert_spec(outlet, "output"))
-            .collect::<Result<Vec<_>>>()?;
+            .filter(|spec| spec.name == self.logits)
+            .cloned()
+            .collect::<Vec<_>>();
         if filtered.len() != 1 {
             return Err(EngineError::ManifestInvalid(
                 "genai logits output is missing".into(),
@@ -165,7 +158,7 @@ impl GenaiSpec {
 
 pub(crate) struct GenaiState {
     spec: GenaiSpec,
-    past: Vec<DynValue>,
+    past: Vec<Tensor>,
     cached_ids: Vec<i64>,
 }
 
@@ -177,44 +170,8 @@ impl GenaiState {
             cached_ids: Vec::new(),
         }
     }
-}
 
-pub(crate) fn load_genai_config(base_dir: &Path) -> Result<Option<GenaiConfig>> {
-    let path = base_dir.join("genai_config.json");
-    if !path.is_file() {
-        return Ok(None);
-    }
-    let raw = std::fs::read_to_string(&path).map_err(|error| {
-        EngineError::ManifestInvalid(format!("cannot read {}: {error}", path.display()))
-    })?;
-    let config = serde_json::from_str(&raw)
-        .map_err(|error| EngineError::ManifestInvalid(format!("{}: {error}", path.display())))?;
-    Ok(Some(config))
-}
-
-pub(crate) fn run_genai(
-    state: &mut OnnxState,
-    inputs: &[Tensor],
-    options: &RunOptions<NoSelectedOutputs>,
-    cancelled: &AtomicBool,
-) -> Result<Vec<Tensor>> {
-    let mut genai = state
-        .genai
-        .take()
-        .ok_or_else(|| EngineError::Other("genai state missing".into()))?;
-    let result = genai.forward(&mut state.session, inputs, options, cancelled);
-    state.genai = Some(genai);
-    result
-}
-
-impl GenaiState {
-    pub(crate) fn forward(
-        &mut self,
-        session: &mut Session,
-        inputs: &[Tensor],
-        options: &RunOptions<NoSelectedOutputs>,
-        cancelled: &AtomicBool,
-    ) -> Result<Vec<Tensor>> {
+    pub(crate) fn forward(&mut self, graph: &mut Graph, inputs: &[Tensor]) -> Result<Vec<Tensor>> {
         let ids = inputs
             .iter()
             .find(|tensor| tensor.name == self.spec.input_ids)
@@ -241,7 +198,7 @@ impl GenaiState {
         let mut past = if reuse {
             std::mem::take(&mut self.past)
         } else {
-            Vec::new()
+            zero_past(&self.spec)?
         };
         if past.is_empty() {
             past = zero_past(&self.spec)?;
@@ -252,83 +209,73 @@ impl GenaiState {
             return Err(EngineError::Other("genai input has no new tokens".into()));
         }
 
-        let ids_value = to_ort(Tensor::new(
+        let mut values = Vec::with_capacity(2 + past.len());
+        values.push(Tensor::new(
             self.spec.input_ids.clone(),
             vec![1, delta.len()],
             TensorData::I64(delta.to_vec()),
-        )?)?;
-        let mask_value = to_ort(Tensor::new(
+        )?);
+        values.push(Tensor::new(
             self.spec.attention_mask.clone(),
             vec![1, mask.len()],
             TensorData::I64(mask),
-        )?)?;
+        )?);
+        values.extend(past);
 
-        let mut values: Vec<(String, SessionInputValue)> = Vec::with_capacity(2 + past.len());
-        values.push((
-            self.spec.input_ids.clone(),
-            SessionInputValue::from(&ids_value),
-        ));
-        values.push((
-            self.spec.attention_mask.clone(),
-            SessionInputValue::from(&mask_value),
-        ));
-        for (name, value) in self.spec.past_order.iter().zip(past.iter()) {
-            values.push((name.clone(), SessionInputValue::from(value)));
-        }
-
-        let mut outputs = session.run_with_options(values, options).map_err(|error| {
-            if cancelled.load(Ordering::SeqCst) {
-                EngineError::Cancelled
-            } else {
-                EngineError::Other(format!("onnx genai run: {error}"))
-            }
-        })?;
-        let logits = from_ort(
-            &TensorSpec {
-                name: self.spec.logits.clone(),
-                dtype: TensorDtype::F32,
-                shape: Vec::new(),
-            },
-            outputs
-                .get(self.spec.logits.as_str())
-                .ok_or_else(|| EngineError::Other("genai logits missing".into()))?,
-        )?;
-        let mut presents = Vec::with_capacity(self.spec.present_order.len());
-        for name in &self.spec.present_order {
-            presents.push(
-                outputs
-                    .remove(name)
-                    .ok_or_else(|| EngineError::Other(format!("genai output {name} missing")))?,
-            );
-        }
-        drop(outputs);
-        drop(past);
+        let outputs = graph.run(values)?;
+        let logits = outputs
+            .iter()
+            .find(|tensor| tensor.name == self.spec.logits)
+            .cloned()
+            .ok_or_else(|| EngineError::Other("genai logits missing".into()))?;
+        let presents = self
+            .spec
+            .past_order
+            .iter()
+            .zip(self.spec.present_order.iter())
+            .map(|(past, present)| {
+                let tensor = outputs
+                    .iter()
+                    .find(|tensor| tensor.name == *present)
+                    .cloned()
+                    .ok_or_else(|| EngineError::Other(format!("genai output {present} missing")))?;
+                Tensor::new(past.clone(), tensor.shape, tensor.data)
+            })
+            .collect::<Result<Vec<_>>>()?;
         self.past = presents;
         self.cached_ids = ids;
         Ok(vec![logits])
     }
 }
 
-pub(crate) fn zero_past(spec: &GenaiSpec) -> Result<Vec<DynValue>> {
-    let mut values = Vec::with_capacity(spec.past_order.len());
-    for _ in &spec.past_order {
-        let shape = vec![1usize, spec.kv_heads, 0, spec.head_size];
-        let value =
-            match spec.past_dtype {
-                TensorElementType::Float32 => OrtTensor::from_array((shape, Vec::<f32>::new()))
-                    .map(ort::value::Value::into_dyn),
-                TensorElementType::Float16 => OrtTensor::from_array((shape, Vec::<f16>::new()))
-                    .map(ort::value::Value::into_dyn),
-                other => {
-                    return Err(EngineError::LoadFailed(format!(
-                        "unsupported genai KV dtype {other:?}"
-                    )));
-                }
-            }
-            .map_err(|error| EngineError::Other(format!("genai zero past: {error}")))?;
-        values.push(value);
+pub(crate) fn load_genai_config(base_dir: &Path) -> Result<Option<GenaiConfig>> {
+    let path = base_dir.join("genai_config.json");
+    if !path.is_file() {
+        return Ok(None);
     }
-    Ok(values)
+    let raw = std::fs::read_to_string(&path).map_err(|error| {
+        EngineError::ManifestInvalid(format!("cannot read {}: {error}", path.display()))
+    })?;
+    let config = serde_json::from_str(&raw)
+        .map_err(|error| EngineError::ManifestInvalid(format!("{}: {error}", path.display())))?;
+    Ok(Some(config))
+}
+
+fn zero_past(spec: &GenaiSpec) -> Result<Vec<Tensor>> {
+    let shape = vec![1usize, spec.kv_heads, 0, spec.head_size];
+    let data = match spec.past_dtype {
+        TensorDtype::F32 => TensorData::F32(Vec::new()),
+        TensorDtype::F16 => TensorData::F16(Vec::new()),
+        other => {
+            return Err(EngineError::LoadFailed(format!(
+                "unsupported genai KV dtype {other:?}"
+            )));
+        }
+    };
+    spec.past_order
+        .iter()
+        .map(|name| Tensor::new(name.clone(), shape.clone(), data.clone()))
+        .collect()
 }
 
 #[cfg(test)]
