@@ -15,6 +15,7 @@ allow_cpu_fallback = true
 [vision]
 architecture = "llama_mtmd"
 mmproj_file = "mmproj-Qwen2.5-VL-7B-Instruct-Q8_0.gguf"
+image_token = "<__media__>"
 
 [[files]]
 path = "Qwen2.5-VL-7B-Instruct-Q4_K_M.gguf"

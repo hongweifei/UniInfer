@@ -291,6 +291,18 @@ impl ModelSlot {
         }
     }
 
+    /// Whether the engine session accepts an image tensor alongside token ids.
+    #[must_use]
+    pub fn supports_image_prompt(&self) -> bool {
+        let inputs = self.session().inputs();
+        inputs
+            .iter()
+            .any(|spec| spec.name == "image" && spec.dtype == uniinfer_core::TensorDtype::U8)
+            && inputs.iter().any(|spec| {
+                spec.name == "input_ids" && spec.dtype == uniinfer_core::TensorDtype::I64
+            })
+    }
+
     /// Count prompt tokens with the slot's tokenizer.
     pub fn count_tokens(&self, prompt: &str) -> Result<usize> {
         self.generator.count_tokens(prompt)
@@ -315,8 +327,20 @@ impl ModelSlot {
         spec: GenerationSpec,
         on_bytes: &mut dyn FnMut(&[u8]) -> bool,
     ) -> Result<GenerationOutput> {
+        self.generate_with_images(prompt, &[], cancel, spec, on_bytes)
+    }
+
+    /// Run one generation pass with an optional image.
+    pub fn generate_with_images(
+        &self,
+        prompt: &str,
+        images: &[Vec<u8>],
+        cancel: &CancelToken,
+        spec: GenerationSpec,
+        on_bytes: &mut dyn FnMut(&[u8]) -> bool,
+    ) -> Result<GenerationOutput> {
         self.generator
-            .generate_with(self.session(), prompt, cancel, spec, on_bytes)
+            .generate_with_images(self.session(), prompt, images, cancel, spec, on_bytes)
     }
 }
 

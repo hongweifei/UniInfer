@@ -33,6 +33,7 @@ toml = "1.2.1"
 thiserror = "2.0.21"
 sha2 = "0.11.1"
 hex = "0.4.3"
+base64 = "0.22.1"
 clap = { version = "4.5", features = ["derive"] }
 axum = { version = "0.8.9", features = ["ws", "multipart"] }
 tokio = { version = "1.54.1", features = ["rt-multi-thread", "macros", "net", "signal", "sync", "time"] }

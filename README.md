@@ -145,7 +145,7 @@ pub trait InferenceEngine: Send + Sync {
 | GGUF | 视觉语言 / 双工 | — | 计划 |
 | GGUF | 图像 / 视频生成 | — | 计划 |
 | Safetensors | 文本（Qwen2/Qwen3） | `CandleEngine` | 已实现 |
-| Safetensors | 视觉语言（Qwen3-VL） | `CandleEngine` | 已实现（单图 forward） |
+| Safetensors | 视觉语言（Qwen3-VL） | `CandleEngine` | 已实现（OpenAI 单图 content part） |
 | GGUF | 视觉语言（Qwen2.5-VL Q4 + mmproj） | `LlamaMtmdEngine` | 已实现（单图 forward） |
 | Safetensors | 视觉语言 / 双工 / 图像 / 视频 | — | 计划 |
 | GGML | 语音转写（Whisper） | `WhisperEngine`（可选 feature） | 已实现，批量 |
@@ -432,7 +432,22 @@ curl -N http://127.0.0.1:8080/v1/chat/completions \
 
 `stop` 接受字符串或字符串数组；流式与非流式共用字节级匹配器，跨 token 的停止串不会泄漏到输出。
 
-聊天请求支持 OpenAI `tools` / `tool_choice`、`role: "tool"`、assistant `tool_calls`，以及文本型 content parts；非文本 part 返回 `400 unsupported_content`。模型输出中的 `<tool_call>...</tool_call>` 或纯 JSON `{name, arguments}` 会解析为结构化 `tool_calls`，`finish_reason` 为 `tool_calls`。流式请求会在结束时发送 tool_calls chunk。
+聊天请求支持 OpenAI `tools` / `tool_choice`、`role: "tool"`、assistant `tool_calls`，以及 `text` / `image_url` content parts。图像只接受 base64 `data:` URL、单请求单图、最大 20 MiB；模型清单必须有 `[vision]` 且引擎暴露 int64 token + uint8 image 输入，否则返回稳定 400：
+
+```bash
+curl http://127.0.0.1:8080/v1/chat/completions \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "model": "qwen3-vl-2b",
+    "messages": [{"role": "user", "content": [
+      {"type": "image_url", "image_url": {"url": "data:image/png;base64,..."}},
+      {"type": "text", "text": "图中是什么颜色？"}
+    ]}],
+    "max_tokens": 32
+  }'
+```
+
+`image_url` 的远程 HTTP URL 暂不支持；`audio` / `video` parts 返回 `400 unsupported_content`。模型输出中的 `<tool_call>...</tool_call>` 或纯 JSON `{name, arguments}` 会解析为结构化 `tool_calls`，`finish_reason` 为 `tool_calls`。流式请求会在结束时发送 tool_calls chunk。
 
 采样参数：`temperature`（0–2，0 为 greedy）、`top_p`（0–1）、`top_k`（0–4096，0 表示不截断）、`seed`、`frequency_penalty` 与 `presence_penalty`（均 0–2）。只传采样字段而未传 `temperature` 时默认 `temperature=1.0`；非法取值返回 `400 invalid_sampling`。
 
@@ -488,7 +503,7 @@ sha256 = "9f8e6c1d0a4b7e2f5c8d1a3b6e9f0c2d4a7b1e8f3c6d9a2b5e0f4c7d1a8b3e6f"  # �
 
 | 端点 | 方法 | 状态 | 用途 |
 | :--- | :--- | :--- | :--- |
-| `/v1/chat/completions` | POST | 已实现 | 文本生成，`stream: true` 走 SSE |
+| `/v1/chat/completions` | POST | 已实现 | 文本/单图生成，`stream: true` 走 SSE |
 | `/v1/audio/transcriptions` | POST | 已实现 | 语音转写；WAV + 清单 `[audio]` 契约，按 Registry 路由引擎 |
 | `/v1/audio/speech` | POST | 计划（501） | 语音合成 |
 | `/v1/images/generations` | POST | 计划（501） | 文生图 |

@@ -16,6 +16,7 @@ pub(super) async fn complete_response(generation: Generation) -> Result<Response
         permit,
         session_id,
         prompt,
+        images,
         prompt_tokens,
         max_tokens,
         stop,
@@ -38,8 +39,9 @@ pub(super) async fn complete_response(generation: Generation) -> Result<Response
         let mut bytes = Vec::new();
         let mut matcher = StopMatcher::new(stop);
         let mut measured_ttft = false;
-        let output = slot.generate_with(
+        let output = slot.generate_with_images(
             &prompt,
+            &images,
             &cancel,
             GenerationSpec {
                 max_tokens,

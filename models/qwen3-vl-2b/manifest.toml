@@ -39,3 +39,4 @@ sha256 = "27225450ac9c6529872ee1924fcb0962ff5634834f817040f444118116f4e516"
 [vision]
 architecture = "qwen3_vl"
 preprocessor_file = "preprocessor_config.json"
+image_token = "<|vision_start|><|image_pad|><|vision_end|>"

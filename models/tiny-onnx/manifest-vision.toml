@@ -1,0 +1,25 @@
+schema_version = 1
+id = "tiny-vision-onnx"
+format = "onnx"
+quantization = "fp32"
+modalities = ["text", "image"]
+streaming_capable = false
+context_len = 64
+tokenizer = "bytes"
+min_vram = "0GiB"
+
+[placement]
+policy = "auto"
+prefer = ["npu", "gpu", "cpu"]
+allow_cpu_fallback = true
+
+[text]
+vocab_size = 256
+
+[vision]
+architecture = "onnx_vlm"
+image_token = "<image>"
+
+[[files]]
+path = "vision.onnx"
+sha256 = "85ce76aacbdef6659679b418fb33f089ff8f53728a8d337f6f8816eac0a006b2"

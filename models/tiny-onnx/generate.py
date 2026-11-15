@@ -19,6 +19,7 @@ OUT_DIR = Path(__file__).resolve().parent
 VOCAB = 256
 INT64 = 7
 FLOAT = 1
+UINT8 = 2
 
 
 def varint(value: int) -> bytes:
@@ -132,6 +133,47 @@ def build_model() -> bytes:
     return model
 
 
+def build_vision_model() -> bytes:
+    """Tiny graph with a uint8 image input, used for API vision plumbing."""
+    nodes = [
+        node("Size", ["image"], ["image_size"]),
+        node("Mul", ["image_size", "zero"], ["zero_offset"]),
+        node("Add", ["input_ids", "zero_offset"], ["offset_ids"]),
+        node("Add", ["offset_ids", "one"], ["shifted"]),
+        node("Mod", ["shifted", "depth"], ["wrapped"]),
+        node("OneHot", ["wrapped", "depth", "values"], ["logits"], axis=-1),
+    ]
+    initializers = [
+        tensor("zero", INT64, [], int_values=[0]),
+        tensor("one", INT64, [], int_values=[1]),
+        tensor("depth", INT64, [], int_values=[VOCAB]),
+        tensor("values", FLOAT, [2], float_values=[0.0, 1.0]),
+    ]
+    graph = b"".join(message(1, value) for value in nodes)
+    graph += string(2, "tiny-vision-lm")
+    graph += b"".join(message(5, value) for value in initializers)
+    graph += message(
+        11,
+        value_info("input_ids", INT64, [("value", 1), ("param", "seq")]),
+    )
+    graph += message(11, value_info("image", UINT8, [("param", "n")]))
+    graph += message(
+        12,
+        value_info(
+            "logits",
+            FLOAT,
+            [("value", 1), ("param", "seq"), ("value", VOCAB)],
+        ),
+    )
+
+    opset = vint(2, 13)
+    model = vint(1, 8)
+    model += string(2, "uniinfer")
+    model += message(7, graph)
+    model += message(8, opset)
+    return model
+
+
 def main() -> None:
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     model_path = OUT_DIR / "model.onnx"
@@ -167,6 +209,43 @@ sha256 = "{digest}"
     print(
         f"wrote {model_path.name} "
         f"({model_path.stat().st_size} bytes, sha256 {digest[:12]}...)"
+    )
+
+    vision_path = OUT_DIR / "vision.onnx"
+    vision_path.write_bytes(build_vision_model())
+    vision_digest = hashlib.sha256(vision_path.read_bytes()).hexdigest()
+    vision_manifest = f"""schema_version = 1
+id = "tiny-vision-onnx"
+format = "onnx"
+quantization = "fp32"
+modalities = ["text", "image"]
+streaming_capable = false
+context_len = 64
+tokenizer = "bytes"
+min_vram = "0GiB"
+
+[placement]
+policy = "auto"
+prefer = ["npu", "gpu", "cpu"]
+allow_cpu_fallback = true
+
+[text]
+vocab_size = {VOCAB}
+
+[vision]
+architecture = "onnx_vlm"
+image_token = "<image>"
+
+[[files]]
+path = "vision.onnx"
+sha256 = "{vision_digest}"
+"""
+    (OUT_DIR / "manifest-vision.toml").write_text(
+        vision_manifest, encoding="utf-8", newline="\n"
+    )
+    print(
+        f"wrote {vision_path.name} "
+        f"({vision_path.stat().st_size} bytes, sha256 {vision_digest[:12]}...)"
     )
 
 

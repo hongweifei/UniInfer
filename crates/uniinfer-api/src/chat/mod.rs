@@ -3,6 +3,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use axum::extract::State;
 use axum::response::Response;
+use base64::Engine as _;
 use serde::Deserialize;
 use uniinfer_backends::{ChatMessage as BackendMessage, Sampling};
 use uniinfer_core::CancelToken;
@@ -91,20 +92,33 @@ enum ChatContent {
     Parts(Vec<serde_json::Value>),
 }
 
+#[derive(Debug, Default)]
+struct ParsedContent {
+    text: String,
+    images: Vec<Vec<u8>>,
+}
+
 impl ChatContent {
-    fn into_text(self) -> Result<String, ApiError> {
+    fn into_parts(self, image_marker: &str) -> Result<ParsedContent, ApiError> {
         match self {
-            Self::Text(text) => Ok(text),
+            Self::Text(text) => Ok(ParsedContent {
+                text,
+                images: Vec::new(),
+            }),
             Self::Parts(parts) => {
-                let mut text = String::new();
+                let mut content = ParsedContent::default();
                 for part in parts {
                     match part.get("type").and_then(serde_json::Value::as_str) {
                         Some("text") => {
                             if let Some(value) =
                                 part.get("text").and_then(serde_json::Value::as_str)
                             {
-                                text.push_str(value);
+                                content.text.push_str(value);
                             }
+                        }
+                        Some("image_url") => {
+                            content.images.push(decode_image_part(&part)?);
+                            content.text.push_str(image_marker);
                         }
                         Some(other) => {
                             return Err(ApiError::bad_request(
@@ -120,10 +134,53 @@ impl ChatContent {
                         }
                     }
                 }
-                Ok(text)
+                Ok(content)
             }
         }
     }
+}
+
+const MAX_IMAGE_BYTES: usize = 20 * 1024 * 1024;
+
+fn decode_image_part(part: &serde_json::Value) -> Result<Vec<u8>, ApiError> {
+    let image = part.get("image_url").ok_or_else(|| {
+        ApiError::bad_request("invalid_content", "image_url part has no image_url")
+    })?;
+    let url = image
+        .as_str()
+        .or_else(|| image.get("url").and_then(serde_json::Value::as_str))
+        .ok_or_else(|| ApiError::bad_request("invalid_content", "image_url has no string url"))?;
+    let Some(rest) = url.strip_prefix("data:") else {
+        return Err(ApiError::bad_request(
+            "unsupported_image_url",
+            "only data: image URLs are supported",
+        ));
+    };
+    let Some((meta, payload)) = rest.split_once(',') else {
+        return Err(ApiError::bad_request(
+            "invalid_image_url",
+            "data URL is missing a comma",
+        ));
+    };
+    if !meta.ends_with(";base64") {
+        return Err(ApiError::bad_request(
+            "unsupported_image_url",
+            "data image must be base64 encoded",
+        ));
+    }
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(payload)
+        .map_err(|_| ApiError::bad_request("invalid_image", "image base64 is invalid"))?;
+    if bytes.is_empty() {
+        return Err(ApiError::bad_request("invalid_image", "image is empty"));
+    }
+    if bytes.len() > MAX_IMAGE_BYTES {
+        return Err(ApiError::bad_request(
+            "image_too_large",
+            format!("image is {} bytes, limit is {MAX_IMAGE_BYTES}", bytes.len()),
+        ));
+    }
+    Ok(bytes)
 }
 
 pub(super) struct Generation {
@@ -132,6 +189,7 @@ pub(super) struct Generation {
     pub(super) permit: tokio::sync::OwnedSemaphorePermit,
     pub(super) session_id: String,
     pub(super) prompt: String,
+    pub(super) images: Vec<Vec<u8>>,
     pub(super) prompt_tokens: usize,
     pub(super) max_tokens: usize,
     pub(super) stop: Vec<String>,
@@ -166,24 +224,62 @@ pub(crate) async fn chat(
     } else {
         request.tools.clone().unwrap_or_default()
     };
+    let marker = slot
+        .manifest()
+        .vision
+        .as_ref()
+        .and_then(|vision| vision.image_token.clone())
+        .unwrap_or_default();
+    let mut images = Vec::new();
     let messages = request
         .messages
         .iter()
         .map(|message| {
+            let content = message
+                .content
+                .clone()
+                .map(|content| content.into_parts(&marker))
+                .transpose()?
+                .unwrap_or_default();
+            images.extend(content.images);
             Ok(BackendMessage {
                 role: message.role.clone(),
-                content: message
-                    .content
-                    .clone()
-                    .map(ChatContent::into_text)
-                    .transpose()?
-                    .unwrap_or_default(),
+                content: content.text,
                 tool_calls: message.tool_calls.clone(),
                 tool_call_id: message.tool_call_id.clone(),
                 name: message.name.clone(),
             })
         })
         .collect::<Result<Vec<_>, ApiError>>()?;
+    if !images.is_empty() {
+        if slot.manifest().vision.is_none() {
+            return Err(ApiError::bad_request(
+                "model_does_not_support_images",
+                format!("model {} has no vision configuration", request.model),
+            ));
+        }
+        if marker.is_empty() {
+            return Err(ApiError::bad_request(
+                "invalid_vision_config",
+                "vision.image_token is not configured for this model",
+            ));
+        }
+        if !slot.supports_image_prompt() {
+            return Err(ApiError::bad_request(
+                "unsupported_engine_image",
+                format!(
+                    "engine {} does not expose image chat through /v1/chat/completions",
+                    slot.engine_name()
+                ),
+            ));
+        }
+        if images.len() > 1 {
+            return Err(ApiError::bad_request(
+                "unsupported_content",
+                "only one image per request is supported",
+            ));
+        }
+    }
     let prompt = slot
         .render_chat_with_tools(&messages, &tools, tool_choice.as_ref())
         .map_err(ApiError::from)?;
@@ -205,16 +301,18 @@ pub(crate) async fn chat(
         presence_penalty: request.presence_penalty.unwrap_or(0.0),
     };
     sampling.validate().map_err(ApiError::from)?;
-    let prepared = state
+    let mut prepared = state
         .router
         .prepare_text(&request.model, prompt, request.max_tokens)
         .await
         .map_err(ApiError::from)?;
+    prepared.images = images;
     let PreparedText {
         slot,
         permit,
         session_id,
         prompt,
+        images,
         prompt_tokens,
         max_tokens,
         cancel,
@@ -228,6 +326,7 @@ pub(crate) async fn chat(
         permit,
         session_id,
         prompt,
+        images,
         prompt_tokens,
         max_tokens,
         stop,
@@ -254,4 +353,46 @@ pub(super) fn unix_seconds() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_or(0, |duration| duration.as_secs())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn parts(value: serde_json::Value) -> ChatContent {
+        serde_json::from_value(value).expect("content")
+    }
+
+    #[test]
+    fn data_image_is_decoded_and_marker_inserted() {
+        let content = parts(serde_json::json!([
+            {"type": "text", "text": "look "},
+            {"type": "image_url", "image_url": {"url": "data:image/png;base64,aGk="}},
+            {"type": "text", "text": " now"}
+        ]))
+        .into_parts("<image>")
+        .expect("parse");
+        assert_eq!(content.text, "look <image> now");
+        assert_eq!(content.images, vec![b"hi".to_vec()]);
+    }
+
+    #[test]
+    fn remote_image_url_is_rejected() {
+        let error = parts(serde_json::json!([
+            {"type": "image_url", "image_url": {"url": "https://example.com/a.png"}}
+        ]))
+        .into_parts("<image>")
+        .expect_err("must reject");
+        assert_eq!(error.code, "unsupported_image_url");
+    }
+
+    #[test]
+    fn invalid_base64_is_rejected() {
+        let error = parts(serde_json::json!([
+            {"type": "image_url", "image_url": {"url": "data:image/png;base64,***"}}
+        ]))
+        .into_parts("<image>")
+        .expect_err("must reject");
+        assert_eq!(error.code, "invalid_image");
+    }
 }

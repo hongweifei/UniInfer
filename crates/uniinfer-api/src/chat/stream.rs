@@ -57,6 +57,7 @@ pub(super) async fn stream_response(generation: Generation) -> Result<Response, 
         permit,
         session_id,
         prompt,
+        images,
         max_tokens,
         stop,
         sampling,
@@ -85,8 +86,9 @@ pub(super) async fn stream_response(generation: Generation) -> Result<Response, 
         let mut tool_stream = tool_calls_enabled.then(|| ToolStream::new(task_session.clone()));
         let mut open = true;
         let mut measured_ttft = false;
-        let result = task_slot.generate_with(
+        let result = task_slot.generate_with_images(
             &prompt,
+            &images,
             &cancel,
             GenerationSpec {
                 max_tokens,

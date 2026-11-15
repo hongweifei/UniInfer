@@ -89,7 +89,7 @@ struct Qwen3VlSession {
 
 impl Qwen3VlSession {
     fn run_inner(&self, inputs: &[CoreTensor]) -> Result<Vec<CoreTensor>> {
-        let ids = inputs
+        let mut ids = inputs
             .iter()
             .find(|tensor| tensor.name == "input_ids")
             .and_then(|tensor| match &tensor.data {
@@ -136,6 +136,7 @@ impl Qwen3VlSession {
             let merge = self.preprocessor.merge_size() as i64;
             let tokens =
                 image_tokens.unwrap_or_else(|| ((grid[1] / merge) * (grid[2] / merge)) as usize);
+            ids = expand_image_tokens(ids, self.image_token_id, tokens)?;
             let spans = image_spans(&ids, self.image_token_id).map_err(EngineError::Other)?;
             if spans.iter().map(|(s, e)| e - s).sum::<usize>() != tokens {
                 return Err(EngineError::Other(
@@ -236,6 +237,33 @@ impl EngineSession for Qwen3VlSession {
     fn cancel(&self) {}
 }
 
+/// Expand the tokenizer's single image marker into the processor's merged
+/// image-token count. One image per prompt is the supported contract.
+fn expand_image_tokens(ids: Vec<i64>, image_token: i64, tokens: usize) -> Result<Vec<i64>> {
+    let markers = ids.iter().filter(|id| **id == image_token).count();
+    if markers == 0 {
+        return Err(EngineError::Other(
+            "prompt has no image placeholder token".into(),
+        ));
+    }
+    if markers == tokens {
+        return Ok(ids);
+    }
+    let mut expanded = Vec::with_capacity(ids.len() + tokens);
+    let mut inserted = false;
+    for id in ids {
+        if id == image_token {
+            if !inserted {
+                expanded.extend(std::iter::repeat_n(image_token, tokens));
+                inserted = true;
+            }
+        } else {
+            expanded.push(id);
+        }
+    }
+    Ok(expanded)
+}
+
 fn image_spans(ids: &[i64], image_token: i64) -> std::result::Result<Vec<(usize, usize)>, String> {
     let mut spans = Vec::new();
     let mut start = None;
@@ -259,6 +287,17 @@ mod tests {
     use uniinfer_core::{
         DeviceBudget, DeviceClass, EngineLoadSpec, InferenceEngine, ModelManifest,
     };
+
+    #[test]
+    fn marker_expands_to_processor_token_count() {
+        let expanded = expand_image_tokens(vec![1, 99, 99, 2], 99, 5).expect("expand");
+        assert_eq!(expanded, vec![1, 99, 99, 99, 99, 99, 2]);
+    }
+
+    #[test]
+    fn missing_marker_is_rejected() {
+        assert!(expand_image_tokens(vec![1, 2], 99, 5).is_err());
+    }
 
     #[test]
     #[ignore = "loads the 4 GiB Qwen3-VL-2B fixture"]

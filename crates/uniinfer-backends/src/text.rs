@@ -110,6 +110,21 @@ impl TextGenerator {
         spec: GenerationSpec,
         on_bytes: &mut dyn FnMut(&[u8]) -> bool,
     ) -> Result<GenerationOutput> {
+        self.generate_with_images(session, prompt, &[], cancel, spec, on_bytes)
+    }
+
+    /// Generate from a prompt plus at most one image. The session receives the
+    /// encoded image alongside every forward pass; vision sessions expand the
+    /// image placeholder in `input_ids` to the processor's token count.
+    pub fn generate_with_images(
+        &self,
+        session: &dyn EngineSession,
+        prompt: &str,
+        images: &[Vec<u8>],
+        cancel: &CancelToken,
+        spec: GenerationSpec,
+        on_bytes: &mut dyn FnMut(&[u8]) -> bool,
+    ) -> Result<GenerationOutput> {
         let GenerationSpec {
             max_tokens,
             sampling,
@@ -152,6 +167,15 @@ impl TextGenerator {
         let mask_spec = find_input(session, "attention_mask");
         let logits_spec = find_logits(session)
             .ok_or_else(|| EngineError::Other("model has no float logits output".into()))?;
+        let image_spec = find_image_input(session);
+        if !images.is_empty() && image_spec.is_none() {
+            return Err(EngineError::Other("model has no uint8 image input".into()));
+        }
+        if images.len() > 1 {
+            return Err(EngineError::Other(
+                "only one image per generation is supported".into(),
+            ));
+        }
 
         let mut generated = Vec::with_capacity(max_tokens);
         let mut generated_tokens = Vec::with_capacity(max_tokens);
@@ -177,6 +201,13 @@ impl TextGenerator {
                     mask.name.clone(),
                     vec![1, length],
                     TensorData::I64(vec![1; length]),
+                )?);
+            }
+            if let (Some(spec), Some(image)) = (&image_spec, images.first()) {
+                tensors.push(Tensor::new(
+                    spec.name.clone(),
+                    vec![image.len()],
+                    TensorData::U8(image.clone()),
                 )?);
             }
 
@@ -235,6 +266,14 @@ fn find_i64_input(session: &dyn EngineSession) -> Option<TensorSpec> {
         .cloned()
 }
 
+fn find_image_input(session: &dyn EngineSession) -> Option<TensorSpec> {
+    session
+        .inputs()
+        .iter()
+        .find(|spec| spec.dtype == TensorDtype::U8 && spec.name == "image")
+        .cloned()
+}
+
 fn find_logits(session: &dyn EngineSession) -> Option<TensorSpec> {
     session
         .outputs()
@@ -283,22 +322,31 @@ mod tests {
         inputs: Vec<TensorSpec>,
         outputs: Vec<TensorSpec>,
         seen: Mutex<Vec<Vec<i64>>>,
+        image_bytes: Mutex<Vec<usize>>,
     }
 
     impl Scripted {
         fn new() -> Self {
             Self {
-                inputs: vec![TensorSpec {
-                    name: "input_ids".into(),
-                    dtype: TensorDtype::I64,
-                    shape: vec![Some(1), None],
-                }],
+                inputs: vec![
+                    TensorSpec {
+                        name: "input_ids".into(),
+                        dtype: TensorDtype::I64,
+                        shape: vec![Some(1), None],
+                    },
+                    TensorSpec {
+                        name: "image".into(),
+                        dtype: TensorDtype::U8,
+                        shape: vec![None],
+                    },
+                ],
                 outputs: vec![TensorSpec {
                     name: "logits".into(),
                     dtype: TensorDtype::F32,
                     shape: vec![Some(1), None, Some(256)],
                 }],
                 seen: Mutex::new(Vec::new()),
+                image_bytes: Mutex::new(Vec::new()),
             }
         }
     }
@@ -319,6 +367,11 @@ mod tests {
             };
             let seq = ids.len();
             self.seen.lock().expect("lock").push(ids.clone());
+            if let Some(image) = inputs.iter().find(|tensor| tensor.name == "image")
+                && let TensorData::U8(bytes) = &image.data
+            {
+                self.image_bytes.lock().expect("lock").push(bytes.len());
+            }
             let mut logits = vec![0.0f32; seq * 256];
             for position in 0..seq {
                 let next = (ids[position] + 1) % 256;
@@ -362,6 +415,23 @@ mod tests {
         assert_eq!(seen.len(), 3);
         assert_eq!(seen[0], vec![97, 98]);
         assert_eq!(seen[2], vec![97, 98, 99, 100]);
+    }
+
+    #[test]
+    fn image_is_sent_on_every_forward_pass() {
+        let session = Scripted::new();
+        let generated = generator()
+            .generate_with_images(
+                &session,
+                "ab",
+                &[vec![1, 2, 3]],
+                &CancelToken::new(),
+                GenerationSpec::greedy(2),
+                &mut |_| true,
+            )
+            .expect("generate");
+        assert_eq!(generated.bytes, b"cd");
+        assert_eq!(*session.image_bytes.lock().expect("lock"), vec![3, 3]);
     }
 
     #[test]
