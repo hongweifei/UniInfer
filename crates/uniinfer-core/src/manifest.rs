@@ -152,7 +152,7 @@ pub struct TextConfig {
     pub tokenizer_file: Option<PathBuf>,
 }
 
-/// Audio preprocessing contract for speech models.
+/// Audio preprocessing contract shared by every speech adapter.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AudioConfig {
@@ -164,38 +164,13 @@ pub struct AudioConfig {
     pub input: String,
     #[serde(default = "default_audio_output")]
     pub output: String,
-    /// Adapter selected by the ONNX speech backend.
+    /// Adapter selector for models that need a multi-graph or model-specific
+    /// preprocessing/decoding pipeline.
     #[serde(default)]
     pub architecture: Option<String>,
-    /// Single ONNX graph for CTC-style ASR models.
+    /// Adapter-owned configuration. Core does not interpret these keys.
     #[serde(default)]
-    pub graph_file: Option<PathBuf>,
-    #[serde(default = "default_graph_input")]
-    pub graph_input: String,
-    #[serde(default = "default_graph_output")]
-    pub graph_output: String,
-    #[serde(default = "default_frontend")]
-    pub frontend: String,
-    #[serde(default)]
-    pub blank_token: u32,
-    /// Encoder graph for encoder-decoder ASR models.
-    #[serde(default)]
-    pub encoder_file: Option<PathBuf>,
-    /// Decoder graph for encoder-decoder ASR models.
-    #[serde(default)]
-    pub decoder_file: Option<PathBuf>,
-    /// Decoder graph with KV-cache inputs for encoder-decoder ASR models.
-    #[serde(default)]
-    pub decoder_with_past_file: Option<PathBuf>,
-    /// Tokenizer JSON paired with the ASR graph.
-    #[serde(default)]
-    pub tokenizer_file: Option<PathBuf>,
-    /// Model config JSON (start/EOS/forced decoder ids).
-    #[serde(default)]
-    pub config_file: Option<PathBuf>,
-    /// Maximum generated decoder tokens, before the model context limit.
-    #[serde(default)]
-    pub max_tokens: Option<usize>,
+    pub options: Option<toml::Value>,
 }
 
 fn default_sample_rate() -> u32 {
@@ -214,18 +189,6 @@ fn default_audio_output() -> String {
     "text".into()
 }
 
-fn default_graph_input() -> String {
-    "input_values".into()
-}
-
-fn default_graph_output() -> String {
-    "logits".into()
-}
-
-fn default_frontend() -> String {
-    "raw".into()
-}
-
 impl Default for AudioConfig {
     fn default() -> Self {
         Self {
@@ -234,17 +197,7 @@ impl Default for AudioConfig {
             input: default_audio_input(),
             output: default_audio_output(),
             architecture: None,
-            graph_file: None,
-            graph_input: default_graph_input(),
-            graph_output: default_graph_output(),
-            frontend: default_frontend(),
-            blank_token: 0,
-            encoder_file: None,
-            decoder_file: None,
-            decoder_with_past_file: None,
-            tokenizer_file: None,
-            config_file: None,
-            max_tokens: None,
+            options: None,
         }
     }
 }
@@ -395,40 +348,10 @@ impl ModelManifest {
                     "audio tensor names must not be empty".into(),
                 ));
             }
-            if audio.max_tokens == Some(0) {
+            if audio.architecture.as_deref() == Some("") {
                 return Err(EngineError::ManifestInvalid(
-                    "audio.max_tokens must be positive".into(),
+                    "audio.architecture must not be empty".into(),
                 ));
-            }
-            if audio.graph_input.is_empty() || audio.graph_output.is_empty() {
-                return Err(EngineError::ManifestInvalid(
-                    "audio graph tensor names must not be empty".into(),
-                ));
-            }
-            for path in [
-                &audio.graph_file,
-                &audio.encoder_file,
-                &audio.decoder_file,
-                &audio.decoder_with_past_file,
-                &audio.tokenizer_file,
-                &audio.config_file,
-            ]
-            .into_iter()
-            .flatten()
-            {
-                if path.is_absolute()
-                    || path.components().any(|component| {
-                        matches!(
-                            component,
-                            Component::ParentDir | Component::RootDir | Component::Prefix(_)
-                        )
-                    })
-                {
-                    return Err(EngineError::ManifestInvalid(format!(
-                        "audio file path must stay inside the model directory: {}",
-                        path.display()
-                    )));
-                }
             }
         }
         Ok(())
@@ -524,14 +447,6 @@ sha256 = "0000000000000000000000000000000000000000000000000000000000000000"
         assert_eq!(audio.sample_rate, 16_000);
         assert_eq!(audio.input, "audio");
         assert_eq!(audio.output, "text");
-    }
-
-    #[test]
-    fn rejects_audio_path_escape() {
-        let raw = base().replace("modalities = [\"text\"]", "modalities = [\"audio\"]")
-            + "\n[audio]\nencoder_file = \"../encoder.onnx\"\n";
-        let error = parse(&raw).validate().expect_err("must reject");
-        assert!(error.to_string().contains("model directory"));
     }
 
     #[test]

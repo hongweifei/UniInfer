@@ -7,7 +7,6 @@
 mod cache;
 mod config;
 
-use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use ort::environment::Environment;
@@ -22,7 +21,7 @@ use uniinfer_core::{
 use crate::build_session;
 
 use self::cache::{run_decoder, run_with_past};
-use self::config::WhisperConfig;
+use self::config::{WhisperConfig, options};
 use super::frontend::mel;
 
 pub(crate) fn load(
@@ -35,35 +34,28 @@ pub(crate) fn load(
         .audio
         .as_ref()
         .ok_or_else(|| EngineError::ManifestInvalid("missing [audio] config".into()))?;
-    let encoder = audio_file(
-        &spec.base_dir,
-        audio.encoder_file.as_deref(),
-        "encoder_file",
-    )?;
-    let decoder = audio_file(
-        &spec.base_dir,
-        audio.decoder_file.as_deref(),
-        "decoder_file",
-    )?;
-    let tokenizer_file = audio_file(
-        &spec.base_dir,
-        audio.tokenizer_file.as_deref(),
-        "tokenizer_file",
-    )?;
-    let config_file = audio_file(&spec.base_dir, audio.config_file.as_deref(), "config_file")?;
+    let options = options(audio)?;
+    let encoder = super::options::path(&spec.base_dir, &options.encoder_file, "encoder_file")?;
+    let decoder = super::options::path(&spec.base_dir, &options.decoder_file, "decoder_file")?;
+    let tokenizer_file =
+        super::options::path(&spec.base_dir, &options.tokenizer_file, "tokenizer_file")?;
+    let config_file = super::options::path(&spec.base_dir, &options.config_file, "config_file")?;
     spec.manifest.verify_files(&spec.base_dir)?;
 
     let encoder = build_session(environment, class, &encoder)?;
     let decoder = build_session(environment, class, &decoder)?;
-    let decoder_with_past = audio
+    let decoder_with_past = options
         .decoder_with_past_file
-        .as_deref()
-        .map(|file| build_session(environment, class, &spec.base_dir.join(file)))
+        .as_ref()
+        .map(|file| {
+            super::options::path(&spec.base_dir, file, "decoder_with_past_file")
+                .and_then(|path| build_session(environment, class, &path))
+        })
         .transpose()?;
     let tokenizer = Tokenizer::from_file(&tokenizer_file)
         .map_err(|error| EngineError::LoadFailed(format!("tokenizer: {error}")))?;
     let config = WhisperConfig::load(&config_file)?;
-    let max_tokens = audio
+    let max_tokens = options
         .max_tokens
         .or(config.max_length)
         .unwrap_or(448)
@@ -95,13 +87,6 @@ pub(crate) fn load(
         }],
         cancelled: AtomicBool::new(false),
     })
-}
-
-fn audio_file(base: &Path, file: Option<&Path>, field: &str) -> Result<std::path::PathBuf> {
-    let file = file.ok_or_else(|| {
-        EngineError::ManifestInvalid(format!("audio.{field} is required for ONNX ASR"))
-    })?;
-    Ok(base.join(file))
 }
 
 pub(crate) struct WhisperOnnxSession {

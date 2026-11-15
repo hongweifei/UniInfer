@@ -10,6 +10,8 @@ context_len = 448
 architecture = "whisper"
 sample_rate = 16000
 channels = 1
+
+[audio.options]
 encoder_file = "onnx/encoder_model.onnx"
 decoder_file = "onnx/decoder_model.onnx"
 decoder_with_past_file = "onnx/decoder_with_past_model.onnx"

@@ -1,9 +1,9 @@
 //! Whisper generation config parsed from config.json.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
-use uniinfer_core::{EngineError, Result};
+use uniinfer_core::{AudioConfig, EngineError, Result};
 #[derive(Debug, Clone, Deserialize)]
 pub(super) struct WhisperConfig {
     pub(super) decoder_start_token_id: u32,
@@ -30,4 +30,21 @@ impl WhisperConfig {
         ids.extend(self.forced_decoder_ids.iter().map(|pair| pair[1]));
         ids
     }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct WhisperOptions {
+    pub(super) encoder_file: PathBuf,
+    pub(super) decoder_file: PathBuf,
+    #[serde(default)]
+    pub(super) decoder_with_past_file: Option<PathBuf>,
+    pub(super) tokenizer_file: PathBuf,
+    pub(super) config_file: PathBuf,
+    #[serde(default)]
+    pub(super) max_tokens: Option<usize>,
+}
+
+pub(super) fn options(audio: &AudioConfig) -> Result<WhisperOptions> {
+    super::super::options::parse(audio)
 }

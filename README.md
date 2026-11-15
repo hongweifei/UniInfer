@@ -241,6 +241,8 @@ CTC 单图模型示例：
 [audio]
 architecture = "ctc"
 sample_rate = 16000
+
+[audio.options]
 graph_file = "model.onnx"
 graph_input = "input_values"
 graph_output = "logits"

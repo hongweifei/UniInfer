@@ -11,6 +11,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use ort::environment::Environment;
 use ort::session::Session;
 use ort::value::Tensor as OrtTensor;
+use serde::Deserialize;
 use tokenizers::Tokenizer;
 use uniinfer_core::{
     DeviceClass, EngineError, EngineLoadSpec, EngineSession, Result, Tensor, TensorData,
@@ -20,6 +21,7 @@ use uniinfer_core::{
 use crate::build_session;
 
 use super::decode::ctc_tokens;
+use super::options;
 
 pub(crate) fn load(
     environment: &Environment,
@@ -31,48 +33,44 @@ pub(crate) fn load(
         .audio
         .as_ref()
         .ok_or_else(|| EngineError::ManifestInvalid("missing [audio] config".into()))?;
-    if audio.frontend != "raw" {
+    let options: CtcOptions = options::parse(audio)?;
+    if options.frontend != "raw" {
         return Err(EngineError::UnsupportedEngine(format!(
             "CTC frontend {:?}; only raw audio is registered",
-            audio.frontend
+            options.frontend
         )));
     }
-    let graph = audio
-        .graph_file
-        .as_deref()
-        .map(|file| spec.base_dir.join(file))
-        .or_else(|| {
-            spec.manifest
-                .files
-                .first()
-                .map(|file| spec.base_dir.join(&file.path))
-        })
-        .ok_or_else(|| EngineError::ManifestInvalid("audio.graph_file is required".into()))?;
-    let tokenizer_file = audio
-        .tokenizer_file
-        .as_deref()
-        .map(|file| spec.base_dir.join(file))
-        .ok_or_else(|| EngineError::ManifestInvalid("audio.tokenizer_file is required".into()))?;
+    let graph = match &options.graph_file {
+        Some(file) => options::path(&spec.base_dir, file, "graph_file")?,
+        None => spec
+            .manifest
+            .files
+            .first()
+            .map(|file| options::path(&spec.base_dir, &file.path, "graph_file"))
+            .transpose()?
+            .ok_or_else(|| EngineError::ManifestInvalid("audio.graph_file is required".into()))?,
+    };
+    let tokenizer_file = options::path(&spec.base_dir, &options.tokenizer_file, "tokenizer_file")?;
     spec.manifest.verify_files(&spec.base_dir)?;
     let session = build_session(environment, class, &graph)?;
     if !session
         .inputs()
         .iter()
-        .any(|input| input.name() == audio.graph_input)
+        .any(|input| input.name() == options.graph_input)
     {
         return Err(EngineError::ManifestInvalid(format!(
             "CTC graph has no input {:?}",
-            audio.graph_input
+            options.graph_input
         )));
     }
     if !session
         .outputs()
         .iter()
-        .any(|output| output.name() == audio.graph_output)
+        .any(|output| output.name() == options.graph_output)
     {
         return Err(EngineError::ManifestInvalid(format!(
             "CTC graph has no output {:?}",
-            audio.graph_output
+            options.graph_output
         )));
     }
     let tokenizer = Tokenizer::from_file(&tokenizer_file)
@@ -83,9 +81,9 @@ pub(crate) fn load(
         state: Mutex::new(CtcState {
             session,
             tokenizer,
-            graph_input: audio.graph_input.clone(),
-            graph_output: audio.graph_output.clone(),
-            blank_token: audio.blank_token,
+            graph_input: options.graph_input.clone(),
+            graph_output: options.graph_output.clone(),
+            blank_token: options.blank_token,
         }),
         input_name: input_name.clone(),
         output_name: output_name.clone(),
@@ -101,6 +99,34 @@ pub(crate) fn load(
         }],
         cancelled: AtomicBool::new(false),
     })
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct CtcOptions {
+    #[serde(default)]
+    graph_file: Option<std::path::PathBuf>,
+    #[serde(default = "default_graph_input")]
+    graph_input: String,
+    #[serde(default = "default_graph_output")]
+    graph_output: String,
+    tokenizer_file: std::path::PathBuf,
+    #[serde(default = "default_frontend")]
+    frontend: String,
+    #[serde(default)]
+    blank_token: u32,
+}
+
+fn default_graph_input() -> String {
+    "input_values".into()
+}
+
+fn default_graph_output() -> String {
+    "logits".into()
+}
+
+fn default_frontend() -> String {
+    "raw".into()
 }
 
 pub(crate) struct CtcOnnxSession {

@@ -9,6 +9,7 @@ use uniinfer_core::{DeviceClass, EngineError, EngineLoadSpec, EngineSession, Res
 mod ctc;
 mod decode;
 mod frontend;
+mod options;
 mod whisper;
 
 pub(crate) fn load(
