@@ -170,6 +170,9 @@ pub struct AudioConfig {
     /// Decoder graph for encoder-decoder ASR models.
     #[serde(default)]
     pub decoder_file: Option<PathBuf>,
+    /// Decoder graph with KV-cache inputs for encoder-decoder ASR models.
+    #[serde(default)]
+    pub decoder_with_past_file: Option<PathBuf>,
     /// Tokenizer JSON paired with the ASR graph.
     #[serde(default)]
     pub tokenizer_file: Option<PathBuf>,
@@ -206,6 +209,7 @@ impl Default for AudioConfig {
             output: default_audio_output(),
             encoder_file: None,
             decoder_file: None,
+            decoder_with_past_file: None,
             tokenizer_file: None,
             config_file: None,
             max_tokens: None,
@@ -367,6 +371,7 @@ impl ModelManifest {
             for path in [
                 &audio.encoder_file,
                 &audio.decoder_file,
+                &audio.decoder_with_past_file,
                 &audio.tokenizer_file,
                 &audio.config_file,
             ]

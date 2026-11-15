@@ -11,6 +11,7 @@ sample_rate = 16000
 channels = 1
 encoder_file = "onnx/encoder_model.onnx"
 decoder_file = "onnx/decoder_model.onnx"
+decoder_with_past_file = "onnx/decoder_with_past_model.onnx"
 tokenizer_file = "tokenizer.json"
 config_file = "config.json"
 max_tokens = 128
@@ -25,6 +26,10 @@ sha256 = "ee247387567b1f9dea4d6f7d077d852ff2648038e5f50ecb6a744aff3db74856"
 [[files]]
 path = "onnx/decoder_model.onnx"
 sha256 = "018fba571ba7408856ae35c1d5577b6eeb4905d2fdec9bd20b9f8debb815bf96"
+
+[[files]]
+path = "onnx/decoder_with_past_model.onnx"
+sha256 = "10a99f03f47d387f211edd5bde5afb39e56fba12370e3a90e48d95e36e94af95"
 
 [[files]]
 path = "tokenizer.json"

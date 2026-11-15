@@ -233,7 +233,7 @@ curl -X POST http://127.0.0.1:8080/v1/audio/transcriptions \
   -F file=@hello.wav
 ```
 
-`OnnxEngine` 检测到清单中的 encoder/decoder 文件后使用 ONNX encoder/decoder ASR 适配器；`/v1/audio/transcriptions` 和 `AudioSlot` 不依赖具体引擎。输入 WAV 必须是清单 `[audio].sample_rate` 指定的采样率、单声道、PCM16。
+`OnnxEngine` 检测到清单中的 encoder/decoder 文件后使用 ONNX encoder/decoder ASR 适配器；存在 `decoder_with_past_file` 时复用 KV cache，否则回退到每步重算完整 decoder 前缀。`/v1/audio/transcriptions` 和 `AudioSlot` 不依赖具体引擎。输入 WAV 必须是清单 `[audio].sample_rate` 指定的采样率、单声道、PCM16。
 
 可选 GGML 路径：
 
