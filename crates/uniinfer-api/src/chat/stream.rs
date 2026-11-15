@@ -93,6 +93,9 @@ pub(super) async fn stream_response(generation: Generation) -> Result<Response, 
         };
         task_state
             .router
+            .record_generation(&metric_model, started.elapsed());
+        task_state
+            .router
             .record_completion(&metric_model, completion_tokens);
         let _ = tx.blocking_send(StreamEvent::Finish(finish));
         if include_usage {

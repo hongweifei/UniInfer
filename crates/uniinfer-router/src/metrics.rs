@@ -15,6 +15,10 @@ pub struct ModelMetrics {
     pub ttft_micros: u64,
     pub ttft_samples: u64,
     pub cancellations: u64,
+    pub queue_micros: u64,
+    pub queue_samples: u64,
+    pub generation_micros: u64,
+    pub generation_samples: u64,
     pub asr_requests: u64,
     pub asr_audio_seconds: f64,
     pub asr_compute_micros: u64,
@@ -28,6 +32,10 @@ pub struct MetricsSnapshot {
     pub ttft_micros: u64,
     pub ttft_samples: u64,
     pub cancellations: u64,
+    pub queue_micros: u64,
+    pub queue_samples: u64,
+    pub generation_micros: u64,
+    pub generation_samples: u64,
     pub asr_requests: u64,
     pub asr_audio_seconds: f64,
     pub asr_compute_micros: u64,
@@ -42,6 +50,10 @@ pub struct Metrics {
     ttft_micros: AtomicU64,
     ttft_samples: AtomicU64,
     cancellations: AtomicU64,
+    queue_micros: AtomicU64,
+    queue_samples: AtomicU64,
+    generation_micros: AtomicU64,
+    generation_samples: AtomicU64,
     asr_requests: AtomicU64,
     asr_audio_micros: AtomicU64,
     asr_compute_micros: AtomicU64,
@@ -82,6 +94,28 @@ impl Metrics {
         }
     }
 
+    pub fn queue(&self, model: &str, elapsed: Duration) {
+        let micros = elapsed.as_micros().min(u128::from(u64::MAX)) as u64;
+        self.queue_micros.fetch_add(micros, Ordering::Relaxed);
+        self.queue_samples.fetch_add(1, Ordering::Relaxed);
+        if let Ok(mut models) = self.models.lock() {
+            let entry = models.entry(model.to_owned()).or_default();
+            entry.queue_micros += micros;
+            entry.queue_samples += 1;
+        }
+    }
+
+    pub fn generation(&self, model: &str, elapsed: Duration) {
+        let micros = elapsed.as_micros().min(u128::from(u64::MAX)) as u64;
+        self.generation_micros.fetch_add(micros, Ordering::Relaxed);
+        self.generation_samples.fetch_add(1, Ordering::Relaxed);
+        if let Ok(mut models) = self.models.lock() {
+            let entry = models.entry(model.to_owned()).or_default();
+            entry.generation_micros += micros;
+            entry.generation_samples += 1;
+        }
+    }
+
     pub fn asr(&self, model: &str, audio_seconds: f64, elapsed: Duration) {
         let audio_micros = (audio_seconds.max(0.0) * 1_000_000.0) as u64;
         let compute_micros = elapsed.as_micros().min(u128::from(u64::MAX)) as u64;
@@ -118,6 +152,10 @@ impl Metrics {
             ttft_micros: self.ttft_micros.load(Ordering::Relaxed),
             ttft_samples: self.ttft_samples.load(Ordering::Relaxed),
             cancellations: self.cancellations.load(Ordering::Relaxed),
+            queue_micros: self.queue_micros.load(Ordering::Relaxed),
+            queue_samples: self.queue_samples.load(Ordering::Relaxed),
+            generation_micros: self.generation_micros.load(Ordering::Relaxed),
+            generation_samples: self.generation_samples.load(Ordering::Relaxed),
             asr_requests: self.asr_requests.load(Ordering::Relaxed),
             asr_audio_seconds: self.asr_audio_micros.load(Ordering::Relaxed) as f64 / 1_000_000.0,
             asr_compute_micros: self.asr_compute_micros.load(Ordering::Relaxed),
@@ -139,5 +177,12 @@ mod tests {
         assert!((snapshot.asr_audio_seconds - 2.0).abs() < 1e-9);
         assert_eq!(snapshot.asr_compute_micros, 500_000);
         assert_eq!(snapshot.models["whisper"].asr_requests, 1);
+        metrics.queue("whisper", Duration::from_millis(2));
+        metrics.generation("whisper", Duration::from_millis(3));
+        let snapshot = metrics.snapshot();
+        assert_eq!(snapshot.queue_samples, 1);
+        assert_eq!(snapshot.queue_micros, 2_000);
+        assert_eq!(snapshot.generation_samples, 1);
+        assert_eq!(snapshot.generation_micros, 3_000);
     }
 }

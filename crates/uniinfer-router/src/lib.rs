@@ -211,6 +211,7 @@ impl ModelRouter {
         requested: Option<usize>,
         wait: Option<Duration>,
     ) -> std::result::Result<PreparedText, RouterError> {
+        let queued = Instant::now();
         let slot = self
             .slot(model)
             .ok_or_else(|| RouterError::ModelNotFound(model.to_owned()))?;
@@ -230,6 +231,7 @@ impl ModelRouter {
             Some(wait) => slot.acquire(wait).await.map_err(RouterError::from)?,
             None => slot.try_acquire().ok_or(RouterError::Busy)?,
         };
+        self.metrics.queue(&slot.manifest().id, queued.elapsed());
         let session_id = next_session_id();
         let cancel = CancelToken::new();
         let model = slot.manifest().id.clone();
@@ -331,6 +333,10 @@ impl ModelRouter {
 
     pub fn record_asr(&self, model: &str, audio_seconds: f64, elapsed: Duration) {
         self.metrics.asr(model, audio_seconds, elapsed);
+    }
+
+    pub fn record_generation(&self, model: &str, elapsed: Duration) {
+        self.metrics.generation(model, elapsed);
     }
 
     #[must_use]

@@ -68,6 +68,10 @@ async fn metrics(State(state): State<AppState>) -> Json<Value> {
     Json(json!({
         "active_requests": state.router.active_count(),
         "loaded_sessions": state.runtime.active_sessions(),
+        "loaded_models": {
+            "text": state.router.slots().len(),
+            "audio": state.audio_slots.lock().map(|slots| slots.len()).unwrap_or(0),
+        },
         "requests": state.router.metrics(),
     }))
 }

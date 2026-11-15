@@ -417,7 +417,7 @@ curl -N http://127.0.0.1:8080/v1/chat/completions \
 
 `finish_reason` 区分 `stop`（EOS 或 stop 串）与 `length`（达到 max_tokens）。流式请求可用 `stream_options.include_usage: true` 在 `[DONE]` 前收到包含 prompt/completion/total tokens 的 usage chunk。
 
-`/metrics` 暴露 active/loaded、请求数、prompt/completion tokens、TTFT 样本与均值、ASR 音频时长/计算耗时，以及按模型的计数。
+`/metrics` 暴露 active/loaded、已加载文本/音频模型数、请求数、队列等待、生成耗时、prompt/completion tokens、TTFT、ASR 音频时长/计算耗时，以及按模型的计数。
 
 图像、视频与 TTS 端点尚未实现。请求会得到稳定错误，而不是伪造结果：
 
