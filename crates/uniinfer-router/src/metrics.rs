@@ -15,6 +15,9 @@ pub struct ModelMetrics {
     pub ttft_micros: u64,
     pub ttft_samples: u64,
     pub cancellations: u64,
+    pub asr_requests: u64,
+    pub asr_audio_seconds: f64,
+    pub asr_compute_micros: u64,
 }
 
 #[derive(Debug, Clone, Default, Serialize)]
@@ -25,6 +28,9 @@ pub struct MetricsSnapshot {
     pub ttft_micros: u64,
     pub ttft_samples: u64,
     pub cancellations: u64,
+    pub asr_requests: u64,
+    pub asr_audio_seconds: f64,
+    pub asr_compute_micros: u64,
     pub models: BTreeMap<String, ModelMetrics>,
 }
 
@@ -36,6 +42,9 @@ pub struct Metrics {
     ttft_micros: AtomicU64,
     ttft_samples: AtomicU64,
     cancellations: AtomicU64,
+    asr_requests: AtomicU64,
+    asr_audio_micros: AtomicU64,
+    asr_compute_micros: AtomicU64,
     models: Mutex<BTreeMap<String, ModelMetrics>>,
 }
 
@@ -73,6 +82,22 @@ impl Metrics {
         }
     }
 
+    pub fn asr(&self, model: &str, audio_seconds: f64, elapsed: Duration) {
+        let audio_micros = (audio_seconds.max(0.0) * 1_000_000.0) as u64;
+        let compute_micros = elapsed.as_micros().min(u128::from(u64::MAX)) as u64;
+        self.asr_requests.fetch_add(1, Ordering::Relaxed);
+        self.asr_audio_micros
+            .fetch_add(audio_micros, Ordering::Relaxed);
+        self.asr_compute_micros
+            .fetch_add(compute_micros, Ordering::Relaxed);
+        if let Ok(mut models) = self.models.lock() {
+            let entry = models.entry(model.to_owned()).or_default();
+            entry.asr_requests += 1;
+            entry.asr_audio_seconds += audio_seconds.max(0.0);
+            entry.asr_compute_micros += compute_micros;
+        }
+    }
+
     pub fn cancelled(&self, model: &str) {
         self.cancellations.fetch_add(1, Ordering::Relaxed);
         if let Ok(mut models) = self.models.lock() {
@@ -93,7 +118,26 @@ impl Metrics {
             ttft_micros: self.ttft_micros.load(Ordering::Relaxed),
             ttft_samples: self.ttft_samples.load(Ordering::Relaxed),
             cancellations: self.cancellations.load(Ordering::Relaxed),
+            asr_requests: self.asr_requests.load(Ordering::Relaxed),
+            asr_audio_seconds: self.asr_audio_micros.load(Ordering::Relaxed) as f64 / 1_000_000.0,
+            asr_compute_micros: self.asr_compute_micros.load(Ordering::Relaxed),
             models,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn records_asr_audio_and_compute_time() {
+        let metrics = Metrics::default();
+        metrics.asr("whisper", 2.0, Duration::from_millis(500));
+        let snapshot = metrics.snapshot();
+        assert_eq!(snapshot.asr_requests, 1);
+        assert!((snapshot.asr_audio_seconds - 2.0).abs() < 1e-9);
+        assert_eq!(snapshot.asr_compute_micros, 500_000);
+        assert_eq!(snapshot.models["whisper"].asr_requests, 1);
     }
 }

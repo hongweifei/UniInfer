@@ -42,12 +42,17 @@ pub(crate) async fn transcribe(
         ApiError::not_found("model_not_found", format!("model {model} is not loaded"))
     })?;
     let samples = decode_wav_mono(&audio, slot.audio_config().sample_rate)?;
+    let audio_seconds = samples.len() as f64 / f64::from(slot.audio_config().sample_rate);
     let permit = slot.acquire(state.router.queue_timeout()).await?;
+    let started = std::time::Instant::now();
     let text = tokio::task::spawn_blocking(move || {
         let _permit = permit;
         slot.transcribe(samples)
     })
     .await
     .map_err(|_| ApiError::internal("transcription task panicked"))??;
+    state
+        .router
+        .record_asr(&model, audio_seconds, started.elapsed());
     Ok(Json(json!({"text": text})))
 }

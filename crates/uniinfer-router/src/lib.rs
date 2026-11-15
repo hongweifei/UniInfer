@@ -245,6 +245,10 @@ impl ModelRouter {
         self.metrics.cancelled(model);
     }
 
+    pub fn record_asr(&self, model: &str, audio_seconds: f64, elapsed: Duration) {
+        self.metrics.asr(model, audio_seconds, elapsed);
+    }
+
     #[must_use]
     pub fn active_guard(&self) -> ActiveGuard {
         ActiveGuard::new(Arc::clone(&self.active))
