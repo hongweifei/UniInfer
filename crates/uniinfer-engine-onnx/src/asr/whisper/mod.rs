@@ -141,8 +141,7 @@ impl EngineSession for WhisperOnnxSession {
             .state
             .lock()
             .map_err(|_| EngineError::Other("whisper onnx state lock poisoned".into()))?;
-        let features = mel::log_mel(samples, state.sample_rate)?;
-        let text = state.transcribe(&features, &self.cancelled)?;
+        let text = state.transcribe_audio(samples, &self.cancelled)?;
         let bytes = text.trim().as_bytes().to_vec();
         Ok(vec![Tensor::new(
             self.output_name.clone(),
@@ -160,7 +159,26 @@ impl EngineSession for WhisperOnnxSession {
 }
 
 impl WhisperState {
-    fn transcribe(&mut self, features: &[f32], cancelled: &AtomicBool) -> Result<String> {
+    fn transcribe_audio(&mut self, samples: &[f32], cancelled: &AtomicBool) -> Result<String> {
+        if samples.is_empty() {
+            return Err(EngineError::InvalidAudio("audio is empty".into()));
+        }
+        let mut parts = Vec::new();
+        for chunk in samples.chunks(mel::N_SAMPLES) {
+            if cancelled.load(Ordering::SeqCst) {
+                return Err(EngineError::Cancelled);
+            }
+            let features = mel::log_mel(chunk, self.sample_rate)?;
+            let text = self.transcribe_features(&features, cancelled)?;
+            let text = text.trim();
+            if !text.is_empty() {
+                parts.push(text.to_owned());
+            }
+        }
+        Ok(parts.join(" "))
+    }
+
+    fn transcribe_features(&mut self, features: &[f32], cancelled: &AtomicBool) -> Result<String> {
         let encoder_input = self
             .encoder
             .inputs()

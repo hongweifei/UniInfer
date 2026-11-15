@@ -233,7 +233,7 @@ curl -X POST http://127.0.0.1:8080/v1/audio/transcriptions \
   -F file=@hello.wav
 ```
 
-`OnnxEngine` 不包含具体 ASR 模型分支：清单 `[audio].architecture` 选择 adapter。`whisper` 走 encoder/decoder ASR，存在 `decoder_with_past_file` 时复用 KV cache；`ctc` 走单图 raw audio → logits + CTC 解码，tokenizer、graph 输入输出名与 blank id 都由清单声明。`/v1/audio/transcriptions` 和 `AudioSlot` 不依赖具体引擎。输入 WAV 必须是清单 `[audio].sample_rate` 指定的采样率、单声道、PCM16。
+`OnnxEngine` 不包含具体 ASR 模型分支：清单 `[audio].architecture` 选择 adapter。`whisper` 走 encoder/decoder ASR，存在 `decoder_with_past_file` 时复用 KV cache；超过 30 秒的音频按 30 秒分块转写并拼接文本，不再静默截断。`ctc` 走单图 raw audio → logits + CTC 解码，tokenizer、graph 输入输出名与 blank id 都由清单声明。`/v1/audio/transcriptions` 和 `AudioSlot` 不依赖具体引擎。输入 WAV 必须是清单 `[audio].sample_rate` 指定的采样率、单声道、PCM16。
 
 CTC 单图模型示例：
 
