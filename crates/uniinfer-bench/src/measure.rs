@@ -48,19 +48,21 @@ pub(crate) fn run(
     let mut ttft_total = 0.0;
     let mut total_total = 0.0;
     let mut generated = 0usize;
+    let mut generated_tokens = 0usize;
 
     for _ in 0..iterations {
         let token = CancelToken::new();
         let start = Instant::now();
         let mut first_byte = None;
         let mut bytes = 0usize;
-        slot.generate(prompt, max_tokens, &token, &mut |chunk| {
+        let output = slot.generate(prompt, max_tokens, &token, &mut |chunk| {
             if first_byte.is_none() {
                 first_byte = Some(start.elapsed());
             }
             bytes += chunk.len();
             true
         })?;
+        generated_tokens += output.tokens;
         let elapsed = start.elapsed();
         ttft_total += first_byte.unwrap_or(elapsed).as_secs_f64() * 1000.0;
         total_total += elapsed.as_secs_f64() * 1000.0;
@@ -93,7 +95,7 @@ pub(crate) fn run(
         generated_bytes: generated,
         ttft_ms,
         total_ms,
-        tokens_per_second: (generated as f64 / iterations as f64) / decode_seconds,
+        tokens_per_second: (generated_tokens as f64 / iterations as f64) / decode_seconds,
         peak_rss_bytes: current_process_memory(),
     };
 

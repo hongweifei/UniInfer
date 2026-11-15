@@ -6,8 +6,8 @@ use std::time::Duration;
 
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use uniinfer_backends::{
-    ByteTokenizer, ChatMessage, ChatTemplate, HuggingFaceTokenizer, TextGenerator, Tokenizer,
-    fallback_prompt,
+    ByteTokenizer, ChatMessage, ChatTemplate, GenerationOutput, HuggingFaceTokenizer,
+    TextGenerator, Tokenizer, fallback_prompt,
 };
 use uniinfer_core::{Device, EngineError, EngineSession, ModelManifest, PlacementPlan, Result};
 use uniinfer_registry::{EngineRegistry, SessionLease};
@@ -158,7 +158,7 @@ impl ModelSlot {
         max_tokens: usize,
         cancel: &CancelToken,
         on_bytes: &mut dyn FnMut(&[u8]) -> bool,
-    ) -> Result<Vec<u8>> {
+    ) -> Result<GenerationOutput> {
         self.generator
             .generate(self.session(), prompt, max_tokens, cancel, on_bytes)
     }
@@ -197,9 +197,10 @@ mod tests {
     #[test]
     fn generate_uses_manifest_context() {
         let (_runtime, slot) = slot();
-        let bytes = slot
+        let output = slot
             .generate("ab", 3, &CancelToken::new(), &mut |_| true)
             .expect("generate");
-        assert_eq!(bytes, b"cde");
+        assert_eq!(output.bytes, b"cde");
+        assert_eq!(output.tokens, 3);
     }
 }

@@ -83,6 +83,7 @@ async fn chat_completion_returns_generated_bytes() {
     assert_eq!(response.status(), StatusCode::OK);
     let body = body_json(response).await;
     assert_eq!(body["choices"][0]["message"]["content"], "cde");
+    assert_eq!(body["usage"]["completion_tokens"], 3);
 }
 
 #[tokio::test]
