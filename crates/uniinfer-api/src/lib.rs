@@ -1,5 +1,6 @@
 //! HTTP surface for the text service.
 
+mod api_config;
 mod audio;
 mod auth;
 mod chat;
@@ -16,7 +17,8 @@ use std::io;
 use axum::Router;
 use tokio::net::TcpListener;
 
-pub use state::{ApiConfig, AppState};
+pub use api_config::ApiConfig;
+pub use state::AppState;
 
 /// Serve a prebuilt router on an existing listener.
 pub async fn serve_listener(listener: TcpListener, app: Router) -> io::Result<()> {
