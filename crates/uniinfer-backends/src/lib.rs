@@ -6,9 +6,11 @@ pub mod sampling;
 pub mod stop;
 pub mod text;
 pub mod tokenizer;
+pub mod tool_call;
 pub mod utf8;
 
 pub use chat_template::{ChatMessage, ChatTemplate, fallback_prompt};
 pub use sampling::Sampling;
 pub use text::{FinishReason, GenerationOutput, GenerationSpec, TextGenerator};
 pub use tokenizer::{ByteTokenizer, HuggingFaceTokenizer, Tokenizer};
+pub use tool_call::{ParsedToolCalls, ToolCall, parse as parse_tool_calls};

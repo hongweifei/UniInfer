@@ -3178,6 +3178,7 @@ dependencies = [
 name = "uniinfer-service"
 version = "0.0.0"
 dependencies = [
+ "serde_json",
  "tokio",
  "tracing",
  "uniinfer-backends",

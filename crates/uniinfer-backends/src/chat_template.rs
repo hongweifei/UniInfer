@@ -12,6 +12,12 @@ use uniinfer_core::{EngineError, Result};
 pub struct ChatMessage {
     pub role: String,
     pub content: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tool_calls: Option<serde_json::Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tool_call_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
 }
 
 /// Compiled chat template loaded from `tokenizer_config.json`.
@@ -53,6 +59,16 @@ impl ChatTemplate {
 
     /// Render messages with `add_generation_prompt = true`.
     pub fn render(&self, messages: &[ChatMessage]) -> Result<String> {
+        self.render_with_tools(messages, &[], None)
+    }
+
+    /// Render messages with optional OpenAI-style tool definitions.
+    pub fn render_with_tools(
+        &self,
+        messages: &[ChatMessage],
+        tools: &[serde_json::Value],
+        tool_choice: Option<&serde_json::Value>,
+    ) -> Result<String> {
         let template = self
             .environment
             .get_template("chat")
@@ -61,7 +77,10 @@ impl ChatTemplate {
             .render(context! {
                 messages => Value::from(Serde(messages)),
                 add_generation_prompt => true,
-                tools => Value::from(()),
+                tools => Value::from(Serde(tools)),
+                tool_choice => tool_choice
+                    .map(|value| Value::from(Serde(value)))
+                    .unwrap_or(Value::from(())),
             })
             .map_err(|error| EngineError::Other(format!("render chat template: {error}")))
     }
@@ -102,6 +121,9 @@ mod tests {
             .render(&[ChatMessage {
                 role: "user".into(),
                 content: "hi".into(),
+                tool_calls: None,
+                tool_call_id: None,
+                name: None,
             }])
             .expect("render");
         assert_eq!(prompt, "<user>hi<assistant>");
@@ -113,14 +135,23 @@ mod tests {
             ChatMessage {
                 role: "user".into(),
                 content: "first".into(),
+                tool_calls: None,
+                tool_call_id: None,
+                name: None,
             },
             ChatMessage {
                 role: "assistant".into(),
                 content: "answer".into(),
+                tool_calls: None,
+                tool_call_id: None,
+                name: None,
             },
             ChatMessage {
                 role: "user".into(),
                 content: "second".into(),
+                tool_calls: None,
+                tool_call_id: None,
+                name: None,
             },
         ])
         .expect("prompt");

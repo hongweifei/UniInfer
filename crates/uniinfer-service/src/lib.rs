@@ -271,8 +271,18 @@ impl ModelSlot {
 
     /// Render chat messages with the model template, or the fallback prompt.
     pub fn render_chat(&self, messages: &[ChatMessage]) -> Result<String> {
+        self.render_chat_with_tools(messages, &[], None)
+    }
+
+    /// Render chat messages with OpenAI-style tools.
+    pub fn render_chat_with_tools(
+        &self,
+        messages: &[ChatMessage],
+        tools: &[serde_json::Value],
+        tool_choice: Option<&serde_json::Value>,
+    ) -> Result<String> {
         match &self.chat_template {
-            Some(template) => template.render(messages),
+            Some(template) => template.render_with_tools(messages, tools, tool_choice),
             None => fallback_prompt(messages),
         }
     }
