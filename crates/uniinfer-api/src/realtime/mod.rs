@@ -8,14 +8,19 @@ use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use futures_util::{SinkExt, StreamExt};
 use serde::Deserialize;
-use serde_json::{Value, json};
+use serde_json::json;
 use tokio::sync::mpsc;
-use uniinfer_core::{CancelToken, EngineError};
+use uniinfer_core::CancelToken;
 use uniinfer_service::ModelSlot;
 
 use crate::state::AppState;
-use uniinfer_backends::audio::{EnergyVad, FRAME_BYTES, VadEvent};
-use uniinfer_backends::utf8::Utf8Decoder;
+
+mod audio;
+mod generation;
+
+use audio::handle_audio;
+use generation::spawn_response;
+use uniinfer_backends::audio::EnergyVad;
 
 /// WebSocket entry point for the realtime session protocol.
 pub(crate) async fn realtime(
@@ -51,13 +56,13 @@ enum ClientEvent {
     ResponseCancel,
 }
 
-struct SessionState {
+pub(super) struct SessionState {
     id: String,
     prompt: Option<String>,
     slot: Option<Arc<ModelSlot>>,
-    active: Option<CancelToken>,
-    audio_enabled: bool,
-    vad: EnergyVad,
+    pub(super) active: Option<CancelToken>,
+    pub(super) audio_enabled: bool,
+    pub(super) vad: EnergyVad,
 }
 
 impl Default for SessionState {
@@ -74,7 +79,7 @@ impl Default for SessionState {
 }
 
 static NEXT_SESSION: AtomicU64 = AtomicU64::new(1);
-static NEXT_RESPONSE: AtomicU64 = AtomicU64::new(1);
+pub(super) static NEXT_RESPONSE: AtomicU64 = AtomicU64::new(1);
 
 async fn session(socket: WebSocket, state: AppState) {
     let (mut sink, mut incoming) = socket.split();
@@ -115,51 +120,6 @@ async fn session(socket: WebSocket, state: AppState) {
                 }
             }
         }
-    }
-}
-
-async fn handle_audio(
-    tx: &mpsc::Sender<String>,
-    session: &mut SessionState,
-    frame: &[u8],
-) -> Result<(), String> {
-    if !session.audio_enabled {
-        return tx
-            .send(error_event(
-                "unsupported_channel",
-                "session.start did not enable audio",
-            ))
-            .await
-            .map_err(|_| "channel closed".to_string());
-    }
-    if frame.len() != FRAME_BYTES {
-        return tx
-            .send(error_event(
-                "invalid_audio_frame",
-                &format!("expected {FRAME_BYTES} bytes of 16 kHz PCM16"),
-            ))
-            .await
-            .map_err(|_| "channel closed".to_string());
-    }
-
-    match session.vad.push(frame) {
-        Some(VadEvent::SpeechStarted) => {
-            tx.send(json!({"type": "input.speech.started"}).to_string())
-                .await
-                .map_err(|_| "channel closed".to_string())?;
-            if let Some(token) = session.active.take() {
-                token.cancel();
-                tx.send(json!({"type": "response.cancelled", "reason": "barge_in"}).to_string())
-                    .await
-                    .map_err(|_| "channel closed".to_string())?;
-            }
-            Ok(())
-        }
-        Some(VadEvent::SpeechStopped) => tx
-            .send(json!({"type": "input.speech.stopped"}).to_string())
-            .await
-            .map_err(|_| "channel closed".to_string()),
-        None => Ok(()),
     }
 }
 
@@ -277,67 +237,6 @@ async fn handle_client(
             Ok(())
         }
     }
-}
-
-fn spawn_response(
-    slot: Arc<ModelSlot>,
-    tx: mpsc::Sender<String>,
-    permit: tokio::sync::OwnedSemaphorePermit,
-    cancel: CancelToken,
-    prompt: String,
-    max_tokens: Option<usize>,
-    active: uniinfer_router::ActiveGuard,
-) {
-    let response_id = format!("resp-{:x}", NEXT_RESPONSE.fetch_add(1, Ordering::Relaxed));
-    let max_tokens = max_tokens.unwrap_or(16);
-    tokio::task::spawn_blocking(move || {
-        let _permit = permit;
-        let _active = active;
-        let mut decoder = Utf8Decoder::new();
-        let send = |event: Value| -> bool { tx.blocking_send(event.to_string()).is_ok() };
-        let result = slot.generate(&prompt, max_tokens, &cancel, &mut |chunk| {
-            for &byte in chunk {
-                if let Some(delta) = decoder.push(byte) {
-                    let event = json!({
-                        "type": "output.text.delta",
-                        "response_id": response_id,
-                        "delta": delta,
-                    });
-                    if !send(event) {
-                        return false;
-                    }
-                }
-            }
-            true
-        });
-        let tail = decoder.finish();
-        if !tail.is_empty() {
-            let _ = send(json!({
-                "type": "output.text.delta",
-                "response_id": response_id,
-                "delta": tail,
-            }));
-        }
-        match result {
-            Ok(_) => {
-                let _ = send(json!({"type": "response.done", "response_id": response_id}));
-            }
-            Err(EngineError::Cancelled) => {
-                let _ = send(
-                    json!({"type": "response.done", "response_id": response_id, "cancelled": true}),
-                );
-            }
-            Err(error) => {
-                let _ = send(json!({
-                    "type": "error",
-                    "code": error.code(),
-                    "message": error.to_string(),
-                    "response_id": response_id,
-                }));
-                let _ = send(json!({"type": "response.done", "response_id": response_id}));
-            }
-        }
-    });
 }
 
 fn error_json(error: &str) -> String {
