@@ -9,7 +9,7 @@ use std::time::Duration;
 use tokio::sync::mpsc;
 use uniinfer_backends::stop::StopMatcher;
 use uniinfer_backends::utf8::Utf8Decoder;
-use uniinfer_backends::{FinishReason, GenerationSpec};
+use uniinfer_backends::{FinishReason, GenerationSpec, parse_tool_calls};
 use uniinfer_core::EngineError;
 
 use crate::error::ApiError;
@@ -40,6 +40,7 @@ pub(super) async fn stream_response(generation: Generation) -> Result<Response, 
         sampling,
         prompt_tokens,
         include_usage,
+        parse_tool_calls: tool_calls_enabled,
         started,
         deadline,
         cancel,
@@ -59,6 +60,7 @@ pub(super) async fn stream_response(generation: Generation) -> Result<Response, 
         let _active = task_state.router.active_guard();
         let mut matcher = StopMatcher::new(stop);
         let mut decoder = Utf8Decoder::new();
+        let mut full = Vec::new();
         let mut open = true;
         let mut measured_ttft = false;
         let result = task_slot.generate_with(
@@ -77,7 +79,9 @@ pub(super) async fn stream_response(generation: Generation) -> Result<Response, 
                         .record_ttft(&metric_model, started.elapsed());
                 }
                 matcher.push(chunk, &mut |safe| {
-                    if open {
+                    if tool_calls_enabled {
+                        full.extend_from_slice(safe);
+                    } else if open {
                         open = send_text(&tx, &mut decoder, safe);
                         if !open {
                             cancel.cancel();
@@ -88,7 +92,9 @@ pub(super) async fn stream_response(generation: Generation) -> Result<Response, 
             },
         );
         matcher.finish(&mut |safe| {
-            if open {
+            if tool_calls_enabled {
+                full.extend_from_slice(safe);
+            } else if open {
                 open = send_text(&tx, &mut decoder, safe);
                 if !open {
                     cancel.cancel();
@@ -96,10 +102,10 @@ pub(super) async fn stream_response(generation: Generation) -> Result<Response, 
             }
         });
         let tail = decoder.finish();
-        if open && !tail.is_empty() {
+        if !tool_calls_enabled && open && !tail.is_empty() {
             let _ = tx.blocking_send(StreamEvent::Delta(tail));
         }
-        let (finish, completion_tokens) = match result {
+        let (mut finish, completion_tokens) = match result {
             Ok(output) => (reason(output.finish), output.tokens),
             Err(EngineError::Cancelled) => ("stop", 0),
             Err(error) => {
@@ -115,6 +121,25 @@ pub(super) async fn stream_response(generation: Generation) -> Result<Response, 
                 ("stop", 0)
             }
         };
+        if tool_calls_enabled && !full.is_empty() {
+            let parsed = parse_tool_calls(&String::from_utf8_lossy(&full), &task_session);
+            if let Some(content) = parsed.content
+                && open
+                && tx.blocking_send(StreamEvent::Delta(content)).is_err()
+            {
+                cancel.cancel();
+            }
+            if !parsed.calls.is_empty() {
+                if tx
+                    .blocking_send(StreamEvent::ToolCalls(parsed.calls))
+                    .is_err()
+                {
+                    cancel.cancel();
+                } else {
+                    finish = "tool_calls";
+                }
+            }
+        }
         task_state
             .router
             .record_generation(&metric_model, started.elapsed());

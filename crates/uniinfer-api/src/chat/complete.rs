@@ -3,7 +3,7 @@
 use axum::Json;
 use axum::response::{IntoResponse, Response};
 use uniinfer_backends::stop::StopMatcher;
-use uniinfer_backends::{FinishReason, GenerationSpec};
+use uniinfer_backends::{FinishReason, GenerationSpec, parse_tool_calls};
 
 use crate::error::ApiError;
 
@@ -21,6 +21,7 @@ pub(super) async fn complete_response(generation: Generation) -> Result<Response
         stop,
         sampling,
         include_usage: _,
+        parse_tool_calls: tool_calls_enabled,
         started,
         deadline,
         cancel,
@@ -85,6 +86,35 @@ pub(super) async fn complete_response(generation: Generation) -> Result<Response
         .record_completion(&metric_model, completion_tokens);
 
     let content = String::from_utf8_lossy(&bytes).into_owned();
+    let (content_value, tool_calls, reason) = if tool_calls_enabled {
+        let parsed = parse_tool_calls(&content, &session_id);
+        let reason = if parsed.calls.is_empty() {
+            finish_reason(finish)
+        } else {
+            "tool_calls"
+        };
+        (
+            parsed
+                .content
+                .map(serde_json::Value::String)
+                .unwrap_or(serde_json::Value::Null),
+            parsed.calls,
+            reason,
+        )
+    } else {
+        (
+            serde_json::Value::String(content),
+            Vec::new(),
+            finish_reason(finish),
+        )
+    };
+    let mut message = serde_json::json!({
+        "role": "assistant",
+        "content": content_value,
+    });
+    if !tool_calls.is_empty() {
+        message["tool_calls"] = serde_json::json!(tool_calls);
+    }
     Ok(Json(serde_json::json!({
         "id": format!("chatcmpl-{session_id}"),
         "object": "chat.completion",
@@ -92,8 +122,8 @@ pub(super) async fn complete_response(generation: Generation) -> Result<Response
         "model": model,
         "choices": [{
             "index": 0,
-            "message": {"role": "assistant", "content": content},
-            "finish_reason": finish_reason(finish)
+            "message": message,
+            "finish_reason": reason
         }],
         "usage": {
             "prompt_tokens": prompt_tokens,

@@ -43,6 +43,10 @@ pub(crate) struct ChatRequest {
     presence_penalty: Option<f32>,
     #[serde(default)]
     stream_options: Option<StreamOptions>,
+    #[serde(default)]
+    tools: Option<Vec<serde_json::Value>>,
+    #[serde(default)]
+    tool_choice: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -70,7 +74,56 @@ impl StopInput {
 #[derive(Debug, Deserialize)]
 pub(crate) struct ChatMessage {
     role: String,
-    content: String,
+    #[serde(default)]
+    content: Option<ChatContent>,
+    #[serde(default)]
+    tool_calls: Option<serde_json::Value>,
+    #[serde(default)]
+    tool_call_id: Option<String>,
+    #[serde(default)]
+    name: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(untagged)]
+enum ChatContent {
+    Text(String),
+    Parts(Vec<serde_json::Value>),
+}
+
+impl ChatContent {
+    fn into_text(self) -> Result<String, ApiError> {
+        match self {
+            Self::Text(text) => Ok(text),
+            Self::Parts(parts) => {
+                let mut text = String::new();
+                for part in parts {
+                    match part.get("type").and_then(serde_json::Value::as_str) {
+                        Some("text") => {
+                            if let Some(value) =
+                                part.get("text").and_then(serde_json::Value::as_str)
+                            {
+                                text.push_str(value);
+                            }
+                        }
+                        Some(other) => {
+                            return Err(ApiError::bad_request(
+                                "unsupported_content",
+                                format!("content part {other:?} is not supported"),
+                            ));
+                        }
+                        None => {
+                            return Err(ApiError::bad_request(
+                                "invalid_content",
+                                "content part is missing type",
+                            ));
+                        }
+                    }
+                }
+                Ok(text)
+            }
+        }
+    }
 }
 
 pub(super) struct Generation {
@@ -84,6 +137,7 @@ pub(super) struct Generation {
     pub(super) stop: Vec<String>,
     pub(super) sampling: Sampling,
     pub(super) include_usage: bool,
+    pub(super) parse_tool_calls: bool,
     pub(super) started: std::time::Instant,
     pub(super) deadline: Option<std::time::Instant>,
     pub(super) cancel: CancelToken,
@@ -106,15 +160,29 @@ pub(crate) async fn chat(
         .text_slot(&request.model)
         .await
         .map_err(ApiError::from)?;
+    let tools = request.tools.clone().unwrap_or_default();
+    let tool_choice = request.tool_choice.clone();
     let messages = request
         .messages
         .iter()
-        .map(|message| BackendMessage {
-            role: message.role.clone(),
-            content: message.content.clone(),
+        .map(|message| {
+            Ok(BackendMessage {
+                role: message.role.clone(),
+                content: message
+                    .content
+                    .clone()
+                    .map(ChatContent::into_text)
+                    .transpose()?
+                    .unwrap_or_default(),
+                tool_calls: message.tool_calls.clone(),
+                tool_call_id: message.tool_call_id.clone(),
+                name: message.name.clone(),
+            })
         })
-        .collect::<Vec<_>>();
-    let prompt = slot.render_chat(&messages).map_err(ApiError::from)?;
+        .collect::<Result<Vec<_>, ApiError>>()?;
+    let prompt = slot
+        .render_chat_with_tools(&messages, &tools, tool_choice.as_ref())
+        .map_err(ApiError::from)?;
     let stop = request.stop.map(StopInput::into_vec).unwrap_or_default();
     let sampling_requested = request.temperature.is_some()
         || request.top_p.is_some()
@@ -163,6 +231,7 @@ pub(crate) async fn chat(
         include_usage: request
             .stream_options
             .is_some_and(|options| options.include_usage),
+        parse_tool_calls: !tools.is_empty(),
         started,
         deadline,
         cancel,

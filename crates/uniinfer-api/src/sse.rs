@@ -6,10 +6,13 @@ use tokio::sync::mpsc;
 use tokio_stream::StreamExt;
 use tokio_stream::wrappers::ReceiverStream;
 
+use uniinfer_backends::ToolCall;
+
 use crate::error::ApiError;
 
 pub(crate) enum StreamEvent {
     Delta(String),
+    ToolCalls(Vec<ToolCall>),
     Finish(&'static str),
     Usage {
         prompt_tokens: usize,
@@ -30,6 +33,9 @@ pub(crate) fn stream(
         Ok(match event {
             StreamEvent::Delta(text) => {
                 Event::default().data(chunk_json(&id, &model, created, &text))
+            }
+            StreamEvent::ToolCalls(calls) => {
+                Event::default().data(tool_calls_json(&id, &model, created, &calls))
             }
             StreamEvent::Finish(reason) => {
                 Event::default().data(finish_json(&id, &model, created, reason))
@@ -62,6 +68,21 @@ fn finish_json(id: &str, model: &str, created: u64, reason: &str) -> String {
             "index": 0,
             "delta": {},
             "finish_reason": reason
+        }]
+    })
+    .to_string()
+}
+
+fn tool_calls_json(id: &str, model: &str, created: u64, calls: &[ToolCall]) -> String {
+    json!({
+        "id": id,
+        "object": "chat.completion.chunk",
+        "created": created,
+        "model": model,
+        "choices": [{
+            "index": 0,
+            "delta": {"tool_calls": calls},
+            "finish_reason": null
         }]
     })
     .to_string()

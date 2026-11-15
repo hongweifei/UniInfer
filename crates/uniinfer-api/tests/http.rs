@@ -849,3 +849,28 @@ async fn model_load_timeout_returns_gateway_timeout() {
     let body = body_json(response).await;
     assert_eq!(body["code"], "timeout");
 }
+
+#[tokio::test]
+async fn tools_and_text_content_parts_are_accepted() {
+    let body = json!({
+        "model": "tiny-byte-onnx",
+        "messages": [{
+            "role": "user",
+            "content": [{"type": "text", "text": "ab"}]
+        }],
+        "tools": [{
+            "type": "function",
+            "function": {"name": "lookup", "parameters": {"type": "object"}}
+        }],
+        "tool_choice": "auto",
+        "max_tokens": 1
+    })
+    .to_string();
+    let response = app()
+        .oneshot(post("/v1/chat/completions", &body))
+        .await
+        .expect("response");
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = body_json(response).await;
+    assert_eq!(body["choices"][0]["message"]["content"], "c");
+}
