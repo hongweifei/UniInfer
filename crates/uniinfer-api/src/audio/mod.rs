@@ -4,6 +4,7 @@ use axum::Json;
 use axum::extract::{Multipart, State};
 use serde_json::{Value, json};
 use uniinfer_backends::audio::decode_wav_mono;
+use uniinfer_core::EngineError;
 
 use crate::error::ApiError;
 use crate::state::AppState;
@@ -55,14 +56,30 @@ pub(crate) async fn transcribe(
     let audio_seconds = samples.len() as f64 / f64::from(slot.audio_config().sample_rate);
     let permit = slot.acquire(state.router.queue_timeout()).await?;
     let started = std::time::Instant::now();
-    let text = tokio::task::spawn_blocking(move || {
+    let process_isolated = slot.engine_name() == "process";
+    let deadline = state.request_timeout.map(|timeout| started + timeout);
+    let result = tokio::task::spawn_blocking(move || {
         let _permit = permit;
-        slot.transcribe(samples)
+        slot.transcribe_with_deadline(samples, deadline)
     })
     .await
-    .map_err(|_| ApiError::internal("transcription task panicked"))??;
+    .map_err(|_| ApiError::internal("transcription task panicked"))?;
     state
         .router
         .record_asr(&model, audio_seconds, started.elapsed());
+    let text = match result {
+        Ok(text) => text,
+        Err(error) => {
+            if matches!(error, EngineError::Timeout) {
+                state.router.record_timeout(&model);
+            }
+            if process_isolated
+                && matches!(error, EngineError::Timeout | EngineError::ProcessExited)
+            {
+                state.unload_audio(&model);
+            }
+            return Err(error.into());
+        }
+    };
     Ok(Json(json!({"text": text})))
 }

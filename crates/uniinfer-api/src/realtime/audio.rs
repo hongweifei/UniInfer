@@ -3,6 +3,7 @@
 use serde_json::json;
 use tokio::sync::mpsc;
 use uniinfer_backends::audio::{FRAME_BYTES, VadEvent};
+use uniinfer_core::EngineError;
 
 use crate::state::AppState;
 
@@ -87,15 +88,28 @@ async fn transcribe_and_respond(
                 .map_err(|_| "channel closed".to_string());
         }
     };
+    let model = asr.manifest().id.clone();
+    let process_isolated = asr.engine_name() == "process";
+    let deadline = state
+        .request_timeout
+        .map(|timeout| std::time::Instant::now() + timeout);
     let text = tokio::task::spawn_blocking(move || {
         let _permit = permit;
-        asr.transcribe(samples)
+        asr.transcribe_with_deadline(samples, deadline)
     })
     .await
     .map_err(|_| "transcription task panicked".to_string())?;
     let text = match text {
         Ok(text) => text,
         Err(error) => {
+            if matches!(error, EngineError::Timeout) {
+                state.router.record_timeout(&model);
+            }
+            if process_isolated
+                && matches!(error, EngineError::Timeout | EngineError::ProcessExited)
+            {
+                state.unload_audio(&model);
+            }
             return tx
                 .send(error_event(error.code(), &error.to_string()))
                 .await

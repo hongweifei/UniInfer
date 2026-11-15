@@ -97,8 +97,17 @@ impl AudioSlot {
 
     /// Transcribe 16 kHz mono F32 samples with the loaded session.
     pub fn transcribe(&self, samples: Vec<f32>) -> Result<String> {
+        self.transcribe_with_deadline(samples, None)
+    }
+
+    /// Transcribe with an optional wall-clock deadline.
+    pub fn transcribe_with_deadline(
+        &self,
+        samples: Vec<f32>,
+        deadline: Option<std::time::Instant>,
+    ) -> Result<String> {
         let input = Tensor::new("audio", vec![samples.len()], TensorData::F32(samples))?;
-        let outputs = self.session().run(vec![input])?;
+        let outputs = self.session().run_with_deadline(vec![input], deadline)?;
         let output = outputs
             .iter()
             .find(|tensor| tensor.name == "text")
