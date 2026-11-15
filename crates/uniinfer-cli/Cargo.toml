@@ -31,6 +31,7 @@ whisper = ["uniinfer-api/whisper"]
 [dependencies]
 uniinfer-api.workspace = true
 uniinfer-config.workspace = true
+uniinfer-model-inspect.workspace = true
 uniinfer-service.workspace = true
 tokio.workspace = true
 clap.workspace = true

@@ -5,6 +5,7 @@ use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use uniinfer_service::{CancelToken, Runtime};
 
+mod models;
 mod serve;
 
 #[derive(Debug, Parser)]
@@ -18,9 +19,30 @@ struct Cli {
 }
 
 #[derive(Debug, Subcommand)]
+enum ModelsCommand {
+    /// Print a generated manifest without writing it.
+    Inspect {
+        path: PathBuf,
+        #[arg(long)]
+        id: Option<String>,
+    },
+    /// Generate manifest.toml and add it to the application config.
+    Import {
+        path: PathBuf,
+        #[arg(long)]
+        id: Option<String>,
+    },
+}
+
+#[derive(Debug, Subcommand)]
 enum Command {
     /// List discovered devices and execution backends.
     Devices,
+    /// Inspect or import a local model directory.
+    Models {
+        #[command(subcommand)]
+        command: ModelsCommand,
+    },
     /// Serve the OpenAI-compatible HTTP API.
     Serve {
         /// Model manifest paths; when set, they replace config.models.
@@ -65,6 +87,12 @@ async fn main() -> Result<()> {
         .or_else(|| std::env::var_os("UNIINFER_CONFIG").map(std::path::PathBuf::from));
     match cli.command {
         Command::Devices => devices(),
+        Command::Models { command } => match command {
+            ModelsCommand::Inspect { path, id } => models::inspect_model(path, id),
+            ModelsCommand::Import { path, id } => {
+                models::import_model(path, config_path.clone(), id)
+            }
+        },
         Command::Serve {
             manifests,
             addr,

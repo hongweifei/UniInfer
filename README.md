@@ -352,6 +352,17 @@ cargo run -p uniinfer-cli --release -- run \
   --max-tokens 64
 ```
 
+### 模型导入
+
+不需要手写清单。指向模型目录即可生成草稿：
+
+```bash
+cargo run -p uniinfer-cli -- models inspect models/qwen3-0.6b-onnx
+cargo run -p uniinfer-cli -- --config uniinfer.toml models import models/whisper-tiny.en-onnx
+```
+
+`inspect` 识别 ONNX / GGUF / Safetensors / GGML、文本/音频模态、Whisper encoder-decoder、量化、tokenizer、context 与权重 SHA；`import` 写入 `manifest.toml` 并把模型入口加入应用配置。生成结果只是草稿，复杂模型仍可在 GUI 中审阅/覆盖 `[audio.options]` 或 placement。
+
 ### 配置
 
 配置与 CLI 参数分离，GUI 将直接编辑同一份 `UniInferConfig`：
@@ -492,6 +503,7 @@ crates/
   uniinfer-devices       # DeviceInventory、代价模型、PlacementPlan
   uniinfer-registry      # 格式+模态路由、预检、SessionLease、显存预算
   uniinfer-config        # UniInferConfig、ConfigHandle、校验与环境变量覆盖
+  uniinfer-model-inspect # 模型目录检测与 manifest 自动生成
   uniinfer-service       # Runtime、文本/语音 Slot、统一 Permit 与 ModelView
   uniinfer-engine-set    # 默认引擎装配与 engine feature 收敛
   uniinfer-engine-onnx   # ort + GenAI KV cache + ONNX Whisper ASR；EP feature 门控
