@@ -17,3 +17,6 @@ models/cache
 /models/qwen3-0.6b-onnx/*.json
 /models/qwen3-0.6b-onnx/onnxruntime/
 !/models/qwen3-0.6b-onnx/genai_config.json
+
+# Whisper GGML weights; fetch via models/fetch-whisper.sh
+/models/whisper-large-v3-turbo-ggml/*.bin

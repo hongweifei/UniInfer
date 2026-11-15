@@ -20,6 +20,7 @@ uniinfer-service = { version = "0.0.0", path = "crates/uniinfer-service" }
 uniinfer-engine-onnx = { version = "0.0.0", path = "crates/uniinfer-engine-onnx" }
 uniinfer-engine-candle = { version = "0.0.0", path = "crates/uniinfer-engine-candle" }
 uniinfer-engine-llama = { version = "0.0.0", path = "crates/uniinfer-engine-llama" }
+uniinfer-engine-whisper = { version = "0.0.0", path = "crates/uniinfer-engine-whisper" }
 uniinfer-engine-set = { version = "0.0.0", path = "crates/uniinfer-engine-set" }
 uniinfer-backends = { version = "0.0.0", path = "crates/uniinfer-backends" }
 uniinfer-api = { version = "0.0.0", path = "crates/uniinfer-api" }
@@ -30,7 +31,7 @@ thiserror = "2.0.21"
 sha2 = "0.11.1"
 hex = "0.4.3"
 clap = { version = "4.5", features = ["derive"] }
-axum = { version = "0.8.9", features = ["ws"] }
+axum = { version = "0.8.9", features = ["ws", "multipart"] }
 tokio = { version = "1.54.1", features = ["rt-multi-thread", "macros", "net", "signal", "sync", "time"] }
 tokio-stream = { version = "0.1", features = ["sync"] }
 futures-util = "0.3"
@@ -47,6 +48,7 @@ minijinja = { version = "3", features = ["serde", "json"] }
 minijinja-contrib = { version = "3", features = ["pycompat"] }
 anyhow = "1"
 tempfile = "3"
+hound = "3.5.1"
 
 [workspace.lints.rust]
 unsafe_code = "deny"

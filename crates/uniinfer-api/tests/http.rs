@@ -281,3 +281,25 @@ async fn stop_array_truncates_streaming() {
     assert!(!text.contains("\"content\":\"e\""));
     assert!(text.contains("[DONE]"));
 }
+
+#[cfg(feature = "whisper")]
+#[tokio::test]
+async fn audio_endpoint_reports_missing_model() {
+    let boundary = "uniinfer-test-boundary";
+    let body = format!(
+        "--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"x.wav\"\r\n\r\nabc\r\n--{boundary}--\r\n"
+    );
+    let request = Request::builder()
+        .method("POST")
+        .uri("/v1/audio/transcriptions")
+        .header(
+            "content-type",
+            format!("multipart/form-data; boundary={boundary}"),
+        )
+        .body(Body::from(body))
+        .expect("request");
+    let response = app().oneshot(request).await.expect("response");
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let body = body_json(response).await;
+    assert_eq!(body["code"], "missing_model");
+}

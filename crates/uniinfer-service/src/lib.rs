@@ -12,7 +12,30 @@ use uniinfer_backends::{
 use uniinfer_core::{Device, EngineError, EngineSession, ModelManifest, PlacementPlan, Result};
 use uniinfer_registry::{EngineRegistry, SessionLease};
 
+#[cfg(feature = "whisper")]
+mod audio;
+#[cfg(feature = "whisper")]
+pub use audio::AudioSlot;
 pub use uniinfer_core::CancelToken;
+
+/// Acquire one of a slot's request permits, returning `Busy` on timeout.
+pub(crate) async fn acquire_permit(
+    permit: &Arc<Semaphore>,
+    wait: Duration,
+) -> Result<OwnedSemaphorePermit> {
+    match tokio::time::timeout(wait, Arc::clone(permit).acquire_owned()).await {
+        Ok(Ok(permit)) => Ok(permit),
+        Ok(Err(_)) => Err(EngineError::Other("slot semaphore closed".into())),
+        Err(_) => Err(EngineError::Busy),
+    }
+}
+
+/// Read-only view shared by text and speech slots.
+pub trait ModelView: Send + Sync {
+    fn manifest(&self) -> &ModelManifest;
+    fn placement(&self) -> &PlacementPlan;
+    fn engine_name(&self) -> &str;
+}
 
 /// Owns the engine registry and the device inventory.
 pub struct Runtime {
@@ -35,6 +58,22 @@ impl Runtime {
     #[must_use]
     pub fn active_sessions(&self) -> usize {
         self.registry.active_sessions()
+    }
+
+    /// Load an audio model for transcription.
+    #[cfg(feature = "whisper")]
+    pub fn load_audio(&self, manifest_path: &Path) -> Result<Arc<AudioSlot>> {
+        let manifest = ModelManifest::load(manifest_path)?;
+        if !manifest
+            .modalities
+            .contains(&uniinfer_core::Modality::Audio)
+        {
+            return Err(EngineError::ManifestInvalid(
+                "audio runtime requires the audio modality".into(),
+            ));
+        }
+        let lease = Arc::new(self.registry.load(manifest_path)?);
+        Ok(Arc::new(AudioSlot::new(lease)))
     }
 
     /// Load one model and validate the text-generation contract.
@@ -102,6 +141,20 @@ pub struct ModelSlot {
     permit: Arc<Semaphore>,
 }
 
+impl ModelView for ModelSlot {
+    fn manifest(&self) -> &ModelManifest {
+        self.lease.manifest()
+    }
+
+    fn placement(&self) -> &PlacementPlan {
+        self.lease.placement()
+    }
+
+    fn engine_name(&self) -> &str {
+        self.lease.engine_name()
+    }
+}
+
 impl ModelSlot {
     #[must_use]
     pub fn manifest(&self) -> &ModelManifest {
@@ -125,11 +178,7 @@ impl ModelSlot {
 
     /// Acquire the generation permit, returning `Busy` on timeout.
     pub async fn acquire(&self, wait: Duration) -> Result<OwnedSemaphorePermit> {
-        match tokio::time::timeout(wait, Arc::clone(&self.permit).acquire_owned()).await {
-            Ok(Ok(permit)) => Ok(permit),
-            Ok(Err(_)) => Err(EngineError::Other("model semaphore closed".into())),
-            Err(_) => Err(EngineError::Busy),
-        }
+        acquire_permit(&self.permit, wait).await
     }
 
     /// Try to acquire the generation permit without waiting.

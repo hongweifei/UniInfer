@@ -1,0 +1,14 @@
+schema_version = 1
+id = "whisper-large-v3-turbo"
+format = "whisper"
+quantization = "fp16"
+modalities = ["audio"]
+streaming_capable = false
+context_len = 448
+
+[placement]
+policy = "auto"
+
+[[files]]
+path = "ggml-model.bin"
+sha256 = "a2094962a33f48ce1fc59ab6f34ca9bb4408443bf8a86361b6b1775aaa4bc1f3"

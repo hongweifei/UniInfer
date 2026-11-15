@@ -22,6 +22,7 @@ jobs:
           - { os: windows-latest, feature: ep-directml }
           - { os: windows-latest, feature: ep-nnapi }
           - { os: macos-latest, feature: ep-coreml }
+          - { os: ubuntu-latest, feature: whisper }
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4

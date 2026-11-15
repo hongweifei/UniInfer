@@ -1,5 +1,7 @@
 //! HTTP surface for the text service.
 
+#[cfg(feature = "whisper")]
+mod audio;
 mod auth;
 mod chat;
 mod error;

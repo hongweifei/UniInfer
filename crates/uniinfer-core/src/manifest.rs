@@ -17,6 +17,7 @@ pub enum ModelFormat {
     Onnx,
     Gguf,
     Safetensors,
+    Whisper,
 }
 
 impl ModelFormat {
@@ -26,6 +27,7 @@ impl ModelFormat {
             Self::Onnx => "onnx",
             Self::Gguf => "gguf",
             Self::Safetensors => "safetensors",
+            Self::Whisper => "whisper",
         }
     }
 }

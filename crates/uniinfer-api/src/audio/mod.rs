@@ -1,0 +1,53 @@
+//! OpenAI-compatible audio transcription endpoint.
+
+use axum::Json;
+use axum::extract::{Multipart, State};
+use serde_json::{Value, json};
+use uniinfer_backends::audio::decode_wav_16k_mono;
+
+use crate::error::ApiError;
+use crate::state::AppState;
+
+pub(crate) async fn transcribe(
+    State(state): State<AppState>,
+    mut multipart: Multipart,
+) -> Result<Json<Value>, ApiError> {
+    let mut model = None;
+    let mut audio = None;
+    while let Some(field) = multipart
+        .next_field()
+        .await
+        .map_err(|error| ApiError::bad_request("invalid_multipart", error.to_string()))?
+    {
+        match field.name().unwrap_or_default() {
+            "model" => {
+                model =
+                    Some(field.text().await.map_err(|error| {
+                        ApiError::bad_request("invalid_model", error.to_string())
+                    })?);
+            }
+            "file" | "audio" => {
+                audio =
+                    Some(field.bytes().await.map_err(|error| {
+                        ApiError::bad_request("invalid_audio", error.to_string())
+                    })?);
+            }
+            _ => {}
+        }
+    }
+
+    let model = model.ok_or_else(|| ApiError::bad_request("missing_model", "model is required"))?;
+    let audio = audio.ok_or_else(|| ApiError::bad_request("missing_audio", "file is required"))?;
+    let samples = decode_wav_16k_mono(&audio)?;
+    let slot = state.audio_slots.get(&model).cloned().ok_or_else(|| {
+        ApiError::not_found("model_not_found", format!("model {model} is not loaded"))
+    })?;
+    let permit = slot.acquire(state.router.queue_timeout()).await?;
+    let text = tokio::task::spawn_blocking(move || {
+        let _permit = permit;
+        slot.transcribe(samples)
+    })
+    .await
+    .map_err(|_| ApiError::internal("transcription task panicked"))??;
+    Ok(Json(json!({"text": text})))
+}

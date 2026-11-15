@@ -3,7 +3,9 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
-use uniinfer_core::{EngineError, Result};
+use uniinfer_core::{EngineError, Modality, ModelManifest, Result};
+#[cfg(feature = "whisper")]
+use uniinfer_service::AudioSlot;
 use uniinfer_service::Runtime;
 
 /// Server options.
@@ -41,6 +43,8 @@ impl ApiConfig {
 #[derive(Clone)]
 pub struct AppState {
     pub(crate) router: Arc<uniinfer_router::ModelRouter>,
+    #[cfg(feature = "whisper")]
+    pub(crate) audio_slots: Arc<HashMap<String, Arc<AudioSlot>>>,
     pub(crate) runtime: Arc<Runtime>,
     pub(crate) token: Option<String>,
 }
@@ -54,13 +58,49 @@ impl AppState {
         }
         let runtime = Arc::new(Runtime::new()?);
         let mut slots = HashMap::new();
-        for manifest in &config.manifests {
-            let slot = runtime.load(manifest)?;
-            let id = slot.manifest().id.clone();
-            if slots.insert(id.clone(), slot).is_some() {
+        #[cfg(feature = "whisper")]
+        let mut audio_slots = HashMap::new();
+        for path in &config.manifests {
+            let manifest = ModelManifest::load(path)?;
+            let audio_only =
+                manifest.modalities.contains(&Modality::Audio) && manifest.text.is_none();
+            let id = manifest.id.clone();
+            #[cfg(feature = "whisper")]
+            if slots.contains_key(&id) || audio_slots.contains_key(&id) {
                 return Err(EngineError::ManifestInvalid(format!(
                     "duplicate model id {id}"
                 )));
+            }
+            #[cfg(not(feature = "whisper"))]
+            if slots.contains_key(&id) {
+                return Err(EngineError::ManifestInvalid(format!(
+                    "duplicate model id {id}"
+                )));
+            }
+            if audio_only {
+                #[cfg(feature = "whisper")]
+                {
+                    let slot = runtime.load_audio(path)?;
+                    if audio_slots.insert(id.clone(), slot).is_some() {
+                        return Err(EngineError::ManifestInvalid(format!(
+                            "duplicate model id {id}"
+                        )));
+                    }
+                }
+                #[cfg(not(feature = "whisper"))]
+                {
+                    return Err(EngineError::UnsupportedModality {
+                        format: manifest.format,
+                        modality: Modality::Audio,
+                    });
+                }
+            } else {
+                let slot = runtime.load(path)?;
+                if slots.insert(id.clone(), slot).is_some() {
+                    return Err(EngineError::ManifestInvalid(format!(
+                        "duplicate model id {id}"
+                    )));
+                }
             }
         }
 
@@ -69,6 +109,8 @@ impl AppState {
                 slots,
                 config.queue_timeout,
             )),
+            #[cfg(feature = "whisper")]
+            audio_slots: Arc::new(audio_slots),
             runtime,
             token: config.token.clone(),
         })

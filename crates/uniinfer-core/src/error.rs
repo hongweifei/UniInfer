@@ -34,6 +34,8 @@ pub enum EngineError {
     PlacementUnsatisfiable(String),
     #[error("io error: {0}")]
     Io(#[from] std::io::Error),
+    #[error("invalid audio: {0}")]
+    InvalidAudio(String),
     #[error("engine error: {0}")]
     Other(String),
 }
@@ -56,6 +58,7 @@ impl EngineError {
             Self::Busy => "busy",
             Self::PlacementUnsatisfiable(_) => "placement_unsatisfiable",
             Self::Io(_) => "io_error",
+            Self::InvalidAudio(_) => "invalid_audio",
             Self::Other(_) => "engine_error",
         }
     }

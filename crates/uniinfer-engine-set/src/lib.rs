@@ -11,6 +11,8 @@ use uniinfer_engine_candle::CandleEngine;
 #[cfg(feature = "llama")]
 use uniinfer_engine_llama::LlamaEngine;
 use uniinfer_engine_onnx::OnnxEngine;
+#[cfg(feature = "whisper")]
+use uniinfer_engine_whisper::WhisperEngine;
 use uniinfer_registry::EngineRegistry;
 
 /// Build the default engine registry and probe every engine's devices.
@@ -19,6 +21,8 @@ pub fn build() -> Result<EngineRegistry> {
     let candle = CandleEngine::new()?;
     #[cfg(feature = "llama")]
     let llama = LlamaEngine::new()?;
+    #[cfg(feature = "whisper")]
+    let whisper = WhisperEngine::new();
 
     let mut inventory = DeviceInventory::probe();
     for device in onnx.probe_devices() {
@@ -31,11 +35,17 @@ pub fn build() -> Result<EngineRegistry> {
     for device in llama.probe_devices() {
         inventory.register(device);
     }
+    #[cfg(feature = "whisper")]
+    for device in whisper.probe_devices() {
+        inventory.register(device);
+    }
 
     let mut registry = EngineRegistry::new(inventory);
     registry.register(Arc::new(onnx));
     #[cfg(feature = "llama")]
     registry.register(Arc::new(llama));
+    #[cfg(feature = "whisper")]
+    registry.register(Arc::new(whisper));
     registry.register(Arc::new(candle));
     Ok(registry)
 }
