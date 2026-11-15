@@ -1,0 +1,35 @@
+schema_version = 1
+id = "whisper-tiny.en-onnx"
+format = "onnx"
+quantization = "fp32"
+modalities = ["audio"]
+streaming_capable = false
+context_len = 448
+
+[audio]
+sample_rate = 16000
+channels = 1
+encoder_file = "onnx/encoder_model.onnx"
+decoder_file = "onnx/decoder_model.onnx"
+tokenizer_file = "tokenizer.json"
+config_file = "config.json"
+max_tokens = 128
+
+[placement]
+policy = "auto"
+
+[[files]]
+path = "onnx/encoder_model.onnx"
+sha256 = "ee247387567b1f9dea4d6f7d077d852ff2648038e5f50ecb6a744aff3db74856"
+
+[[files]]
+path = "onnx/decoder_model.onnx"
+sha256 = "018fba571ba7408856ae35c1d5577b6eeb4905d2fdec9bd20b9f8debb815bf96"
+
+[[files]]
+path = "tokenizer.json"
+sha256 = "1bb34b47daba40728f488323190dc64765c5338b5196f95c4af926e13a6161c3"
+
+[[files]]
+path = "config.json"
+sha256 = "79e11e4a0d1415f68dcfaa32e8dbeda0856d44dd1954f0a075867885fa759a70"

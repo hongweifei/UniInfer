@@ -8,9 +8,13 @@ repository.workspace = true
 publish.workspace = true
 description = "whisper.cpp engine for speech transcription"
 
+[features]
+default = []
+whisper = ["dep:whisper-rs", "dep:uniinfer-core"]
+
 [dependencies]
-uniinfer-core.workspace = true
-whisper-rs = "0.16"
+uniinfer-core = { workspace = true, optional = true }
+whisper-rs = { version = "0.16", optional = true }
 
 [lints]
 workspace = true

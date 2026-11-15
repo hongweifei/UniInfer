@@ -16,6 +16,8 @@ tracing.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 half = "2"
+tokenizers.workspace = true
+rustfft.workspace = true
 
 [features]
 default = []

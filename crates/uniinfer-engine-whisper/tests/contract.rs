@@ -1,3 +1,5 @@
+#![cfg(feature = "whisper")]
+
 use uniinfer_core::{DeviceClass, InferenceEngine, Modality, ModelFormat, Quantization};
 use uniinfer_engine_whisper::WhisperEngine;
 

@@ -1,0 +1,4 @@
+[env]
+# whisper-rs-sys otherwise requires libclang for bindgen. Its bundled
+# bindings are sufficient for the versions pinned in Cargo.lock.
+WHISPER_DONT_GENERATE_BINDINGS = "1"

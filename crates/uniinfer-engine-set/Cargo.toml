@@ -27,7 +27,7 @@ llama-vulkan = ["llama", "uniinfer-engine-llama/vulkan"]
 llama-cuda = ["llama", "uniinfer-engine-llama/cuda"]
 llama-rocm = ["llama", "uniinfer-engine-llama/rocm"]
 llama-metal = ["llama", "uniinfer-engine-llama/metal"]
-whisper = ["dep:uniinfer-engine-whisper"]
+whisper = ["dep:uniinfer-engine-whisper", "uniinfer-engine-whisper/whisper"]
 
 [dependencies]
 uniinfer-core.workspace = true

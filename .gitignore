@@ -20,3 +20,10 @@ models/cache
 
 # Whisper GGML weights; fetch via models/fetch-whisper.sh
 /models/whisper-large-v3-turbo-ggml/*.bin
+
+# ONNX Whisper weights/tokenizer; fetch via models/fetch-onnx-whisper.sh
+/models/whisper-tiny.en-onnx/onnx/*.onnx
+/models/whisper-tiny.en-onnx/*.json
+
+# Whisper ONNX tokenizer sidecar
+/models/whisper-tiny.en-onnx/merges.txt

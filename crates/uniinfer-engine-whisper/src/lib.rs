@@ -1,3 +1,5 @@
+#![cfg(feature = "whisper")]
+
 //! whisper.cpp engine for speech transcription.
 //!
 //! The engine exposes Whisper as an `InferenceEngine` session: one `audio`

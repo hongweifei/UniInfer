@@ -1,5 +1,6 @@
 //! ONNX Runtime engine.
 
+use std::path::Path;
 use std::sync::atomic::AtomicBool;
 use std::sync::{LazyLock, Mutex};
 
@@ -10,6 +11,7 @@ use uniinfer_core::{
     ModelFormat, Quantization, Result,
 };
 
+mod asr;
 mod genai;
 mod io;
 mod session;
@@ -193,22 +195,16 @@ impl InferenceEngine for OnnxEngine {
             .ok_or_else(|| EngineError::ManifestInvalid("files is empty".into()))?;
         let model_path = spec.base_dir.join(&model_file.path);
 
-        let builder = Session::builder(&self.environment)
-            .map_err(|error| EngineError::LoadFailed(format!("session builder: {error}")))?;
-        // Honor a CPU placement even when GPU EPs are registered in the
-        // process-wide ORT environment.
-        let mut builder = if class == DeviceClass::Cpu {
-            builder
-                .with_no_environment_execution_providers()
-                .map_err(|error| {
-                    EngineError::LoadFailed(format!("cpu-only session options: {error}"))
-                })?
-        } else {
-            builder
-        };
-        let session = builder.commit_from_file(&model_path).map_err(|error| {
-            EngineError::LoadFailed(format!("cannot load {}: {error}", model_path.display()))
-        })?;
+        // Encoder-decoder ASR manifests carry their own graph files. Keep the
+        // dispatch here so ONNX stays the first choice for every ONNX model.
+        if let Some(audio) = &spec.manifest.audio
+            && (audio.encoder_file.is_some() || audio.decoder_file.is_some())
+        {
+            return asr::load(&self.environment, &spec, class)
+                .map(|session| Box::new(session) as Box<dyn EngineSession>);
+        }
+
+        let session = build_session(&self.environment, class, &model_path)?;
 
         let genai_config = load_genai_config(&spec.base_dir)?;
         let (inputs, outputs, genai) = match genai_config {
@@ -245,6 +241,29 @@ impl InferenceEngine for OnnxEngine {
             active: Mutex::new(None),
         }))
     }
+}
+
+pub(crate) fn build_session(
+    environment: &Environment,
+    class: DeviceClass,
+    path: &Path,
+) -> Result<Session> {
+    let builder = Session::builder(environment)
+        .map_err(|error| EngineError::LoadFailed(format!("session builder: {error}")))?;
+    // Honor a CPU placement even when GPU EPs are registered in the
+    // process-wide ORT environment.
+    let mut builder = if class == DeviceClass::Cpu {
+        builder
+            .with_no_environment_execution_providers()
+            .map_err(|error| {
+                EngineError::LoadFailed(format!("cpu-only session options: {error}"))
+            })?
+    } else {
+        builder
+    };
+    builder.commit_from_file(path).map_err(|error| {
+        EngineError::LoadFailed(format!("cannot load {}: {error}", path.display()))
+    })
 }
 
 fn ep_enabled(ep: &str) -> bool {

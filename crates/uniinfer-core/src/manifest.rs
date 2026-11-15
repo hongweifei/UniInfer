@@ -164,6 +164,21 @@ pub struct AudioConfig {
     pub input: String,
     #[serde(default = "default_audio_output")]
     pub output: String,
+    /// Encoder graph for encoder-decoder ASR models.
+    #[serde(default)]
+    pub encoder_file: Option<PathBuf>,
+    /// Decoder graph for encoder-decoder ASR models.
+    #[serde(default)]
+    pub decoder_file: Option<PathBuf>,
+    /// Tokenizer JSON paired with the ASR graph.
+    #[serde(default)]
+    pub tokenizer_file: Option<PathBuf>,
+    /// Model config JSON (start/EOS/forced decoder ids).
+    #[serde(default)]
+    pub config_file: Option<PathBuf>,
+    /// Maximum generated decoder tokens, before the model context limit.
+    #[serde(default)]
+    pub max_tokens: Option<usize>,
 }
 
 fn default_sample_rate() -> u32 {
@@ -189,6 +204,11 @@ impl Default for AudioConfig {
             channels: default_channels(),
             input: default_audio_input(),
             output: default_audio_output(),
+            encoder_file: None,
+            decoder_file: None,
+            tokenizer_file: None,
+            config_file: None,
+            max_tokens: None,
         }
     }
 }
@@ -339,6 +359,34 @@ impl ModelManifest {
                     "audio tensor names must not be empty".into(),
                 ));
             }
+            if audio.max_tokens == Some(0) {
+                return Err(EngineError::ManifestInvalid(
+                    "audio.max_tokens must be positive".into(),
+                ));
+            }
+            for path in [
+                &audio.encoder_file,
+                &audio.decoder_file,
+                &audio.tokenizer_file,
+                &audio.config_file,
+            ]
+            .into_iter()
+            .flatten()
+            {
+                if path.is_absolute()
+                    || path.components().any(|component| {
+                        matches!(
+                            component,
+                            Component::ParentDir | Component::RootDir | Component::Prefix(_)
+                        )
+                    })
+                {
+                    return Err(EngineError::ManifestInvalid(format!(
+                        "audio file path must stay inside the model directory: {}",
+                        path.display()
+                    )));
+                }
+            }
         }
         Ok(())
     }
@@ -433,6 +481,14 @@ sha256 = "0000000000000000000000000000000000000000000000000000000000000000"
         assert_eq!(audio.sample_rate, 16_000);
         assert_eq!(audio.input, "audio");
         assert_eq!(audio.output, "text");
+    }
+
+    #[test]
+    fn rejects_audio_path_escape() {
+        let raw = base().replace("modalities = [\"text\"]", "modalities = [\"audio\"]")
+            + "\n[audio]\nencoder_file = \"../encoder.onnx\"\n";
+        let error = parse(&raw).validate().expect_err("must reject");
+        assert!(error.to_string().contains("model directory"));
     }
 
     #[test]

@@ -144,7 +144,8 @@ pub trait InferenceEngine: Send + Sync {
 | Safetensors | 视频生成 | `CandleEngine`（candle-video / plakat） | — | batch |
 | ONNX | 实时预览帧 | `OnnxEngine` | — | realtime |
 | ONNX | 实时逐帧视频 | `OnnxEngine` + RAVE | — | realtime |
-| GGML | 语音转写 | Registry 路由（当前 `WhisperEngine`） | 可新增 ONNX ASR 引擎 | batch |
+| ONNX | 语音转写（Whisper encoder/decoder） | `OnnxEngine` ASR 适配器 | — | batch |
+| GGML | 语音转写 | Registry 路由（当前 `WhisperEngine`） | — | batch |
 
 **量化**：ONNX 支持 FP32、FP16、INT8 与 INT4（如 Qwen3 ONNX int4 GenAI bundle）；GGUF 覆盖 Q2_K–Q8_0、Q4_0、Q8_0；FP8 在加载期返回 `UnsupportedQuantization` 并给出替代建议；IQ/MXFP4 由 `frink` 可选引擎覆盖。Safetensors 以 FP16/BF16 mmap 加载，FP8 的 ISQ 路径在 M11 评估。
 
@@ -218,7 +219,23 @@ cargo run -p uniinfer-cli -- run \
 
 Windows 上 AMD GPU 可用 `--features ep-directml` 走 DirectML；CPU 构建直接运行。
 
-### 可选：Whisper 语音转写
+### 语音转写：ONNX 优先
+
+```bash
+models/fetch-onnx-whisper.sh
+
+cargo run -p uniinfer-cli -- serve \
+  --manifest models/whisper-tiny.en-onnx/manifest.toml \
+  --addr 127.0.0.1:8080
+
+curl -X POST http://127.0.0.1:8080/v1/audio/transcriptions \
+  -F model=whisper-tiny.en-onnx \
+  -F file=@hello.wav
+```
+
+`OnnxEngine` 检测到清单中的 encoder/decoder 文件后使用 ONNX encoder/decoder ASR 适配器；`/v1/audio/transcriptions` 和 `AudioSlot` 不依赖具体引擎。输入 WAV 必须是清单 `[audio].sample_rate` 指定的采样率、单声道、PCM16。
+
+可选 GGML 路径：
 
 ```bash
 models/fetch-whisper.sh
@@ -226,13 +243,9 @@ models/fetch-whisper.sh
 cargo run -p uniinfer-cli --features whisper -- serve \
   --manifest models/whisper-large-v3-turbo-ggml/manifest.toml \
   --addr 127.0.0.1:8080
-
-curl -X POST http://127.0.0.1:8080/v1/audio/transcriptions \
-  -F model=whisper-large-v3-turbo \
-  -F file=@hello.wav
 ```
 
-输入 WAV 必须是清单 `[audio].sample_rate` 指定的采样率、单声道、PCM16。`/v1/audio/transcriptions` 不依赖某个引擎；`whisper` feature 仅用于启用当前 GGML 引擎，未启用时加载 GGML 音频清单会返回 `unsupported_format`。`WhisperEngine` 当前按 CPU 运行，模型来自 ModelScope `ivrit-ai/yi-whisper-large-v3-turbo-ggml`。
+`whisper` feature 只装配 GGML 引擎；未启用时加载 GGML 音频清单会返回 `unsupported_format`。该 feature 构建需要 CMake；仓库 `.cargo/config.toml` 跳过 bindgen，使用 whisper.cpp 随附绑定。GGML 模型来自 ModelScope `ivrit-ai/yi-whisper-large-v3-turbo-ggml`，ONNX 模型来自 ModelScope `onnx-community/whisper-tiny.en-ONNX`。
 
 ### 可选：llama.cpp 内置引擎（GGUF）
 
@@ -437,7 +450,7 @@ crates/
   uniinfer-registry      # 格式+模态路由、预检、SessionLease、显存预算
   uniinfer-service       # Runtime、文本/语音 Slot、统一 Permit 与 ModelView
   uniinfer-engine-set    # 默认引擎装配与 engine feature 收敛
-  uniinfer-engine-onnx   # ort + GenAI KV cache；EP feature 门控
+  uniinfer-engine-onnx   # ort + GenAI KV cache + ONNX Whisper ASR；EP feature 门控
   uniinfer-engine-candle # candle-core/transformers；GGUF / Safetensors
   uniinfer-engine-whisper # whisper.cpp；GGML 语音转写引擎（可选 feature）
   uniinfer-engine-llama  # llama.cpp；可选 GGUF 引擎
