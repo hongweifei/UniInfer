@@ -7,6 +7,7 @@ use axum::response::sse::{KeepAlive, Sse};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::mpsc;
+use uniinfer_backends::FinishReason;
 use uniinfer_backends::stop::StopMatcher;
 use uniinfer_backends::utf8::Utf8Decoder;
 use uniinfer_core::EngineError;
@@ -37,6 +38,8 @@ pub(super) async fn stream_response(generation: Generation) -> Result<Response, 
         max_tokens,
         stop,
         sampling,
+        prompt_tokens,
+        include_usage,
         cancel,
         ..
     } = generation;
@@ -71,13 +74,21 @@ pub(super) async fn stream_response(generation: Generation) -> Result<Response, 
         if open && !tail.is_empty() {
             let _ = tx.blocking_send(StreamEvent::Delta(tail));
         }
-        match result {
-            Ok(_) | Err(EngineError::Cancelled) => {}
+        let (finish, completion_tokens) = match result {
+            Ok(output) => (reason(output.finish), output.tokens),
+            Err(EngineError::Cancelled) => ("stop", 0),
             Err(error) => {
                 let _ = tx.blocking_send(StreamEvent::Error(error.into()));
+                ("stop", 0)
             }
+        };
+        let _ = tx.blocking_send(StreamEvent::Finish(finish));
+        if include_usage {
+            let _ = tx.blocking_send(StreamEvent::Usage {
+                prompt_tokens,
+                completion_tokens,
+            });
         }
-        let _ = tx.blocking_send(StreamEvent::Finish);
         let _ = tx.blocking_send(StreamEvent::Done);
         task_state.router.unregister(&task_session);
     });
@@ -91,4 +102,11 @@ pub(super) async fn stream_response(generation: Generation) -> Result<Response, 
         HeaderValue::from_str(&session_id).map_err(|_| ApiError::internal("invalid session id"))?,
     );
     Ok(response)
+}
+
+fn reason(finish: FinishReason) -> &'static str {
+    match finish {
+        FinishReason::Length => "length",
+        FinishReason::Eos | FinishReason::SinkClosed => "stop",
+    }
 }

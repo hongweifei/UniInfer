@@ -10,7 +10,11 @@ use crate::error::ApiError;
 
 pub(crate) enum StreamEvent {
     Delta(String),
-    Finish,
+    Finish(&'static str),
+    Usage {
+        prompt_tokens: usize,
+        completion_tokens: usize,
+    },
     Error(ApiError),
     Done,
 }
@@ -27,7 +31,19 @@ pub(crate) fn stream(
             StreamEvent::Delta(text) => {
                 Event::default().data(chunk_json(&id, &model, created, &text))
             }
-            StreamEvent::Finish => Event::default().data(finish_json(&id, &model, created)),
+            StreamEvent::Finish(reason) => {
+                Event::default().data(finish_json(&id, &model, created, reason))
+            }
+            StreamEvent::Usage {
+                prompt_tokens,
+                completion_tokens,
+            } => Event::default().data(usage_json(
+                &id,
+                &model,
+                created,
+                prompt_tokens,
+                completion_tokens,
+            )),
             StreamEvent::Error(error) => Event::default()
                 .event("error")
                 .data(json!({"code": error.code, "message": error.message}).to_string()),
@@ -36,7 +52,7 @@ pub(crate) fn stream(
     })
 }
 
-fn finish_json(id: &str, model: &str, created: u64) -> String {
+fn finish_json(id: &str, model: &str, created: u64, reason: &str) -> String {
     json!({
         "id": id,
         "object": "chat.completion.chunk",
@@ -45,7 +61,7 @@ fn finish_json(id: &str, model: &str, created: u64) -> String {
         "choices": [{
             "index": 0,
             "delta": {},
-            "finish_reason": "stop"
+            "finish_reason": reason
         }]
     })
     .to_string()
@@ -62,6 +78,28 @@ fn chunk_json(id: &str, model: &str, created: u64, text: &str) -> String {
             "delta": {"content": text},
             "finish_reason": null
         }]
+    })
+    .to_string()
+}
+
+fn usage_json(
+    id: &str,
+    model: &str,
+    created: u64,
+    prompt_tokens: usize,
+    completion_tokens: usize,
+) -> String {
+    json!({
+        "id": id,
+        "object": "chat.completion.chunk",
+        "created": created,
+        "model": model,
+        "choices": [],
+        "usage": {
+            "prompt_tokens": prompt_tokens,
+            "completion_tokens": completion_tokens,
+            "total_tokens": prompt_tokens + completion_tokens
+        }
     })
     .to_string()
 }

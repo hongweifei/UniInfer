@@ -108,7 +108,7 @@ async fn streaming_emits_deltas_and_done() {
         .to_bytes();
     let text = String::from_utf8_lossy(&bytes);
     assert!(text.contains("\"content\":\"c\""));
-    assert!(text.contains("\"finish_reason\":\"stop\""));
+    assert!(text.contains("\"finish_reason\":\"length\""));
     assert!(text.contains("[DONE]"));
 }
 
@@ -569,4 +569,29 @@ async fn sampling_parameters_are_validated() {
         .await
         .expect("response");
     assert_eq!(response.status(), StatusCode::OK);
+}
+
+#[tokio::test]
+async fn streaming_usage_is_emitted_when_requested() {
+    let body = json!({
+        "model": "tiny-byte-onnx",
+        "messages": [{"role": "user", "content": "ab"}],
+        "max_tokens": 3,
+        "stream": true,
+        "stream_options": {"include_usage": true}
+    })
+    .to_string();
+    let response = app()
+        .oneshot(post("/v1/chat/completions", &body))
+        .await
+        .expect("response");
+    let bytes = response
+        .into_body()
+        .collect()
+        .await
+        .expect("body")
+        .to_bytes();
+    let text = String::from_utf8_lossy(&bytes);
+    assert!(text.contains("\"usage\""));
+    assert!(text.contains("\"completion_tokens\":3"));
 }

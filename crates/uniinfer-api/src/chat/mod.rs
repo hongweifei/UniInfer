@@ -37,6 +37,14 @@ pub(crate) struct ChatRequest {
     top_k: Option<usize>,
     #[serde(default)]
     seed: Option<u64>,
+    #[serde(default)]
+    stream_options: Option<StreamOptions>,
+}
+
+#[derive(Debug, Deserialize)]
+struct StreamOptions {
+    #[serde(default)]
+    include_usage: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -71,6 +79,7 @@ pub(super) struct Generation {
     pub(super) max_tokens: usize,
     pub(super) stop: Vec<String>,
     pub(super) sampling: Sampling,
+    pub(super) include_usage: bool,
     pub(super) cancel: CancelToken,
 }
 
@@ -133,6 +142,9 @@ pub(crate) async fn chat(
         max_tokens,
         stop,
         sampling,
+        include_usage: request
+            .stream_options
+            .is_some_and(|options| options.include_usage),
         cancel,
     };
 

@@ -411,6 +411,8 @@ curl -N http://127.0.0.1:8080/v1/chat/completions \
 
 采样参数：`temperature`（0–2，0 为 greedy）、`top_p`（0–1）、`top_k`（0–4096，0 表示不截断）与 `seed`。只传 `top_p`/`top_k`/`seed` 而未传 `temperature` 时默认 `temperature=1.0`；非法取值返回 `400 invalid_sampling`。
 
+`finish_reason` 区分 `stop`（EOS 或 stop 串）与 `length`（达到 max_tokens）。流式请求可用 `stream_options.include_usage: true` 在 `[DONE]` 前收到包含 prompt/completion/total tokens 的 usage chunk。
+
 图像、视频与 TTS 端点尚未实现。请求会得到稳定错误，而不是伪造结果：
 
 ```bash
