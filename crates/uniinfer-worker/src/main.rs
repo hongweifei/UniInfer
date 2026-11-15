@@ -1,14 +1,14 @@
 //! Isolated text model worker.
 //!
 //! The parent owns the process; this process owns the native model session.
-//! Requests and replies are newline-delimited JSON on stdin/stdout.
-
-use std::io::{BufRead, Write};
+//! Requests and replies are length-prefixed MessagePack frames on stdin/stdout.
 
 use std::sync::Arc;
 
 use uniinfer_core::{EngineSession, ModelManifest};
-use uniinfer_engine_process::{WireSpec, WireTensor, WorkerRequest, WorkerResponse};
+use uniinfer_engine_process::{
+    WireSpec, WireTensor, WorkerRequest, WorkerResponse, decode_frame, read_frame, write_frame,
+};
 use uniinfer_service::{AudioSlot, ModelSlot, Runtime};
 
 enum WorkerModel {
@@ -51,13 +51,12 @@ fn main() -> anyhow::Result<()> {
         inputs: session.inputs().iter().map(WireSpec::from).collect(),
         outputs: session.outputs().iter().map(WireSpec::from).collect(),
     };
-    writeln!(stdout, "{}", serde_json::to_string(&ready)?)?;
-    stdout.flush()?;
+    write_frame(&mut stdout, &ready)?;
 
     let stdin = std::io::stdin();
-    for line in stdin.lock().lines() {
-        let line = line?;
-        let request: WorkerRequest = serde_json::from_str(&line)?;
+    let mut input = stdin.lock();
+    while let Some(frame) = read_frame(&mut input)? {
+        let request: WorkerRequest = decode_frame(&frame)?;
         match request {
             WorkerRequest::Shutdown => break,
             WorkerRequest::Run { inputs } => {
@@ -74,8 +73,7 @@ fn main() -> anyhow::Result<()> {
                         message: error.to_string(),
                     },
                 };
-                writeln!(stdout, "{}", serde_json::to_string(&response)?)?;
-                stdout.flush()?;
+                write_frame(&mut stdout, &response)?;
             }
         }
     }

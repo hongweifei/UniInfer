@@ -11,7 +11,7 @@ description = "Process-isolated text inference engine"
 [dependencies]
 uniinfer-core.workspace = true
 serde.workspace = true
-serde_json.workspace = true
+rmp-serde.workspace = true
 half.workspace = true
 
 [lints]

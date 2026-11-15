@@ -3,13 +3,15 @@
 //! The parent owns the process lifecycle; the child owns the native engine and
 //! its model. Killing the child is therefore a hard cancellation path even
 //! when the underlying ONNX/Candle loader has no cancellation callback.
+//! Tensor frames use length-prefixed MessagePack, not JSON.
 
-use std::io::{BufRead, BufReader, Write};
+use std::io::{Read, Write};
 use std::path::PathBuf;
 use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
 use std::time::{Duration, Instant};
 
+use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use uniinfer_core::{
     DeviceClass, EngineError, EngineLoadSpec, EngineSession, InferenceEngine, Modality,
@@ -57,6 +59,46 @@ pub enum WorkerResponse {
         code: String,
         message: String,
     },
+}
+
+const MAX_FRAME_BYTES: usize = 512 * 1024 * 1024;
+
+pub fn encode_frame<T: Serialize>(value: &T) -> Result<Vec<u8>> {
+    rmp_serde::to_vec(value).map_err(|error| EngineError::Other(format!("ipc encode: {error}")))
+}
+
+pub fn decode_frame<T: DeserializeOwned>(bytes: &[u8]) -> Result<T> {
+    rmp_serde::from_slice(bytes).map_err(|error| EngineError::Other(format!("ipc decode: {error}")))
+}
+
+pub fn write_frame<W: Write, T: Serialize>(writer: &mut W, value: &T) -> Result<()> {
+    let payload = encode_frame(value)?;
+    let length = u32::try_from(payload.len())
+        .map_err(|_| EngineError::Other("ipc frame exceeds u32".into()))?;
+    writer
+        .write_all(&length.to_le_bytes())
+        .and_then(|_| writer.write_all(&payload))
+        .and_then(|_| writer.flush())
+        .map_err(|error| EngineError::Other(format!("ipc write: {error}")))
+}
+
+/// Read one length-prefixed frame. `Ok(None)` means clean EOF.
+pub fn read_frame<R: Read>(reader: &mut R) -> Result<Option<Vec<u8>>> {
+    let mut header = [0u8; 4];
+    match reader.read_exact(&mut header) {
+        Ok(()) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::UnexpectedEof => return Ok(None),
+        Err(error) => return Err(EngineError::Other(format!("ipc read: {error}"))),
+    }
+    let length = u32::from_le_bytes(header) as usize;
+    if length > MAX_FRAME_BYTES {
+        return Err(EngineError::Other(format!("ipc frame too large: {length}")));
+    }
+    let mut payload = vec![0u8; length];
+    reader
+        .read_exact(&mut payload)
+        .map_err(|error| EngineError::Other(format!("ipc read: {error}")))?;
+    Ok(Some(payload))
 }
 
 impl WireTensor {
@@ -242,22 +284,18 @@ impl InferenceEngine for ProcessEngine {
             .take()
             .ok_or_else(|| EngineError::LoadFailed("worker stdin unavailable".into()))?;
         let (ready_tx, ready_rx) = mpsc::channel();
-        let (line_tx, line_rx) = mpsc::channel();
+        let (frame_tx, frame_rx) = mpsc::channel();
         std::thread::spawn(move || {
-            let mut reader = BufReader::new(stdout);
-            let mut line = String::new();
-            if reader.read_line(&mut line).unwrap_or(0) > 0 {
-                let _ = ready_tx.send(line.clone());
+            let mut stdout = stdout;
+            match read_frame(&mut stdout) {
+                Ok(Some(frame)) => {
+                    let _ = ready_tx.send(frame);
+                }
+                Ok(None) | Err(_) => return,
             }
-            loop {
-                line.clear();
-                match reader.read_line(&mut line) {
-                    Ok(0) | Err(_) => break,
-                    Ok(_) => {
-                        if line_tx.send(line.clone()).is_err() {
-                            break;
-                        }
-                    }
+            while let Ok(Some(frame)) = read_frame(&mut stdout) {
+                if frame_tx.send(frame).is_err() {
+                    break;
                 }
             }
         });
@@ -279,7 +317,7 @@ impl InferenceEngine for ProcessEngine {
                 }
             }
         };
-        let ready: WorkerResponse = serde_json::from_str(&ready).map_err(|error| {
+        let ready: WorkerResponse = decode_frame(&ready).map_err(|error| {
             let _ = child.kill();
             let _ = child.wait();
             EngineError::LoadFailed(format!("worker ready: {error}"))
@@ -294,7 +332,7 @@ impl InferenceEngine for ProcessEngine {
             io: std::sync::Mutex::new(ProcessIo {
                 child,
                 stdin,
-                reply: line_rx,
+                reply: frame_rx,
             }),
             inputs: inputs.into_iter().map(WireSpec::into_spec).collect(),
             outputs: outputs.into_iter().map(WireSpec::into_spec).collect(),
@@ -305,7 +343,7 @@ impl InferenceEngine for ProcessEngine {
 struct ProcessIo {
     child: Child,
     stdin: ChildStdin,
-    reply: Receiver<String>,
+    reply: Receiver<Vec<u8>>,
 }
 
 struct ProcessSession {
@@ -320,14 +358,10 @@ impl ProcessSession {
             .io
             .lock()
             .map_err(|_| EngineError::Other("process session lock poisoned".into()))?;
-        let line = serde_json::to_string(request)
-            .map_err(|error| EngineError::Other(format!("worker request: {error}")))?;
-        writeln!(io.stdin, "{line}")
-            .and_then(|_| io.stdin.flush())
-            .map_err(|error| EngineError::LoadFailed(format!("worker stdin: {error}")))?;
-        let line = match timeout {
+        write_frame(&mut io.stdin, request)?;
+        let frame = match timeout {
             Some(timeout) => match io.reply.recv_timeout(timeout) {
-                Ok(line) => line,
+                Ok(frame) => frame,
                 Err(_) => {
                     let _ = io.child.kill();
                     let _ = io.child.wait();
@@ -339,9 +373,7 @@ impl ProcessSession {
                 .recv()
                 .map_err(|_| EngineError::Other("worker exited".into()))?,
         };
-        match serde_json::from_str::<WorkerResponse>(&line)
-            .map_err(|error| EngineError::Other(format!("worker reply: {error}")))?
-        {
+        match decode_frame::<WorkerResponse>(&frame)? {
             WorkerResponse::Outputs { outputs } => {
                 outputs.into_iter().map(WireTensor::into_tensor).collect()
             }
