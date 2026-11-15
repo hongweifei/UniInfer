@@ -78,6 +78,7 @@ fn model_json(slot: &dyn ModelView) -> Value {
         "modalities": manifest.modalities,
         "context_len": manifest.context_len,
         "streaming_capable": manifest.streaming_capable,
+        "loaded": true,
         "engine": slot.engine_name(),
         "devices": slot.placement().devices.iter().map(|device| device.class).collect::<Vec<_>>(),
         "placement": slot.placement(),
@@ -93,20 +94,89 @@ fn placement_json(slot: &dyn ModelView) -> Value {
     })
 }
 
+fn catalog_model_json(state: &AppState, id: &str, entry: &crate::state::CatalogEntry) -> Value {
+    if let Some(slot) = state.router.peek_slot(id) {
+        return model_json(slot.as_ref());
+    }
+    if let Some(slot) = state
+        .audio_slots
+        .lock()
+        .ok()
+        .and_then(|slots| slots.get(id).cloned())
+    {
+        return model_json(slot.as_ref());
+    }
+    let manifest = &entry.manifest;
+    match state.runtime.probe_manifest(manifest) {
+        Ok(route) => json!({
+            "id": manifest.id,
+            "object": "model",
+            "owned_by": "uniinfer",
+            "format": manifest.format,
+            "quantization": manifest.quantization,
+            "modalities": manifest.modalities,
+            "context_len": manifest.context_len,
+            "streaming_capable": manifest.streaming_capable,
+            "loaded": false,
+            "engine": route.engine_name,
+            "devices": route.placement.devices.iter().map(|device| device.class).collect::<Vec<_>>(),
+            "placement": route.placement,
+        }),
+        Err(error) => json!({
+            "id": manifest.id,
+            "object": "model",
+            "owned_by": "uniinfer",
+            "format": manifest.format,
+            "quantization": manifest.quantization,
+            "modalities": manifest.modalities,
+            "context_len": manifest.context_len,
+            "streaming_capable": manifest.streaming_capable,
+            "loaded": false,
+            "engine": Value::Null,
+            "devices": [],
+            "placement": Value::Null,
+            "route_error": {"code": error.code(), "message": error.to_string()},
+        }),
+    }
+}
+
+fn catalog_placement_json(state: &AppState, id: &str, entry: &crate::state::CatalogEntry) -> Value {
+    if let Some(slot) = state.router.peek_slot(id) {
+        return placement_json(slot.as_ref());
+    }
+    if let Some(slot) = state
+        .audio_slots
+        .lock()
+        .ok()
+        .and_then(|slots| slots.get(id).cloned())
+    {
+        return placement_json(slot.as_ref());
+    }
+    match state.runtime.probe_manifest(&entry.manifest) {
+        Ok(route) => json!({
+            "id": id,
+            "loaded": false,
+            "engine": route.engine_name,
+            "placement": route.placement,
+            "fallback_reason": route.placement.fallback_reason,
+        }),
+        Err(error) => json!({
+            "id": id,
+            "loaded": false,
+            "engine": Value::Null,
+            "placement": Value::Null,
+            "fallback_reason": Value::Null,
+            "route_error": {"code": error.code(), "message": error.to_string()},
+        }),
+    }
+}
+
 async fn models(State(state): State<AppState>) -> Json<Value> {
     let data = state
-        .router
-        .slots()
-        .values()
-        .map(|slot| model_json(slot.as_ref()))
+        .catalog
+        .iter()
+        .map(|(id, entry)| catalog_model_json(&state, id, entry))
         .collect::<Vec<_>>();
-    let mut data = data;
-    data.extend(
-        state
-            .audio_slots
-            .values()
-            .map(|slot| model_json(slot.as_ref())),
-    );
     Json(json!({"object": "list", "data": data}))
 }
 
@@ -125,18 +195,10 @@ async fn devices(State(state): State<AppState>) -> Json<Value> {
         })
         .collect::<Vec<_>>();
     let models = state
-        .router
-        .slots()
-        .values()
-        .map(|slot| placement_json(slot.as_ref()))
+        .catalog
+        .iter()
+        .map(|(id, entry)| catalog_placement_json(&state, id, entry))
         .collect::<Vec<_>>();
-    let mut models = models;
-    models.extend(
-        state
-            .audio_slots
-            .values()
-            .map(|slot| placement_json(slot.as_ref())),
-    );
     Json(json!({"devices": devices, "models": models}))
 }
 

@@ -144,14 +144,32 @@ async fn handle_client(
             channels,
             asr_model,
         } => {
-            let Some(selected) = state.router.slot(&model) else {
+            let Some(entry) = state.catalog_entry(&model) else {
                 return tx
                     .send(error_event(
                         "model_not_found",
-                        "requested model is not loaded",
+                        "requested model is not configured",
                     ))
                     .await
                     .map_err(|_| "channel closed".to_string());
+            };
+            if entry.audio_only {
+                return tx
+                    .send(error_event(
+                        "model_not_text",
+                        "realtime text model is audio-only",
+                    ))
+                    .await
+                    .map_err(|_| "channel closed".to_string());
+            }
+            let selected = match state.text_slot(&model).await {
+                Ok(slot) => slot,
+                Err(error) => {
+                    return tx
+                        .send(error_event(error.code(), &error.to_string()))
+                        .await
+                        .map_err(|_| "channel closed".to_string());
+                }
             };
             let model_id = selected.manifest().id.clone();
             if let Some(channel) = channels
@@ -168,7 +186,7 @@ async fn handle_client(
             }
             let audio = channels.iter().any(|channel| channel == "audio");
             let asr_slot = if audio {
-                match select_asr(state, asr_model.as_deref()) {
+                match select_asr(state, asr_model.as_deref()).await {
                     Ok(slot) => slot,
                     Err(message) => {
                         return tx
@@ -221,19 +239,28 @@ async fn handle_client(
     }
 }
 
-fn select_asr(state: &AppState, requested: Option<&str>) -> Result<Option<Arc<AudioSlot>>, String> {
+async fn select_asr(
+    state: &AppState,
+    requested: Option<&str>,
+) -> Result<Option<Arc<AudioSlot>>, String> {
     if let Some(model) = requested {
+        if !state.catalog.contains_key(model) {
+            return Err(format!("ASR model {model} is not configured"));
+        }
         return state
-            .audio_slots
-            .get(model)
-            .cloned()
+            .audio_slot(model)
+            .await
             .map(Some)
-            .ok_or_else(|| format!("ASR model {model} is not loaded"));
+            .map_err(|error| error.to_string());
     }
-    match state.audio_slots.len() {
-        0 => Ok(None),
-        1 => Ok(state.audio_slots.values().next().cloned()),
-        _ => Err("multiple ASR models are loaded; set asr_model explicitly".into()),
+    match state.audio_catalog_ids().as_slice() {
+        [] => Ok(None),
+        [model] => state
+            .audio_slot(model)
+            .await
+            .map(Some)
+            .map_err(|error| error.to_string()),
+        _ => Err("multiple ASR models are configured; set asr_model explicitly".into()),
     }
 }
 

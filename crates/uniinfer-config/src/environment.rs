@@ -17,6 +17,11 @@ pub(crate) fn apply(config: &mut UniInferConfig) -> Result<()> {
             .parse()
             .map_err(|error| ConfigError::Invalid(format!("UNIINFER_MAX_BODY_BYTES: {error}")))?;
     }
+    if let Ok(value) = std::env::var("UNIINFER_MAX_LOADED_MODELS") {
+        config.server.max_loaded_models = value.parse().map_err(|error| {
+            ConfigError::Invalid(format!("UNIINFER_MAX_LOADED_MODELS: {error}"))
+        })?;
+    }
     if let Ok(value) = std::env::var("UNIINFER_TOKEN") {
         config.server.token = if value.is_empty() { None } else { Some(value) };
     }

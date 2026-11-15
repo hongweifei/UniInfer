@@ -92,12 +92,16 @@ pub(crate) async fn chat(
     State(state): State<AppState>,
     ApiJson(request): ApiJson<ChatRequest>,
 ) -> Result<Response, ApiError> {
-    let slot = state.router.slot(&request.model).ok_or_else(|| {
-        ApiError::not_found(
+    if !state.catalog.contains_key(&request.model) {
+        return Err(ApiError::not_found(
             "model_not_found",
-            format!("model {} is not loaded", request.model),
-        )
-    })?;
+            format!("model {} is not configured", request.model),
+        ));
+    }
+    let slot = state
+        .text_slot(&request.model)
+        .await
+        .map_err(ApiError::from)?;
     let messages = request
         .messages
         .iter()

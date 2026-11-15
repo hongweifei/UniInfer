@@ -383,6 +383,8 @@ addr = "127.0.0.1:8080"
 queue_timeout_ms = 30000
 max_body_bytes = 33554432
 # token = "change-me"
+# 0 = 不限；1 表示每个类别最多保留一个已加载模型（LRU）
+max_loaded_models = 0
 
 [[models]]
 manifest = "models/tiny-onnx/manifest.toml"
@@ -392,6 +394,8 @@ tags = ["onnx", "text", "fixture"]
 ```
 
 优先级：默认值 < 配置文件（`--config` 或 `UNIINFER_CONFIG`） < `UNIINFER_*` 环境变量 < CLI 覆盖参数。模型路径相对配置文件解析；GUI 可通过 `GET/PUT /v1/config` 读取和保存配置，服务端返回 `restart_required: true`，由 GUI 决定重启或提示用户。
+
+模型按请求懒加载：启动时只解析清单，不分配权重；`/v1/models` 对未加载模型返回 `loaded: false` 和探测到的路由。`server.max_loaded_models` 非零时按文本/音频类别分别执行 LRU 淘汰；请求仍持有的 `Arc` 会继续完成，不会被强行中断。
 
 ### 调用
 

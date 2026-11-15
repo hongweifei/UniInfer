@@ -35,6 +35,9 @@ pub struct ServerConfig {
     pub max_body_bytes: usize,
     #[serde(default)]
     pub token: Option<String>,
+    /// Maximum models kept loaded per category; `0` means unbounded.
+    #[serde(default)]
+    pub max_loaded_models: usize,
 }
 
 fn default_addr() -> SocketAddr {
@@ -56,6 +59,7 @@ impl Default for ServerConfig {
             queue_timeout_ms: default_queue_timeout_ms(),
             max_body_bytes: default_max_body_bytes(),
             token: None,
+            max_loaded_models: 0,
         }
     }
 }

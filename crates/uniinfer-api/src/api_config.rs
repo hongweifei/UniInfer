@@ -11,6 +11,7 @@ pub struct ApiConfig {
     pub queue_timeout: Duration,
     pub token: Option<String>,
     pub max_body_bytes: usize,
+    pub max_loaded_models: usize,
     pub config: Option<Arc<ConfigHandle>>,
 }
 
@@ -22,6 +23,7 @@ impl ApiConfig {
             queue_timeout: Duration::from_secs(30),
             token: None,
             max_body_bytes: 32 * 1024 * 1024,
+            max_loaded_models: 0,
             config: None,
         }
     }
@@ -40,6 +42,7 @@ impl ApiConfig {
             queue_timeout: Duration::from_millis(config.server.queue_timeout_ms),
             token: config.server.token.clone(),
             max_body_bytes: config.server.max_body_bytes,
+            max_loaded_models: config.server.max_loaded_models,
             config: Some(handle),
         })
     }

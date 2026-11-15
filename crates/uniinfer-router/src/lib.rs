@@ -3,10 +3,10 @@
 //! The router owns the loaded model slots, the cancellation table and the
 //! active-session gauge. Transport crates keep DTO parsing and wire formats.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::sync::atomic::AtomicU64;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, RwLock};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use thiserror::Error;
@@ -69,33 +69,104 @@ struct CancelEntry {
 }
 
 pub struct ModelRouter {
-    slots: Arc<HashMap<String, Arc<ModelSlot>>>,
+    slots: Arc<RwLock<HashMap<String, Arc<ModelSlot>>>>,
     cancels: CancelTable,
     active: Arc<AtomicUsize>,
     metrics: metrics::Metrics,
     queue_timeout: Duration,
+    max_loaded: usize,
+    lru: Arc<Mutex<VecDeque<String>>>,
 }
 
 impl ModelRouter {
     #[must_use]
     pub fn new(slots: HashMap<String, Arc<ModelSlot>>, queue_timeout: Duration) -> Self {
+        Self::new_with_limit(slots, queue_timeout, 0)
+    }
+
+    #[must_use]
+    pub fn new_with_limit(
+        slots: HashMap<String, Arc<ModelSlot>>,
+        queue_timeout: Duration,
+        max_loaded: usize,
+    ) -> Self {
+        let lru = slots.keys().cloned().collect::<VecDeque<_>>();
         Self {
-            slots: Arc::new(slots),
+            slots: Arc::new(RwLock::new(slots)),
             cancels: Arc::new(Mutex::new(HashMap::new())),
             active: Arc::new(AtomicUsize::new(0)),
             metrics: metrics::Metrics::default(),
             queue_timeout,
+            max_loaded,
+            lru: Arc::new(Mutex::new(lru)),
         }
     }
 
     #[must_use]
-    pub fn slots(&self) -> &HashMap<String, Arc<ModelSlot>> {
-        &self.slots
+    pub fn slots(&self) -> Vec<Arc<ModelSlot>> {
+        self.slots
+            .read()
+            .map(|slots| slots.values().cloned().collect())
+            .unwrap_or_default()
     }
 
     #[must_use]
     pub fn slot(&self, id: &str) -> Option<Arc<ModelSlot>> {
-        self.slots.get(id).cloned()
+        let slot = self
+            .slots
+            .read()
+            .ok()
+            .and_then(|slots| slots.get(id).cloned())?;
+        self.touch(id);
+        Some(slot)
+    }
+
+    /// Read a loaded slot without changing its LRU position.
+    #[must_use]
+    pub fn peek_slot(&self, id: &str) -> Option<Arc<ModelSlot>> {
+        self.slots
+            .read()
+            .ok()
+            .and_then(|slots| slots.get(id).cloned())
+    }
+
+    /// Insert a lazily loaded model. Replacing an existing entry is a no-op
+    /// when another request won the load race.
+    pub fn insert_slot(&self, id: &str, slot: Arc<ModelSlot>) -> Result<()> {
+        {
+            let mut slots = self
+                .slots
+                .write()
+                .map_err(|_| EngineError::Other("model catalog lock poisoned".into()))?;
+            slots.entry(id.to_owned()).or_insert(slot);
+        }
+        self.touch(id);
+        self.evict();
+        Ok(())
+    }
+
+    fn touch(&self, id: &str) {
+        if let Ok(mut lru) = self.lru.lock() {
+            lru.retain(|entry| entry != id);
+            lru.push_back(id.to_owned());
+        }
+    }
+
+    fn evict(&self) {
+        if self.max_loaded == 0 {
+            return;
+        }
+        let Ok(mut lru) = self.lru.lock() else {
+            return;
+        };
+        while lru.len() > self.max_loaded {
+            let Some(oldest) = lru.pop_front() else {
+                break;
+            };
+            if let Ok(mut slots) = self.slots.write() {
+                slots.remove(&oldest);
+            }
+        }
     }
 
     /// Resolve a model, validate context, acquire its permit and register

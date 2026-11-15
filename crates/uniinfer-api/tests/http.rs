@@ -672,3 +672,93 @@ async fn model_manifest_can_be_read_and_replaced() {
         .expect("saved manifest");
     assert_eq!(saved.context_len, 32);
 }
+
+#[tokio::test]
+async fn models_are_lazy_loaded_on_first_request() {
+    let app = app();
+    let body = body_json(
+        app.clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/v1/models")
+                    .body(Body::empty())
+                    .expect("request"),
+            )
+            .await
+            .expect("models"),
+    )
+    .await;
+    assert_eq!(body["data"][0]["loaded"], false);
+
+    let request = json!({
+        "model": "tiny-byte-onnx",
+        "messages": [{"role": "user", "content": "ab"}],
+        "max_tokens": 1
+    })
+    .to_string();
+    let response = app
+        .clone()
+        .oneshot(post("/v1/chat/completions", &request))
+        .await
+        .expect("chat");
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let body = body_json(
+        app.oneshot(
+            Request::builder()
+                .uri("/v1/models")
+                .body(Body::empty())
+                .expect("request"),
+        )
+        .await
+        .expect("models"),
+    )
+    .await;
+    assert_eq!(body["data"][0]["loaded"], true);
+}
+
+#[tokio::test]
+async fn max_loaded_models_evicts_lru() {
+    let fixture = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../models/tiny-onnx");
+    let mut config = ApiConfig::new(fixture.join("manifest.toml")).with_manifests(vec![
+        fixture.join("manifest.toml"),
+        fixture.join("manifest-2.toml"),
+    ]);
+    config.max_loaded_models = 1;
+    let app = routes::router(AppState::new(&config).expect("state"));
+
+    for model in ["tiny-byte-onnx", "tiny-byte-onnx-2"] {
+        let body = json!({
+            "model": model,
+            "messages": [{"role": "user", "content": "ab"}],
+            "max_tokens": 1
+        })
+        .to_string();
+        let response = app
+            .clone()
+            .oneshot(post("/v1/chat/completions", &body))
+            .await
+            .expect("chat");
+        assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    let body = body_json(
+        app.oneshot(
+            Request::builder()
+                .uri("/v1/models")
+                .body(Body::empty())
+                .expect("request"),
+        )
+        .await
+        .expect("models"),
+    )
+    .await;
+    let loaded = body["data"]
+        .as_array()
+        .expect("models")
+        .iter()
+        .filter(|entry| entry["loaded"] == true)
+        .map(|entry| entry["id"].as_str().unwrap_or_default())
+        .collect::<Vec<_>>();
+    assert_eq!(loaded, vec!["tiny-byte-onnx-2"]);
+}
