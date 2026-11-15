@@ -14,6 +14,7 @@ pub use device::{
 pub use engine::{EngineCapabilities, EngineLoadSpec, EngineSession, InferenceEngine};
 pub use error::{EngineError, Result};
 pub use manifest::{
-    Modality, ModelFile, ModelFormat, ModelManifest, PlacementConfig, Quantization, TextConfig,
+    AudioConfig, Modality, ModelFile, ModelFormat, ModelManifest, PlacementConfig, Quantization,
+    TextConfig,
 };
 pub use tensor::{Tensor, TensorData, TensorDtype, TensorSpec};

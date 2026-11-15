@@ -17,7 +17,7 @@
 
 ## 项目状态
 
-**M0 已交付，M1 已接通，M3 的 ASR 切片已落地。** Trait、Manifest、Registry、ONNX CPU 引擎、字节级文本后端与 CLI 可运行；REST/SSE、会话取消、错误信封、`/v1/models`、`/metrics`、文本基线测量与 EP 编译矩阵均已接通。音频转写通过 `whisper` feature 提供 Whisper GGML → 文本的独立 Backend；实时 ASR/TTS 编排仍属于 M3 后续。
+**M0 已交付，M1 已接通，M3 的 ASR 切片已落地。** Trait、Manifest、Registry、ONNX CPU 引擎、字节级文本后端与 CLI 可运行；REST/SSE、会话取消、错误信封、`/v1/models`、`/metrics`、文本基线测量与 EP 编译矩阵均已接通。语音转写是统一的 `audio` F32 → `text` U8 引擎契约，由 Registry 按格式 + 模态选择：ONNX 引擎优先注册，`whisper` feature 只是当前 GGML 引擎实现，不是转写能力的边界；实时 ASR/TTS 编排仍属于 M3 后续。
 
 ## 目录
 
@@ -144,7 +144,7 @@ pub trait InferenceEngine: Send + Sync {
 | Safetensors | 视频生成 | `CandleEngine`（candle-video / plakat） | — | batch |
 | ONNX | 实时预览帧 | `OnnxEngine` | — | realtime |
 | ONNX | 实时逐帧视频 | `OnnxEngine` + RAVE | — | realtime |
-| Whisper GGML | 语音转写 | `WhisperEngine` | — | batch |
+| GGML | 语音转写 | Registry 路由（当前 `WhisperEngine`） | 可新增 ONNX ASR 引擎 | batch |
 
 **量化**：ONNX 支持 FP32、FP16、INT8 与 INT4（如 Qwen3 ONNX int4 GenAI bundle）；GGUF 覆盖 Q2_K–Q8_0、Q4_0、Q8_0；FP8 在加载期返回 `UnsupportedQuantization` 并给出替代建议；IQ/MXFP4 由 `frink` 可选引擎覆盖。Safetensors 以 FP16/BF16 mmap 加载，FP8 的 ISQ 路径在 M11 评估。
 
@@ -232,7 +232,7 @@ curl -X POST http://127.0.0.1:8080/v1/audio/transcriptions \
   -F file=@hello.wav
 ```
 
-输入 WAV 必须是 16 kHz、单声道、PCM16；`whisper` feature 未启用时音频清单返回 `unsupported_modality`。`WhisperEngine` 当前按 CPU 运行，模型来自 ModelScope `ivrit-ai/yi-whisper-large-v3-turbo-ggml`。
+输入 WAV 必须是清单 `[audio].sample_rate` 指定的采样率、单声道、PCM16。`/v1/audio/transcriptions` 不依赖某个引擎；`whisper` feature 仅用于启用当前 GGML 引擎，未启用时加载 GGML 音频清单会返回 `unsupported_format`。`WhisperEngine` 当前按 CPU 运行，模型来自 ModelScope `ivrit-ai/yi-whisper-large-v3-turbo-ggml`。
 
 ### 可选：llama.cpp 内置引擎（GGUF）
 
@@ -406,7 +406,7 @@ sha256 = "9f8e6c1d0a4b7e2f5c8d1a3b6e9f0c2d4a7b1e8f3c6d9a2b5e0f4c7d1a8b3e6f"  # �
 | 端点 | 方法 | 用途 |
 | :--- | :--- | :--- |
 | `/v1/chat/completions` | POST | 文本生成，`stream: true` 走 SSE |
-| `/v1/audio/transcriptions` | POST | 语音转写，WAV 16 kHz mono，需 `whisper` feature |
+| `/v1/audio/transcriptions` | POST | 语音转写；WAV + 清单 `[audio]` 契约，按 Registry 路由引擎 |
 | `/v1/audio/speech` | POST | 语音合成 |
 | `/v1/images/generations` | POST | 文生图 |
 | `/v1/images/edits` | POST | img2img / inpaint / outpaint |
@@ -439,7 +439,7 @@ crates/
   uniinfer-engine-set    # 默认引擎装配与 engine feature 收敛
   uniinfer-engine-onnx   # ort + GenAI KV cache；EP feature 门控
   uniinfer-engine-candle # candle-core/transformers；GGUF / Safetensors
-  uniinfer-engine-whisper # whisper.cpp；Whisper GGML 语音转写（可选 feature）
+  uniinfer-engine-whisper # whisper.cpp；GGML 语音转写引擎（可选 feature）
   uniinfer-engine-llama  # llama.cpp；可选 GGUF 引擎
   uniinfer-backends      # Tokenizer、文本生成、PCM/VAD、UTF-8 流
   uniinfer-router        # 模型目录、取消表、活跃请求与队列超时

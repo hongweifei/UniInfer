@@ -282,7 +282,6 @@ async fn stop_array_truncates_streaming() {
     assert!(text.contains("[DONE]"));
 }
 
-#[cfg(feature = "whisper")]
 #[tokio::test]
 async fn audio_endpoint_reports_missing_model() {
     let boundary = "uniinfer-test-boundary";

@@ -20,7 +20,6 @@ pub fn router(state: AppState) -> Router {
         .route("/v1/chat/completions", post(chat))
         .route("/v1/realtime", get(realtime))
         .route("/v1/sessions/{id}/cancel", post(cancel));
-    #[cfg(feature = "whisper")]
     let router = router.route("/v1/audio/transcriptions", post(crate::audio::transcribe));
     router
         .layer(DefaultBodyLimit::max(32 * 1024 * 1024))
@@ -76,17 +75,13 @@ async fn models(State(state): State<AppState>) -> Json<Value> {
         .values()
         .map(|slot| model_json(slot.as_ref()))
         .collect::<Vec<_>>();
-    #[cfg(feature = "whisper")]
-    let data = {
-        let mut data = data;
-        data.extend(
-            state
-                .audio_slots
-                .values()
-                .map(|slot| model_json(slot.as_ref())),
-        );
-        data
-    };
+    let mut data = data;
+    data.extend(
+        state
+            .audio_slots
+            .values()
+            .map(|slot| model_json(slot.as_ref())),
+    );
     Json(json!({"object": "list", "data": data}))
 }
 
@@ -110,17 +105,13 @@ async fn devices(State(state): State<AppState>) -> Json<Value> {
         .values()
         .map(|slot| placement_json(slot.as_ref()))
         .collect::<Vec<_>>();
-    #[cfg(feature = "whisper")]
-    let models = {
-        let mut models = models;
-        models.extend(
-            state
-                .audio_slots
-                .values()
-                .map(|slot| placement_json(slot.as_ref())),
-        );
-        models
-    };
+    let mut models = models;
+    models.extend(
+        state
+            .audio_slots
+            .values()
+            .map(|slot| placement_json(slot.as_ref())),
+    );
     Json(json!({"devices": devices, "models": models}))
 }
 

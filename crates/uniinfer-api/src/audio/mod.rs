@@ -3,7 +3,7 @@
 use axum::Json;
 use axum::extract::{Multipart, State};
 use serde_json::{Value, json};
-use uniinfer_backends::audio::decode_wav_16k_mono;
+use uniinfer_backends::audio::decode_wav_mono;
 
 use crate::error::ApiError;
 use crate::state::AppState;
@@ -38,10 +38,10 @@ pub(crate) async fn transcribe(
 
     let model = model.ok_or_else(|| ApiError::bad_request("missing_model", "model is required"))?;
     let audio = audio.ok_or_else(|| ApiError::bad_request("missing_audio", "file is required"))?;
-    let samples = decode_wav_16k_mono(&audio)?;
     let slot = state.audio_slots.get(&model).cloned().ok_or_else(|| {
         ApiError::not_found("model_not_found", format!("model {model} is not loaded"))
     })?;
+    let samples = decode_wav_mono(&audio, slot.audio_config().sample_rate)?;
     let permit = slot.acquire(state.router.queue_timeout()).await?;
     let text = tokio::task::spawn_blocking(move || {
         let _permit = permit;

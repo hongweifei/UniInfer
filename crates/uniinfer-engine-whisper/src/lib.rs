@@ -16,7 +16,7 @@ use whisper_rs::{
     FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters, WhisperError,
 };
 
-const FORMATS: &[ModelFormat] = &[ModelFormat::Whisper];
+const FORMATS: &[ModelFormat] = &[ModelFormat::Ggml];
 const MODALITIES: &[Modality] = &[Modality::Audio];
 const QUANTIZATIONS: &[Quantization] = &[Quantization::Fp16, Quantization::Fp32];
 const DEVICES: &[DeviceClass] = &[DeviceClass::Cpu];
@@ -60,14 +60,14 @@ impl InferenceEngine for WhisperEngine {
 
     fn supported_modalities(&self, format: ModelFormat) -> &[Modality] {
         match format {
-            ModelFormat::Whisper => MODALITIES,
+            ModelFormat::Ggml => MODALITIES,
             _ => &[],
         }
     }
 
     fn supported_quantizations(&self, format: ModelFormat) -> &[Quantization] {
         match format {
-            ModelFormat::Whisper => QUANTIZATIONS,
+            ModelFormat::Ggml => QUANTIZATIONS,
             _ => &[],
         }
     }
@@ -77,7 +77,7 @@ impl InferenceEngine for WhisperEngine {
     }
 
     fn load_session(&self, spec: EngineLoadSpec) -> Result<Box<dyn EngineSession>> {
-        if spec.manifest.format != ModelFormat::Whisper {
+        if spec.manifest.format != ModelFormat::Ggml {
             return Err(EngineError::UnsupportedFormat(spec.manifest.format));
         }
         let file = spec
@@ -94,7 +94,12 @@ impl InferenceEngine for WhisperEngine {
         let path = spec.base_dir.join(&file.path);
         let context = WhisperContext::new_with_params(&path, WhisperContextParameters::default())
             .map_err(|error| load_error(&path, error))?;
-        Ok(Box::new(WhisperSession::new(Arc::new(context))))
+        let audio = spec.manifest.audio.clone().unwrap_or_default();
+        Ok(Box::new(WhisperSession::new(
+            Arc::new(context),
+            audio.input,
+            audio.output,
+        )))
     }
 }
 
@@ -105,25 +110,29 @@ fn load_error(path: &Path, error: WhisperError) -> EngineError {
 struct WhisperSession {
     context: Arc<WhisperContext>,
     cancel: Arc<AtomicBool>,
+    input_name: String,
+    output_name: String,
     inputs: Vec<TensorSpec>,
     outputs: Vec<TensorSpec>,
 }
 
 impl WhisperSession {
-    fn new(context: Arc<WhisperContext>) -> Self {
+    fn new(context: Arc<WhisperContext>, input_name: String, output_name: String) -> Self {
         Self {
             context,
             cancel: Arc::new(AtomicBool::new(false)),
             inputs: vec![TensorSpec {
-                name: "audio".into(),
+                name: input_name.clone(),
                 dtype: TensorDtype::F32,
                 shape: vec![None],
             }],
             outputs: vec![TensorSpec {
-                name: "text".into(),
+                name: output_name.clone(),
                 dtype: TensorDtype::U8,
                 shape: vec![None],
             }],
+            input_name,
+            output_name,
         }
     }
 }
@@ -143,7 +152,7 @@ impl EngineSession for WhisperSession {
         }
         let samples = inputs
             .iter()
-            .find(|tensor| tensor.name == "audio")
+            .find(|tensor| tensor.name == self.input_name)
             .ok_or_else(|| EngineError::InvalidAudio("missing audio input".into()))?;
         let samples = match &samples.data {
             TensorData::F32(values) => values,
@@ -182,7 +191,11 @@ impl EngineSession for WhisperSession {
             text.push_str(&part);
         }
         let bytes = text.trim().as_bytes().to_vec();
-        let text = Tensor::new("text", vec![bytes.len()], TensorData::U8(bytes))?;
+        let text = Tensor::new(
+            self.output_name.clone(),
+            vec![bytes.len()],
+            TensorData::U8(bytes),
+        )?;
         Ok(vec![text])
     }
 

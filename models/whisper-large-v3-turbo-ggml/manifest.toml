@@ -1,10 +1,14 @@
 schema_version = 1
 id = "whisper-large-v3-turbo"
-format = "whisper"
+format = "ggml"
 quantization = "fp16"
 modalities = ["audio"]
 streaming_capable = false
 context_len = 448
+
+[audio]
+sample_rate = 16000
+channels = 1
 
 [placement]
 policy = "auto"

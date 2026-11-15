@@ -5,7 +5,8 @@ use std::time::Duration;
 
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use uniinfer_core::{
-    EngineError, EngineSession, ModelManifest, PlacementPlan, Result, Tensor, TensorData,
+    AudioConfig, EngineError, EngineSession, ModelManifest, PlacementPlan, Result, Tensor,
+    TensorData, TensorDtype,
 };
 use uniinfer_registry::SessionLease;
 
@@ -14,6 +15,7 @@ use crate::ModelView;
 /// A loaded speech model plus its request permit.
 pub struct AudioSlot {
     lease: Arc<SessionLease>,
+    audio: AudioConfig,
     permit: Arc<Semaphore>,
 }
 
@@ -32,11 +34,40 @@ impl ModelView for AudioSlot {
 }
 
 impl AudioSlot {
-    pub(crate) fn new(lease: Arc<SessionLease>) -> Self {
-        Self {
+    pub(crate) fn new(lease: Arc<SessionLease>) -> Result<Self> {
+        let audio = lease.manifest().audio.clone().unwrap_or_default();
+        let session = lease.session();
+        let input = session
+            .inputs()
+            .iter()
+            .find(|spec| spec.name == audio.input && spec.dtype == TensorDtype::F32)
+            .ok_or_else(|| {
+                EngineError::UnsupportedEngine(format!(
+                    "audio model must expose F32 input {:?}",
+                    audio.input
+                ))
+            })?;
+        let output = session
+            .outputs()
+            .iter()
+            .find(|spec| spec.name == audio.output && spec.dtype == TensorDtype::U8)
+            .ok_or_else(|| {
+                EngineError::UnsupportedEngine(format!(
+                    "audio model must expose U8 output {:?}",
+                    audio.output
+                ))
+            })?;
+        let _ = (input, output);
+        Ok(Self {
             lease,
+            audio,
             permit: Arc::new(Semaphore::new(1)),
-        }
+        })
+    }
+
+    #[must_use]
+    pub fn audio_config(&self) -> &AudioConfig {
+        &self.audio
     }
 
     #[must_use]

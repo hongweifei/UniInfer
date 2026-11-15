@@ -34,6 +34,7 @@ mod tests {
                 sha256: "0".repeat(64),
             }],
             text: None,
+            audio: None,
         }
     }
 

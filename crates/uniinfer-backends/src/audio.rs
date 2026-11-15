@@ -53,8 +53,8 @@ impl EnergyVad {
     }
 }
 
-/// Decode a mono 16 kHz PCM WAV into normalized F32 samples.
-pub fn decode_wav_16k_mono(bytes: &[u8]) -> Result<Vec<f32>> {
+/// Decode a mono PCM WAV at the expected sample rate into normalized F32 samples.
+pub fn decode_wav_mono(bytes: &[u8], expected_rate: u32) -> Result<Vec<f32>> {
     let mut reader = hound::WavReader::new(Cursor::new(bytes))
         .map_err(|error| EngineError::InvalidAudio(format!("wav: {error}")))?;
     let spec = reader.spec();
@@ -64,10 +64,10 @@ pub fn decode_wav_16k_mono(bytes: &[u8]) -> Result<Vec<f32>> {
             spec.channels
         )));
     }
-    if spec.sample_rate != SAMPLE_RATE as u32 {
+    if spec.sample_rate != expected_rate {
         return Err(EngineError::InvalidAudio(format!(
-            "expected {} Hz, got {} Hz",
-            SAMPLE_RATE, spec.sample_rate
+            "expected {expected_rate} Hz, got {} Hz",
+            spec.sample_rate
         )));
     }
 
@@ -144,7 +144,7 @@ mod tests {
     #[test]
     fn decodes_mono_16k_wav() {
         let bytes = wav(&[0, i16::MAX, i16::MIN], 16_000, 1);
-        let samples = decode_wav_16k_mono(&bytes).expect("decode");
+        let samples = decode_wav_mono(&bytes, 16_000).expect("decode");
         assert_eq!(samples.len(), 3);
         assert_eq!(samples[0], 0.0);
         assert!((samples[1] - 1.0).abs() < 1e-4);
@@ -155,12 +155,12 @@ mod tests {
     fn rejects_stereo_and_wrong_rate() {
         let stereo = wav(&[0, 0], 16_000, 2);
         assert!(matches!(
-            decode_wav_16k_mono(&stereo),
+            decode_wav_mono(&stereo, 16_000),
             Err(EngineError::InvalidAudio(_))
         ));
         let rate = wav(&[0], 44_100, 1);
         assert!(matches!(
-            decode_wav_16k_mono(&rate),
+            decode_wav_mono(&rate, 16_000),
             Err(EngineError::InvalidAudio(_))
         ));
     }

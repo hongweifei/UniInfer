@@ -12,9 +12,7 @@ use uniinfer_backends::{
 use uniinfer_core::{Device, EngineError, EngineSession, ModelManifest, PlacementPlan, Result};
 use uniinfer_registry::{EngineRegistry, SessionLease};
 
-#[cfg(feature = "whisper")]
 mod audio;
-#[cfg(feature = "whisper")]
 pub use audio::AudioSlot;
 pub use uniinfer_core::CancelToken;
 
@@ -61,7 +59,6 @@ impl Runtime {
     }
 
     /// Load an audio model for transcription.
-    #[cfg(feature = "whisper")]
     pub fn load_audio(&self, manifest_path: &Path) -> Result<Arc<AudioSlot>> {
         let manifest = ModelManifest::load(manifest_path)?;
         if !manifest
@@ -73,7 +70,7 @@ impl Runtime {
             ));
         }
         let lease = Arc::new(self.registry.load(manifest_path)?);
-        Ok(Arc::new(AudioSlot::new(lease)))
+        Ok(Arc::new(AudioSlot::new(lease)?))
     }
 
     /// Load one model and validate the text-generation contract.

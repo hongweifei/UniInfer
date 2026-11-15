@@ -17,7 +17,9 @@ pub enum ModelFormat {
     Onnx,
     Gguf,
     Safetensors,
-    Whisper,
+    /// Raw GGML/GGUF-style tensor bundles; the engine, not the format,
+    /// decides which model families it can execute.
+    Ggml,
 }
 
 impl ModelFormat {
@@ -27,7 +29,7 @@ impl ModelFormat {
             Self::Onnx => "onnx",
             Self::Gguf => "gguf",
             Self::Safetensors => "safetensors",
-            Self::Whisper => "whisper",
+            Self::Ggml => "ggml",
         }
     }
 }
@@ -150,6 +152,47 @@ pub struct TextConfig {
     pub tokenizer_file: Option<PathBuf>,
 }
 
+/// Audio preprocessing contract for speech models.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AudioConfig {
+    #[serde(default = "default_sample_rate")]
+    pub sample_rate: u32,
+    #[serde(default = "default_channels")]
+    pub channels: u16,
+    #[serde(default = "default_audio_input")]
+    pub input: String,
+    #[serde(default = "default_audio_output")]
+    pub output: String,
+}
+
+fn default_sample_rate() -> u32 {
+    16_000
+}
+
+fn default_channels() -> u16 {
+    1
+}
+
+fn default_audio_input() -> String {
+    "audio".into()
+}
+
+fn default_audio_output() -> String {
+    "text".into()
+}
+
+impl Default for AudioConfig {
+    fn default() -> Self {
+        Self {
+            sample_rate: default_sample_rate(),
+            channels: default_channels(),
+            input: default_audio_input(),
+            output: default_audio_output(),
+        }
+    }
+}
+
 /// Placement directives copied from the manifest.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -206,6 +249,8 @@ pub struct ModelManifest {
     pub files: Vec<ModelFile>,
     #[serde(default)]
     pub text: Option<TextConfig>,
+    #[serde(default)]
+    pub audio: Option<AudioConfig>,
 }
 
 impl ModelManifest {
@@ -275,6 +320,23 @@ impl ModelManifest {
             if text.vocab_size == 0 || text.vocab_size > 1_048_576 {
                 return Err(EngineError::ManifestInvalid(
                     "text.vocab_size must be within 1..=1048576".into(),
+                ));
+            }
+        }
+        if let Some(audio) = &self.audio {
+            if !(8_000..=192_000).contains(&audio.sample_rate) {
+                return Err(EngineError::ManifestInvalid(
+                    "audio.sample_rate must be within 8000..=192000".into(),
+                ));
+            }
+            if audio.channels != 1 {
+                return Err(EngineError::ManifestInvalid(
+                    "audio.channels currently must be 1".into(),
+                ));
+            }
+            if audio.input.is_empty() || audio.output.is_empty() {
+                return Err(EngineError::ManifestInvalid(
+                    "audio tensor names must not be empty".into(),
                 ));
             }
         }
@@ -358,6 +420,27 @@ sha256 = "0000000000000000000000000000000000000000000000000000000000000000"
     fn rejects_unknown_quantization_at_parse_time() {
         let raw = base().replace("quantization = \"fp32\"", "quantization = \"q9_k\"");
         assert!(toml::from_str::<ModelManifest>(&raw).is_err());
+    }
+
+    #[test]
+    fn parses_audio_contract() {
+        let raw = base().replace("modalities = [\"text\"]", "modalities = [\"audio\"]")
+            + "\n[audio]\nsample_rate = 16000\nchannels = 1\n";
+        let manifest = parse(&raw);
+        manifest.validate().expect("valid");
+        assert_eq!(manifest.format, ModelFormat::Onnx);
+        let audio = manifest.audio.expect("audio");
+        assert_eq!(audio.sample_rate, 16_000);
+        assert_eq!(audio.input, "audio");
+        assert_eq!(audio.output, "text");
+    }
+
+    #[test]
+    fn rejects_stereo_audio_contract() {
+        let raw = base().replace("modalities = [\"text\"]", "modalities = [\"audio\"]")
+            + "\n[audio]\nchannels = 2\n";
+        let error = parse(&raw).validate().expect_err("must reject");
+        assert!(error.to_string().contains("channels"));
     }
 
     #[test]

@@ -5,14 +5,14 @@ use uniinfer_engine_whisper::WhisperEngine;
 fn advertises_only_whisper_audio_cpu() {
     let engine = WhisperEngine::new();
     assert_eq!(engine.engine_name(), "whisper");
-    assert_eq!(engine.supported_formats(), &[ModelFormat::Whisper]);
+    assert_eq!(engine.supported_formats(), &[ModelFormat::Ggml]);
     assert_eq!(
-        engine.supported_modalities(ModelFormat::Whisper),
+        engine.supported_modalities(ModelFormat::Ggml),
         &[Modality::Audio]
     );
     assert!(
         engine
-            .supported_quantizations(ModelFormat::Whisper)
+            .supported_quantizations(ModelFormat::Ggml)
             .contains(&Quantization::Fp16)
     );
     assert_eq!(engine.supported_devices(), &[DeviceClass::Cpu]);
