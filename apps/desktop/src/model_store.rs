@@ -41,11 +41,25 @@ pub(crate) struct PlanFile {
 }
 
 #[derive(Clone, Debug, Serialize)]
+pub(crate) struct PlanVariant {
+    pub(crate) key: String,
+    pub(crate) label: String,
+    pub(crate) source: String,
+    pub(crate) format: String,
+    pub(crate) quantization: String,
+    pub(crate) total: u64,
+    pub(crate) files: usize,
+    pub(crate) recommended: bool,
+}
+
+#[derive(Clone, Debug, Serialize)]
 pub(crate) struct InstallPlan {
     pub(crate) repo: String,
     pub(crate) format: String,
     pub(crate) files: Vec<PlanFile>,
     pub(crate) total: u64,
+    pub(crate) default_variant: String,
+    pub(crate) variants: Vec<PlanVariant>,
 }
 
 #[derive(Clone, Debug)]
@@ -117,17 +131,32 @@ pub(crate) async fn search_models(
 #[tauri::command]
 pub(crate) async fn plan_model(repo: String, source: Source) -> Result<InstallPlan, String> {
     let (repo_files, base_files) = fetch_repo_files(&repo, source).await?;
-    let plan = build_plan(&repo_files, base_files.as_ref())?;
+    let variants = build_variants(&repo_files, base_files.as_ref())?;
+    let chosen = choose_variant(&variants, None)?;
     Ok(InstallPlan {
         repo,
-        format: plan.format,
-        total: plan.files.iter().map(|file| file.size).sum(),
-        files: plan
+        format: chosen.format.clone(),
+        default_variant: chosen.key.clone(),
+        total: chosen.files.iter().map(|file| file.size).sum(),
+        files: chosen
             .files
             .iter()
             .map(|file| PlanFile {
                 path: file.path.clone(),
                 size: file.size,
+            })
+            .collect(),
+        variants: variants
+            .iter()
+            .map(|variant| PlanVariant {
+                key: variant.key.clone(),
+                label: variant.label.clone(),
+                source: variant.source.clone(),
+                format: variant.format.clone(),
+                quantization: variant.quantization.clone(),
+                total: variant.files.iter().map(|file| file.size).sum(),
+                files: variant.files.len(),
+                recommended: variant.recommended,
             })
             .collect(),
     })
@@ -191,9 +220,10 @@ pub(crate) async fn install_model(
     app: AppHandle,
     repo: String,
     source: Source,
+    variant: Option<String>,
 ) -> Result<InstallResult, String> {
     let (repo_files, base_files) = fetch_repo_files(&repo, source).await?;
-    let plan = build_plan(&repo_files, base_files.as_ref())?;
+    let plan = build_plan_with_variant(&repo_files, base_files.as_ref(), variant.as_deref())?;
     let id = slug(&repo);
     let dir = models_root().join(&id);
     tokio::fs::create_dir_all(&dir)
@@ -316,14 +346,64 @@ pub(crate) async fn install_model(
 }
 
 struct PlannedFiles {
+    #[cfg_attr(not(test), allow(dead_code))]
     format: String,
     files: Vec<RemoteFile>,
 }
 
+#[derive(Clone, Debug)]
+struct VariantSpec {
+    key: String,
+    label: String,
+    source: String,
+    format: String,
+    quantization: String,
+    files: Vec<RemoteFile>,
+    recommended: bool,
+}
+
+#[cfg(test)]
 fn build_plan(
     repo_files: &RepoFiles,
     base_files: Option<&RepoFiles>,
 ) -> Result<PlannedFiles, String> {
+    build_plan_with_variant(repo_files, base_files, None)
+}
+
+fn build_plan_with_variant(
+    repo_files: &RepoFiles,
+    base_files: Option<&RepoFiles>,
+    variant: Option<&str>,
+) -> Result<PlannedFiles, String> {
+    let variants = build_variants(repo_files, base_files)?;
+    let chosen = choose_variant(&variants, variant)?;
+    Ok(PlannedFiles {
+        format: chosen.format.clone(),
+        files: chosen.files.clone(),
+    })
+}
+
+fn choose_variant<'a>(
+    variants: &'a [VariantSpec],
+    key: Option<&str>,
+) -> Result<&'a VariantSpec, String> {
+    if let Some(key) = key.filter(|key| !key.is_empty()) {
+        return variants
+            .iter()
+            .find(|variant| variant.key == key)
+            .ok_or_else(|| format!("找不到下载变体：{key}"));
+    }
+    variants
+        .iter()
+        .find(|variant| variant.recommended)
+        .or_else(|| variants.first())
+        .ok_or_else(|| "没有可下载的模型文件".into())
+}
+
+fn build_variants(
+    repo_files: &RepoFiles,
+    base_files: Option<&RepoFiles>,
+) -> Result<Vec<VariantSpec>, String> {
     let files = &repo_files.files;
     let has = |ext: &str| files.iter().any(|file| file.path.ends_with(ext));
     let format = if has(".gguf") {
@@ -336,39 +416,77 @@ fn build_plan(
         return Err("仓库里没有 GGUF、Safetensors 或 ONNX 模型文件".into());
     };
 
-    let mut selected: Vec<RemoteFile> = Vec::new();
+    let mut variants = Vec::new();
     match format {
         "gguf" => {
-            let candidate = files
+            let mut candidates = files
                 .iter()
                 .filter(|file| {
                     file.path.ends_with(".gguf") && !file.path.to_lowercase().contains("mmproj")
                 })
-                .min_by_key(|file| quant_rank(&file.path))
-                .ok_or_else(|| "没有可用的 GGUF 量化文件".to_string())?;
-            selected.push(remote_file(repo_files, candidate));
-            selected.extend(sidecars(repo_files));
-            if !selected
-                .iter()
-                .any(|file| file.path.ends_with("tokenizer.json"))
-            {
-                let base = base_files.ok_or_else(|| {
-                    "GGUF 仓库没有 tokenizer.json，也没有可用的 base model".to_string()
-                })?;
-                selected.extend(sidecars(base));
+                .collect::<Vec<_>>();
+            if candidates.is_empty() {
+                return Err("没有可用的 GGUF 量化文件".into());
+            }
+            candidates.sort_by(|a, b| {
+                quant_rank(&a.path)
+                    .cmp(&quant_rank(&b.path))
+                    .then_with(|| a.path.cmp(&b.path))
+            });
+            for candidate in candidates {
+                let mut selected = vec![remote_file(repo_files, candidate)];
+                selected.extend(sidecars(repo_files));
+                if !selected
+                    .iter()
+                    .any(|file| file.path.ends_with("tokenizer.json"))
+                {
+                    let base = base_files.ok_or_else(|| {
+                        "GGUF 仓库没有 tokenizer.json，也没有可用的 base model".to_string()
+                    })?;
+                    selected.extend(sidecars(base));
+                }
+                dedup_files(&mut selected);
+                let quantization = quant_label(&candidate.path);
+                variants.push(VariantSpec {
+                    key: format!("gguf:{}", candidate.path),
+                    label: quantization.clone(),
+                    source: candidate.path.clone(),
+                    format: "gguf".into(),
+                    quantization,
+                    files: selected,
+                    recommended: variants.is_empty(),
+                });
             }
         }
         "safetensors" => {
-            selected.extend(
-                files
-                    .iter()
-                    .filter(|file| {
-                        file.path.ends_with(".safetensors")
-                            || file.path.ends_with(".safetensors.index.json")
-                    })
-                    .map(|file| remote_file(repo_files, file)),
-            );
+            let mut selected = files
+                .iter()
+                .filter(|file| {
+                    file.path.ends_with(".safetensors")
+                        || file.path.ends_with(".safetensors.index.json")
+                })
+                .map(|file| remote_file(repo_files, file))
+                .collect::<Vec<_>>();
             selected.extend(sidecars(repo_files));
+            dedup_files(&mut selected);
+            if selected.is_empty() {
+                return Err("没有可用的 Safetensors 模型文件".into());
+            }
+            let source = selected
+                .iter()
+                .find(|file| file.path.ends_with(".safetensors"))
+                .map(|file| file.path.clone())
+                .unwrap_or_default();
+            let quantization = quant_label(&source);
+            variants.push(VariantSpec {
+                key: "safetensors".into(),
+                label: "Safetensors".into(),
+                source,
+                format: "safetensors".into(),
+                quantization,
+                files: selected,
+                recommended: true,
+            });
         }
         "onnx" => {
             let mut groups: std::collections::BTreeMap<String, Vec<&RemoteInfo>> =
@@ -380,26 +498,75 @@ fn build_plan(
                     .map_or(String::new(), |(dir, _)| dir.to_string());
                 groups.entry(dir).or_default().push(file);
             }
-            let group = groups
-                .into_iter()
-                .min_by_key(|(_, items)| items.iter().map(|file| file.size).sum::<u64>())
-                .map(|(_, items)| items)
-                .unwrap_or_default();
-            selected.extend(group.into_iter().map(|file| remote_file(repo_files, file)));
-            selected.extend(sidecars(repo_files));
+            let mut groups = groups.into_iter().collect::<Vec<_>>();
+            groups.sort_by(|a, b| {
+                let a_size = a.1.iter().map(|file| file.size).sum::<u64>();
+                let b_size = b.1.iter().map(|file| file.size).sum::<u64>();
+                a_size.cmp(&b_size).then_with(|| a.0.cmp(&b.0))
+            });
+            if groups.is_empty() {
+                return Err("没有可用的 ONNX 模型文件".into());
+            }
+            for (dir, items) in groups {
+                let mut selected = items
+                    .into_iter()
+                    .map(|file| remote_file(repo_files, file))
+                    .collect::<Vec<_>>();
+                selected.extend(sidecars(repo_files));
+                dedup_files(&mut selected);
+                let label = if dir.is_empty() {
+                    "ONNX 默认".to_string()
+                } else {
+                    dir.clone()
+                };
+                let quantization = quant_label(&label);
+                variants.push(VariantSpec {
+                    key: format!("onnx:{dir}"),
+                    label,
+                    source: dir,
+                    format: "onnx".into(),
+                    quantization,
+                    files: selected,
+                    recommended: variants.is_empty(),
+                });
+            }
         }
         _ => unreachable!(),
     }
-
-    selected.sort_by(|a, b| a.path.cmp(&b.path));
-    selected.dedup_by(|a, b| a.path == b.path);
-    if selected.is_empty() {
+    if variants.is_empty() {
         return Err("没有可下载的模型文件".into());
     }
-    Ok(PlannedFiles {
-        format: format.to_string(),
-        files: selected,
-    })
+    Ok(variants)
+}
+
+fn dedup_files(files: &mut Vec<RemoteFile>) {
+    files.sort_by(|a, b| a.path.cmp(&b.path));
+    files.dedup_by(|a, b| a.path == b.path);
+}
+
+fn quant_label(path: &str) -> String {
+    let lower = path.to_lowercase();
+    for (needle, label) in [
+        ("q8_0", "Q8_0"),
+        ("q6_k", "Q6_K"),
+        ("q5_k_m", "Q5_K_M"),
+        ("q5_k_s", "Q5_K_S"),
+        ("q4_k_m", "Q4_K_M"),
+        ("q4_k_s", "Q4_K_S"),
+        ("q4_0", "Q4_0"),
+        ("q3_k_m", "Q3_K_M"),
+        ("q2_k", "Q2_K"),
+        ("fp8", "FP8"),
+        ("fp16", "FP16"),
+        ("bf16", "BF16"),
+        ("int8", "INT8"),
+        ("int4", "INT4"),
+    ] {
+        if lower.contains(needle) {
+            return label.into();
+        }
+    }
+    "unknown".into()
 }
 
 fn remote_file(repo: &RepoFiles, info: &RemoteInfo) -> RemoteFile {
@@ -893,6 +1060,43 @@ mod tests {
             plan.files
                 .iter()
                 .all(|file| file.url.contains("hf-mirror.com"))
+        );
+    }
+
+    #[test]
+    fn gguf_variants_are_exposed_and_selectable() {
+        let model = repo(
+            "unsloth/Qwen3-0.6B-GGUF",
+            Source::HuggingFace,
+            &[
+                ("Qwen3-0.6B-Q8_0.gguf", 10),
+                ("Qwen3-0.6B-Q4_K_M.gguf", 20),
+                ("config.json", 1),
+            ],
+        );
+        let base = repo(
+            "Qwen/Qwen3-0.6B",
+            Source::HuggingFace,
+            &[("tokenizer.json", 1)],
+        );
+        let variants = build_variants(&model, Some(&base)).expect("variants");
+        assert_eq!(variants.len(), 2);
+        assert_eq!(variants[0].quantization, "Q4_K_M");
+        assert!(variants[0].recommended);
+        let selected =
+            build_plan_with_variant(&model, Some(&base), Some("gguf:Qwen3-0.6B-Q8_0.gguf"))
+                .expect("plan");
+        assert!(
+            selected
+                .files
+                .iter()
+                .any(|file| file.path.ends_with("Q8_0.gguf"))
+        );
+        assert!(
+            !selected
+                .files
+                .iter()
+                .any(|file| file.path.ends_with("Q4_K_M.gguf"))
         );
     }
 
