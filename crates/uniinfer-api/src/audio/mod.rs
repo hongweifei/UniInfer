@@ -95,7 +95,7 @@ pub(crate) async fn transcribe(
     let permit = slot.acquire(state.router.queue_timeout()).await?;
     let started = std::time::Instant::now();
     let process_isolated = slot.engine_name() == "process";
-    let deadline = state.request_timeout.map(|timeout| started + timeout);
+    let deadline = state.request_timeout().map(|timeout| started + timeout);
     let result = tokio::task::spawn_blocking(move || {
         let _permit = permit;
         slot.execute(

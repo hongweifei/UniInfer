@@ -41,13 +41,19 @@ pub(crate) async fn put(
         .as_ref()
         .ok_or_else(|| ApiError::not_found("config_not_available", "server has no config file"))?;
     let mut config = config;
+    let previous = handle.snapshot().map_err(ApiError::from)?;
     if config.server.token.as_deref() == Some(REDACTED_TOKEN) {
-        config.server.token = handle.snapshot().map_err(ApiError::from)?.server.token;
+        config.server.token = previous.server.token.clone();
     }
-    handle.replace(config).map_err(ApiError::from)?;
+    let restart_required = previous.server.addr != config.server.addr
+        || previous.server.token != config.server.token
+        || previous.server.max_body_bytes != config.server.max_body_bytes
+        || previous.server.isolate_models != config.server.isolate_models;
+    handle.replace(config.clone()).map_err(ApiError::from)?;
+    state.apply_server_config(&config.server);
     Ok(Json(json!({
         "saved": true,
-        "restart_required": true,
+        "restart_required": restart_required,
         "path": handle.path(),
     })))
 }

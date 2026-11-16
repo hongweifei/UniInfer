@@ -1,9 +1,10 @@
 use std::collections::{HashMap, VecDeque};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 
 use tokio::sync::Mutex as AsyncMutex;
-use uniinfer_config::ConfigHandle;
+use uniinfer_config::{ConfigHandle, ServerConfig};
 use uniinfer_core::{CancelToken, CapabilityRequest, EngineError, ModelManifest, Result};
 use uniinfer_service::{AudioSlot, ImageSlot, ModelSlot, Runtime};
 
@@ -30,12 +31,12 @@ pub struct AppState {
     pub(crate) config: Option<Arc<ConfigHandle>>,
     pub(crate) manifest_paths: Arc<RwLock<HashMap<String, PathBuf>>>,
     pub(crate) model_roots: Vec<PathBuf>,
-    pub(crate) request_timeout: Option<std::time::Duration>,
-    model_load_timeout: Option<std::time::Duration>,
+    request_timeout_ms: Arc<AtomicU64>,
+    model_load_timeout_ms: Arc<AtomicU64>,
     pub(crate) catalog: Arc<RwLock<HashMap<String, CatalogEntry>>>,
     load_lock: Arc<AsyncMutex<()>>,
     audio_lru: Arc<Mutex<VecDeque<String>>>,
-    max_loaded_models: usize,
+    max_loaded_models: Arc<AtomicUsize>,
 }
 
 impl AppState {
@@ -79,14 +80,16 @@ impl AppState {
             config: config.config.clone(),
             manifest_paths: Arc::new(RwLock::new(manifest_paths)),
             model_roots: config.model_roots.clone(),
-            request_timeout: (config.request_timeout > std::time::Duration::ZERO)
-                .then_some(config.request_timeout),
-            model_load_timeout: (config.model_load_timeout > std::time::Duration::ZERO)
-                .then_some(config.model_load_timeout),
+            request_timeout_ms: Arc::new(AtomicU64::new(
+                u64::try_from(config.request_timeout.as_millis()).unwrap_or(u64::MAX),
+            )),
+            model_load_timeout_ms: Arc::new(AtomicU64::new(
+                u64::try_from(config.model_load_timeout.as_millis()).unwrap_or(u64::MAX),
+            )),
             catalog: Arc::new(RwLock::new(catalog)),
             load_lock: Arc::new(AsyncMutex::new(())),
             audio_lru: Arc::new(Mutex::new(VecDeque::new())),
-            max_loaded_models: config.max_loaded_models,
+            max_loaded_models: Arc::new(AtomicUsize::new(config.max_loaded_models)),
         })
     }
 
@@ -204,6 +207,29 @@ impl AppState {
             }
         });
         Ok(())
+    }
+
+    pub(crate) fn request_timeout(&self) -> Option<std::time::Duration> {
+        let ms = self.request_timeout_ms.load(Ordering::SeqCst);
+        (ms > 0).then(|| std::time::Duration::from_millis(ms))
+    }
+
+    fn model_load_timeout(&self) -> Option<std::time::Duration> {
+        let ms = self.model_load_timeout_ms.load(Ordering::SeqCst);
+        (ms > 0).then(|| std::time::Duration::from_millis(ms))
+    }
+
+    pub(crate) fn apply_server_config(&self, server: &ServerConfig) {
+        self.request_timeout_ms
+            .store(server.request_timeout_ms, Ordering::SeqCst);
+        self.model_load_timeout_ms
+            .store(server.model_load_timeout_ms, Ordering::SeqCst);
+        self.max_loaded_models
+            .store(server.max_loaded_models, Ordering::SeqCst);
+        self.router
+            .set_queue_timeout(std::time::Duration::from_millis(server.queue_timeout_ms));
+        self.router.set_max_loaded(server.max_loaded_models);
+        self.evict_audio();
     }
 
     pub(crate) fn has_model(&self, id: &str) -> bool {
@@ -360,13 +386,14 @@ impl AppState {
     }
 
     fn evict_audio(&self) {
-        if self.max_loaded_models == 0 {
+        let max_loaded = self.max_loaded_models.load(Ordering::SeqCst);
+        if max_loaded == 0 {
             return;
         }
         let Ok(mut lru) = self.audio_lru.lock() else {
             return;
         };
-        while lru.len() > self.max_loaded_models {
+        while lru.len() > max_loaded {
             let Some(oldest) = lru.pop_front() else {
                 break;
             };
@@ -381,7 +408,7 @@ impl AppState {
         task: tokio::task::JoinHandle<Result<T>>,
         cancel: CancelToken,
     ) -> Result<T> {
-        let Some(timeout) = self.model_load_timeout else {
+        let Some(timeout) = self.model_load_timeout() else {
             return task
                 .await
                 .map_err(|error| EngineError::Other(format!("model load task: {error}")))?;

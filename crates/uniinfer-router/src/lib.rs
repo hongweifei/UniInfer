@@ -74,8 +74,8 @@ pub struct ModelRouter {
     cancels: CancelTable,
     active: Arc<AtomicUsize>,
     metrics: metrics::Metrics,
-    queue_timeout: Duration,
-    max_loaded: usize,
+    queue_timeout_ms: Arc<AtomicU64>,
+    max_loaded: Arc<AtomicUsize>,
     lru: Arc<Mutex<VecDeque<String>>>,
 }
 
@@ -97,8 +97,10 @@ impl ModelRouter {
             cancels: Arc::new(Mutex::new(HashMap::new())),
             active: Arc::new(AtomicUsize::new(0)),
             metrics: metrics::Metrics::default(),
-            queue_timeout,
-            max_loaded,
+            queue_timeout_ms: Arc::new(AtomicU64::new(
+                u64::try_from(queue_timeout.as_millis()).unwrap_or(u64::MAX),
+            )),
+            max_loaded: Arc::new(AtomicUsize::new(max_loaded)),
             lru: Arc::new(Mutex::new(lru)),
         }
     }
@@ -167,13 +169,14 @@ impl ModelRouter {
     }
 
     fn evict(&self) {
-        if self.max_loaded == 0 {
+        let max_loaded = self.max_loaded.load(Ordering::SeqCst);
+        if max_loaded == 0 {
             return;
         }
         let Ok(mut lru) = self.lru.lock() else {
             return;
         };
-        while lru.len() > self.max_loaded {
+        while lru.len() > max_loaded {
             let Some(oldest) = lru.pop_front() else {
                 break;
             };
@@ -191,7 +194,7 @@ impl ModelRouter {
         prompt: String,
         requested: Option<usize>,
     ) -> std::result::Result<PreparedText, RouterError> {
-        self.prepare_text_with(model, prompt, requested, Some(self.queue_timeout))
+        self.prepare_text_with(model, prompt, requested, Some(self.queue_timeout()))
             .await
     }
 
@@ -254,7 +257,19 @@ impl ModelRouter {
 
     #[must_use]
     pub fn queue_timeout(&self) -> Duration {
-        self.queue_timeout
+        Duration::from_millis(self.queue_timeout_ms.load(Ordering::SeqCst))
+    }
+
+    pub fn set_queue_timeout(&self, timeout: Duration) {
+        self.queue_timeout_ms.store(
+            u64::try_from(timeout.as_millis()).unwrap_or(u64::MAX),
+            Ordering::SeqCst,
+        );
+    }
+
+    pub fn set_max_loaded(&self, max_loaded: usize) {
+        self.max_loaded.store(max_loaded, Ordering::SeqCst);
+        self.evict();
     }
 
     #[must_use]

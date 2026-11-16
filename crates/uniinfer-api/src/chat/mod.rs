@@ -110,7 +110,7 @@ pub(crate) async fn chat(
     ApiJson(request): ApiJson<ChatRequest>,
 ) -> Result<Response, ApiError> {
     let deadline = state
-        .request_timeout
+        .request_timeout()
         .map(|timeout| std::time::Instant::now() + timeout);
     let has_image = request
         .messages

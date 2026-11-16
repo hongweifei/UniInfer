@@ -91,7 +91,7 @@ async fn transcribe_and_respond(
     let model = asr.manifest().id.clone();
     let process_isolated = asr.engine_name() == "process";
     let deadline = state
-        .request_timeout
+        .request_timeout()
         .map(|timeout| std::time::Instant::now() + timeout);
     let text = tokio::task::spawn_blocking(move || {
         let _permit = permit;
