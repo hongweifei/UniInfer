@@ -35,8 +35,16 @@ llama-rocm = ["uniinfer-api/llama-rocm"]
 llama-metal = ["uniinfer-api/llama-metal"]
 whisper = ["uniinfer-api/whisper"]
 
-[dependencies]
+[target.'cfg(windows)'.dependencies]
+uniinfer-api = { path = "../../crates/uniinfer-api", features = ["ep-directml"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+uniinfer-api = { path = "../../crates/uniinfer-api", features = ["ep-coreml", "candle-metal"] }
+
+[target.'cfg(all(unix, not(target_os = "macos")))'.dependencies]
 uniinfer-api = { path = "../../crates/uniinfer-api" }
+
+[dependencies]
 uniinfer-config = { path = "../../crates/uniinfer-config" }
 tauri = { version = "2.12.5" }
 tokio = { version = "1.54.1", features = ["rt-multi-thread"] }
