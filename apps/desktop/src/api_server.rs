@@ -27,11 +27,33 @@ pub(crate) fn manifest_paths() -> Vec<std::path::PathBuf> {
             return paths;
         }
     }
-    vec![
-        std::env::var("UNIINFER_MANIFEST")
-            .unwrap_or_else(|_| "models/tiny-onnx/manifest.toml".into())
-            .into(),
-    ]
+    if let Ok(manifest) = std::env::var("UNIINFER_MANIFEST") {
+        return vec![std::path::PathBuf::from(manifest)];
+    }
+    let mut paths = std::fs::read_dir("models")
+        .ok()
+        .into_iter()
+        .flatten()
+        .filter_map(Result::ok)
+        .flat_map(|entry| {
+            std::fs::read_dir(entry.path())
+                .ok()
+                .into_iter()
+                .flatten()
+                .filter_map(Result::ok)
+                .map(|file| file.path())
+        })
+        .filter(|path| {
+            path.file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name.starts_with("manifest") && name.ends_with(".toml"))
+        })
+        .collect::<Vec<_>>();
+    paths.sort();
+    if paths.is_empty() {
+        paths.push("models/tiny-onnx/manifest.toml".into());
+    }
+    paths
 }
 
 pub(crate) fn manifest_display() -> String {

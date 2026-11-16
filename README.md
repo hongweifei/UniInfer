@@ -23,7 +23,7 @@ UniInfer 当前提供以下能力：
 - `/v1/images/generations` 的图像生成管线，包含 capability 选择、PNG 编码与 `b64_json` 响应。
 - `/v1/realtime` 的文本与 16 kHz PCM16 音频输入、能量 VAD、ASR → 文本响应闭环。
 - `/v1/models`、`/v1/devices`、`/v1/config`、`/metrics`、会话取消与模型生命周期。
-- Tauri 2 桌面端，与 HTTP API 共享同一运行时。
+- Tauri 2 桌面工作台：对话、多图、转写、图像生成、模型管理与设置，与 HTTP API 共享同一运行时。
 
 内置的 `tiny-*` ONNX 模型用于契约测试；真实模型通过 manifest 接入。
 
@@ -356,7 +356,7 @@ crates/
   uniinfer-router      会话、指标、取消
   uniinfer-api         OpenAI REST / SSE / WebSocket
   uniinfer-cli         CLI / serve
-apps/desktop           Tauri 2 桌面端
+apps/desktop           Tauri 2 桌面工作台（原生 ES modules）
 ```
 
 ## 依赖策略

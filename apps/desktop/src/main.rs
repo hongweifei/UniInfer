@@ -22,9 +22,42 @@ fn api_info(state: tauri::State<'_, DesktopState>) -> DesktopStatus {
     state.status.clone()
 }
 
+#[tauri::command]
+fn restart_app(app: tauri::AppHandle) {
+    app.restart();
+}
+
+#[tauri::command]
+fn set_window_theme(window: tauri::WebviewWindow, theme: String) {
+    let theme = match theme.as_str() {
+        "light" => Some(tauri::Theme::Light),
+        "dark" => Some(tauri::Theme::Dark),
+        _ => None,
+    };
+    let _ = window.set_theme(theme);
+}
+
+#[tauri::command]
+async fn pick_model_folder() -> Option<String> {
+    tauri::async_runtime::spawn_blocking(|| {
+        rfd::FileDialog::new()
+            .set_title("选择模型目录")
+            .pick_folder()
+            .map(|path| path.display().to_string())
+    })
+    .await
+    .ok()
+    .flatten()
+}
+
 fn main() {
     tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![api_info])
+        .invoke_handler(tauri::generate_handler![
+            api_info,
+            restart_app,
+            set_window_theme,
+            pick_model_folder
+        ])
         .setup(|app| {
             let startup = api_server::start();
             app.manage(DesktopState {

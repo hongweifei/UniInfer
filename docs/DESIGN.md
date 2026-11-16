@@ -218,7 +218,7 @@ kv_cache = "auto"
 
 ## 9. 桌面与移动
 
-Tauri 2 桌面端在进程内启动 loopback API，复用同一配置、模型目录与接口。移动端沿用同一 manifest 与 capability 契约，音频 I/O 通过 PCM 回调与原生播放器接入。
+Tauri 2 桌面工作台在进程内启动 loopback API，复用同一配置、模型目录与接口；前端按对话、转写、图像、模型、设置拆分视图，模型发现覆盖 `models/*/manifest*.toml`。移动端沿用同一 manifest 与 capability 契约，音频 I/O 通过 PCM 回调与原生播放器接入。
 
 ## 10. 测试与基线
 

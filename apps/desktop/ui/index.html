@@ -3,46 +3,18 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="dark light" />
     <title>UniInfer</title>
-    <link rel="stylesheet" href="style.css" />
+    <link rel="stylesheet" href="styles/tokens.css" />
+    <link rel="stylesheet" href="styles/base.css" />
+    <link rel="stylesheet" href="styles/shell.css" />
+    <link rel="stylesheet" href="styles/components.css" />
+    <link rel="stylesheet" href="styles/views.css" />
   </head>
   <body>
-    <header>
-      <strong>UniInfer</strong>
-      <select id="model" disabled></select>
-      <button id="settings-button" class="secondary" type="button">设置</button>
-      <span id="status">正在连接本地运行时…</span>
-    </header>
-    <div id="device-strip">设备：检测中…</div>
-    <main id="messages"></main>
-    <form id="composer">
-      <textarea id="input" rows="2" placeholder="输入消息，Enter 发送，Shift+Enter 换行"></textarea>
-      <button id="send" type="submit">发送</button>
-      <button id="stop" class="secondary" type="button" disabled>停止</button>
-    </form>
-    <dialog id="settings-dialog">
-      <div class="settings-head">
-        <strong>运行时设置</strong>
-        <button id="settings-close" class="secondary" type="button">关闭</button>
-      </div>
-      <p class="settings-meta">配置：<code id="config-path">未绑定配置文件</code></p>
-      <textarea id="config-json" spellcheck="false" aria-label="配置 JSON"></textarea>
-      <div class="settings-actions">
-        <button id="config-load" class="secondary" type="button">重新读取</button>
-        <button id="config-save" type="button">保存</button>
-        <span id="settings-status" class="settings-meta"></span>
-      </div>
-      <hr />
-      <strong>导入模型</strong>
-      <p class="settings-meta">路径必须在配置根目录内；导入后需要重启服务。</p>
-      <div class="settings-actions">
-        <input id="model-path" type="text" placeholder="models/my-model" />
-        <button id="model-inspect" class="secondary" type="button">检查</button>
-        <button id="model-import" type="button" disabled>导入</button>
-      </div>
-      <pre id="model-result" class="settings-result"></pre>
-    </dialog>
-    <script src="settings.js"></script>
-    <script src="app.js"></script>
+    <div id="app" class="app-shell"></div>
+    <div id="toast-region" class="toast-region" aria-live="polite"></div>
+    <div id="modal-root"></div>
+    <script type="module" src="js/main.js"></script>
   </body>
 </html>
