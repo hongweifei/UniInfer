@@ -35,6 +35,7 @@ export function mountCatalog(root, ctx) {
   let currentPage = 1;
   let hasMore = false;
   let lastQuery = '';
+  let totalResults = null;
   let currentItems = [];
   let categoryFilter = 'all';
   let tagFilter = 'all';
@@ -147,6 +148,30 @@ export function mountCatalog(root, ctx) {
       const state = progress.get(entry.id);
       if (state) updateProgress(entry.id, state, button, progressBar, progressText);
     }
+    const totalPages = totalResults ? Math.max(1, Math.ceil(totalResults / PAGE_SIZE)) : null;
+    const pageInput = h('input', {
+      class: 'input page-jump-input',
+      type: 'number',
+      min: '1',
+      max: totalPages ? String(totalPages) : null,
+      value: String(page),
+      attrs: { 'aria-label': '跳转页码' },
+      onKeyDown: (event) => {
+        if (event.key === 'Enter') {
+          event.preventDefault();
+          goToPage();
+        }
+      },
+    });
+    const goToPage = () => {
+      let target = Number.parseInt(pageInput.value, 10);
+      if (!Number.isFinite(target) || target < 1) {
+        pageInput.value = String(page);
+        return;
+      }
+      if (totalPages) target = Math.min(target, totalPages);
+      if (target !== page) void search(target);
+    };
     pager.replaceChildren(
       h('button', {
         class: 'btn sm ghost', type: 'button', text: '上一页', disabled: page <= 1,
@@ -154,8 +179,14 @@ export function mountCatalog(root, ctx) {
       }),
       h('span', { class: 'faint', text: `第 ${page} 页` }),
       h('button', {
-        class: 'btn sm ghost', type: 'button', text: '下一页', disabled: !hasMore,
+        class: 'btn sm ghost', type: 'button', text: '下一页', disabled: !hasMore && (!totalPages || page >= totalPages),
         onClick: () => void search(page + 1),
+      }),
+      h('span', { class: 'faint', text: totalPages ? `/ 共 ${totalPages} 页` : '/ 页数未知' }),
+      pageInput,
+      h('button', {
+        class: 'btn sm', type: 'button', text: '跳转',
+        onClick: goToPage,
       }),
     );
   }
@@ -184,6 +215,7 @@ export function mountCatalog(root, ctx) {
       if (disposed) return;
       currentPage = result.page ?? page;
       hasMore = Boolean(result.has_more);
+      totalResults = result.total ?? null;
       status.textContent = result.total
         ? `${result.total} 个结果 · ${sourceLabel()}`
         : `${result.items?.length ?? 0} 个结果 · ${sourceLabel()}`;
