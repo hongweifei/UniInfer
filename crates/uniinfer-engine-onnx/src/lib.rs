@@ -144,12 +144,7 @@ impl InferenceEngine for OnnxEngine {
     }
 
     fn implementations(&self) -> &[&'static str] {
-        &[
-            "onnx.graph",
-            "onnx.pipeline",
-            "onnx.asr.whisper",
-            "onnx.asr.ctc",
-        ]
+        &["onnx.graph", "onnx.pipeline"]
     }
 
     fn supported_formats(&self) -> &[ModelFormat] {
@@ -218,10 +213,6 @@ impl InferenceEngine for OnnxEngine {
 
         // Encoder-decoder ASR manifests carry their own graph files. Keep the
         // dispatch here so ONNX stays the first choice for every ONNX model.
-        if spec.manifest.implementation.starts_with("onnx.asr.") {
-            return asr::load(&self.environment, &spec, class);
-        }
-
         let session = build_session(&self.environment, class, &model_path)?;
         if spec.cancel.is_cancelled() {
             return Err(EngineError::Cancelled);

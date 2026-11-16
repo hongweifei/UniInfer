@@ -370,6 +370,9 @@ pub enum PipelineStep {
         target: String,
         token: String,
     },
+    Adapter {
+        adapter: String,
+    },
 }
 
 /// Declarative ONNX pipeline.
@@ -622,6 +625,13 @@ impl ModelManifest {
                         if source == target {
                             return Err(EngineError::ManifestInvalid(
                                 "pipeline merge source and target must differ".into(),
+                            ));
+                        }
+                    }
+                    PipelineStep::Adapter { adapter } => {
+                        if adapter.is_empty() {
+                            return Err(EngineError::ManifestInvalid(
+                                "pipeline adapter step requires adapter".into(),
                             ));
                         }
                     }

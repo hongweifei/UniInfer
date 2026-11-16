@@ -139,7 +139,7 @@ pub trait InferenceEngine: Send + Sync {
 | 格式 | 能力 | 默认引擎 | 状态 |
 | :--- | :--- | :--- | :--- |
 | ONNX | 文本生成 / GenAI KV cache | `OnnxEngine` | 已实现 |
-| ONNX | 语音转写（Whisper encoder/decoder / CTC） | `OnnxEngine` ASR adapter registry | 已实现，批量 |
+| ONNX | 语音转写（Whisper encoder/decoder / CTC） | `OnnxEngine` pipeline adapter | 已实现，批量 |
 | ONNX | 视觉语言（SmolVLM2-256M int4 单图） | `OnnxEngine` VLM adapter | 已实现（OpenAI 单图） |
 | ONNX | 图像 / 逐帧视频 / 实时预览 | — | 计划 |
 | GGUF | 文本（Qwen2/Qwen3，含 IQ/MXFP4 可选 llama） | `CandleEngine` / `LlamaEngine` | 已实现 |

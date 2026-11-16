@@ -2,7 +2,7 @@ use std::path::Path;
 
 use uniinfer_core::{
     AudioConfig, Capability, Modality, Mode, ModelFile, ModelFormat, ModelManifest, Operation,
-    PlacementConfig, Quantization, Runtime,
+    PipelineConfig, PipelineStep, PlacementConfig, Quantization, Runtime,
 };
 
 use crate::error::{InspectError, Result};
@@ -204,7 +204,7 @@ pub fn inspect(root: &Path, options: &InspectOptions) -> Result<Inspection> {
         })
         .collect::<Result<Vec<_>>>()?;
     let (runtime, implementation) = match format {
-        ModelFormat::Onnx if audio.is_some() => ("onnx", "onnx.asr.whisper"),
+        ModelFormat::Onnx if audio.is_some() => ("onnx", "onnx.pipeline"),
         ModelFormat::Onnx => ("onnx", "onnx.graph"),
         ModelFormat::Gguf | ModelFormat::Safetensors => ("candle", "candle.text"),
         ModelFormat::Ggml => ("whisper", "whisper.ggml"),
@@ -244,6 +244,15 @@ pub fn inspect(root: &Path, options: &InspectOptions) -> Result<Inspection> {
             mode: Mode::Batch,
         });
     }
+    let pipeline = (format == ModelFormat::Onnx && audio.is_some()).then(|| PipelineConfig {
+        image_preprocessor: None,
+        preprocessor_file: None,
+        token_layout: None,
+        output: "text".into(),
+        steps: vec![PipelineStep::Adapter {
+            adapter: "whisper".into(),
+        }],
+    });
     let runtime = match runtime {
         "onnx" => Runtime::Onnx,
         "candle" => Runtime::Candle,
@@ -266,7 +275,7 @@ pub fn inspect(root: &Path, options: &InspectOptions) -> Result<Inspection> {
         text,
         audio,
         vision: None,
-        pipeline: None,
+        pipeline,
     };
     manifest
         .validate()

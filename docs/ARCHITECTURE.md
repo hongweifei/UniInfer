@@ -102,7 +102,7 @@ graph(s) + declared inputs/outputs + adapter profile
 
 - `onnx.graph`：单个 ONNX 图，named tensors 直通。
 - `onnx.pipeline`：manifest 声明 graph steps、tensor bindings、merge 点和 output；`image_preprocessor` / `token_layout` 只选择 adapter profile。
-- `onnx.asr.whisper` / `onnx.asr.ctc`：语音多图。
+- `onnx.pipeline` 的 `adapter` step：Whisper/CTC 等语音 adapter 通过同一个 pipeline 入口加载。
 
 新增 ONNX 模型时，优先只新增 manifest；只有新的图契约或新的预处理语义才新增 adapter。
 
@@ -126,6 +126,7 @@ graph(s) + declared inputs/outputs + adapter profile
 - `native` 文本解码移出 `EngineSession`，改为独立的 `NativeTextDecoder` capability。
 - `TextGenerator` 的 image 特例改为通用 auxiliary tensor 输入。
 - process isolation 改为 transport 能力，不再伪装成 runtime。
+- ASR 的 Whisper/CTC 通过 `onnx.pipeline` 的 `adapter` step 加载，`onnx.asr.*` 实现名删除。
 
 待完成：
 

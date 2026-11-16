@@ -1,6 +1,6 @@
 id = "whisper-tiny.en-onnx"
 runtime = "onnx"
-implementation = "onnx.asr.whisper"
+implementation = "onnx.pipeline"
 format = "onnx"
 quantization = "fp32"
 streaming_capable = false
@@ -48,3 +48,10 @@ operation = "transcribe"
 required_inputs = ["audio"]
 outputs = ["text"]
 mode = "batch"
+
+[pipeline]
+output = "text"
+
+[[pipeline.steps]]
+kind = "adapter"
+adapter = "whisper"

@@ -12,27 +12,17 @@ mod frontend;
 mod options;
 mod whisper;
 
-pub(crate) fn load(
+pub(crate) fn load_named(
     environment: &ort::environment::Environment,
     spec: &EngineLoadSpec,
     class: DeviceClass,
+    adapter: &str,
 ) -> Result<Box<dyn EngineSession>> {
-    if spec.cancel.is_cancelled() {
-        return Err(EngineError::Cancelled);
-    }
-    let audio = spec
-        .manifest
-        .audio
-        .as_ref()
-        .ok_or_else(|| EngineError::ManifestInvalid("missing [audio] config".into()))?;
-    match audio.family.as_deref() {
-        Some("whisper") => Ok(Box::new(whisper::load(environment, spec, class)?)),
-        Some("ctc") => Ok(Box::new(ctc::load(environment, spec, class)?)),
-        Some(other) => Err(EngineError::UnsupportedEngine(format!(
-            "ONNX speech architecture {other:?} is not registered"
+    match adapter {
+        "whisper" => Ok(Box::new(whisper::load(environment, spec, class)?)),
+        "ctc" => Ok(Box::new(ctc::load(environment, spec, class)?)),
+        other => Err(EngineError::UnsupportedEngine(format!(
+            "ONNX speech adapter {other:?} is not registered"
         ))),
-        None => Err(EngineError::ManifestInvalid(
-            "audio.family is required for a multi-graph speech model".into(),
-        )),
     }
 }

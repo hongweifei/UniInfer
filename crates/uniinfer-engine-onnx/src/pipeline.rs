@@ -27,6 +27,9 @@ pub(crate) fn load(
         .pipeline
         .as_ref()
         .ok_or_else(|| EngineError::ManifestInvalid("pipeline config required".into()))?;
+    if let [PipelineStep::Adapter { adapter }] = pipeline.steps.as_slice() {
+        return crate::asr::load_named(environment, spec, class, adapter);
+    }
     let mut steps = Vec::with_capacity(pipeline.steps.len());
     for step in &pipeline.steps {
         match step {
@@ -51,6 +54,11 @@ pub(crate) fn load(
                     source: source.clone(),
                     target: target.clone(),
                 });
+            }
+            PipelineStep::Adapter { .. } => {
+                return Err(EngineError::UnsupportedEngine(
+                    "pipeline adapter steps cannot be mixed with graph steps".into(),
+                ));
             }
         }
     }
