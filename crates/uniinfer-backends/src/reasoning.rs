@@ -47,6 +47,7 @@ impl ReasoningEvent {
 pub struct ReasoningSplitter {
     buffer: String,
     phase: Phase,
+    implicit: bool,
     finished: bool,
 }
 
@@ -63,6 +64,7 @@ impl ReasoningSplitter {
             } else {
                 Phase::Content
             },
+            implicit,
             finished: false,
         }
     }
@@ -101,6 +103,29 @@ impl ReasoningSplitter {
     fn drain(&mut self, flush: bool) -> Vec<ReasoningEvent> {
         let mut events = Vec::new();
         loop {
+            if self.phase == Phase::Reasoning && self.implicit {
+                if find_any(&self.buffer, OPEN_MARKERS).is_some() {
+                    // The template/model did provide an opening marker; its
+                    // reasoning can stream normally from here on.
+                    self.implicit = false;
+                    continue;
+                }
+                if let Some((index, length)) = find_any(&self.buffer, CLOSE_MARKERS) {
+                    if index > 0 {
+                        events.push(ReasoningEvent::Reasoning(self.buffer[..index].to_owned()));
+                    }
+                    self.buffer.drain(..index + length);
+                    self.phase = Phase::Content;
+                    self.implicit = false;
+                    continue;
+                }
+                if flush && !self.buffer.is_empty() {
+                    // No closing marker arrived: this was a plain answer, not
+                    // an unterminated reasoning block. Never hide it.
+                    events.push(ReasoningEvent::Content(std::mem::take(&mut self.buffer)));
+                }
+                break;
+            }
             let found = match self.phase {
                 Phase::Content => find_any(&self.buffer, OPEN_MARKERS).map(|found| (found, false)),
                 Phase::Reasoning => find_any_any(&self.buffer, OPEN_MARKERS, CLOSE_MARKERS),
@@ -213,6 +238,18 @@ mod tests {
     }
 
     #[test]
+    fn implicit_mode_switches_to_explicit_markers() {
+        let mut split = ReasoningSplitter::new(true);
+        let mut events = split.push("<thi");
+        events.extend(split.push("nk>reason</thi"));
+        events.extend(split.push("nk>answer"));
+        events.extend(split.finish());
+        let (reasoning, content) = collect(events);
+        assert_eq!(reasoning, "reason");
+        assert_eq!(content, "answer");
+    }
+
+    #[test]
     fn leaves_plain_content_untouched() {
         let mut split = ReasoningSplitter::new(false);
         let mut events = split.push("hello ");
@@ -229,18 +266,18 @@ mod tests {
         let mut events = split.push("中文推理");
         events.extend(split.finish());
         let (reasoning, content) = collect(events);
-        assert_eq!(reasoning, "中文推理");
-        assert!(content.is_empty());
+        assert!(reasoning.is_empty());
+        assert_eq!(content, "中文推理");
     }
 
     #[test]
-    fn unclosed_implicit_reasoning_is_not_dropped() {
+    fn unclosed_implicit_reasoning_falls_back_to_content() {
         let mut split = ReasoningSplitter::new(true);
-        let mut events = split.push("only reasoning");
+        let mut events = split.push("plain answer");
         events.extend(split.finish());
         let (reasoning, content) = collect(events);
-        assert_eq!(reasoning, "only reasoning");
-        assert!(content.is_empty());
+        assert!(reasoning.is_empty());
+        assert_eq!(content, "plain answer");
     }
 
     fn collect(events: Vec<ReasoningEvent>) -> (String, String) {
