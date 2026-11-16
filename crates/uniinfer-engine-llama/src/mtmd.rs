@@ -13,8 +13,8 @@ use llama_cpp_2::sampling::LlamaSampler;
 use self_cell::self_cell;
 use uniinfer_core::{
     DeviceClass, EngineError, EngineLoadSpec, EngineSession, InferenceEngine, Modality,
-    ModelFormat, NativeFinish, NativeTextOutput, NativeTextRequest, Quantization, Result,
-    Tensor as CoreTensor, TensorData, TensorSpec,
+    ModelFormat, NativeFinish, NativeTextDecoder, NativeTextOutput, NativeTextRequest,
+    Quantization, Result, Runtime, Tensor as CoreTensor, TensorData, TensorSpec,
 };
 
 const FORMATS: &[ModelFormat] = &[ModelFormat::Gguf];
@@ -241,24 +241,22 @@ impl EngineSession for LlamaMtmdSession {
                 _ => None,
             });
         let images = image.into_iter().collect::<Vec<_>>();
-        let output = self
-            .generate_text(
-                NativeTextRequest {
-                    prompt: &text,
-                    images: &images,
-                    max_tokens: 64,
-                    temperature: 0.0,
-                    top_p: 1.0,
-                    top_k: 0,
-                    seed: None,
-                    frequency_penalty: 0.0,
-                    presence_penalty: 0.0,
-                    deadline: None,
-                    cancel: &uniinfer_core::CancelToken::new(),
-                },
-                &mut |_| true,
-            )?
-            .ok_or_else(|| EngineError::Other("mtmd native generation unavailable".into()))?;
+        let output = self.generate_text(
+            NativeTextRequest {
+                prompt: &text,
+                images: &images,
+                max_tokens: 64,
+                temperature: 0.0,
+                top_p: 1.0,
+                top_k: 0,
+                seed: None,
+                frequency_penalty: 0.0,
+                presence_penalty: 0.0,
+                deadline: None,
+                cancel: &uniinfer_core::CancelToken::new(),
+            },
+            &mut |_| true,
+        )?;
         Ok(vec![CoreTensor::new(
             "text",
             vec![output.bytes.len()],
@@ -266,15 +264,19 @@ impl EngineSession for LlamaMtmdSession {
         )?])
     }
 
-    fn supports_native_generation(&self) -> bool {
-        true
+    fn native_decoder(&self) -> Option<&dyn NativeTextDecoder> {
+        Some(self)
     }
 
+    fn cancel(&self) {}
+}
+
+impl NativeTextDecoder for LlamaMtmdSession {
     fn generate_text(
         &self,
         request: NativeTextRequest<'_>,
         on_bytes: &mut dyn FnMut(&[u8]) -> bool,
-    ) -> Result<Option<NativeTextOutput>> {
+    ) -> Result<NativeTextOutput> {
         if request.images.len() > 1 {
             return Err(EngineError::Other(
                 "only one image per generation is supported".into(),
@@ -284,11 +286,11 @@ impl EngineSession for LlamaMtmdSession {
             return Err(EngineError::Cancelled);
         }
         if request.max_tokens == 0 {
-            return Ok(Some(NativeTextOutput {
+            return Ok(NativeTextOutput {
                 bytes: Vec::new(),
                 tokens: 0,
                 finish: NativeFinish::Length,
-            }));
+            });
         }
 
         let mut state = self
@@ -396,14 +398,12 @@ impl EngineSession for LlamaMtmdSession {
             }
             Ok::<(), EngineError>(())
         })?;
-        Ok(Some(NativeTextOutput {
+        Ok(NativeTextOutput {
             bytes,
             tokens,
             finish,
-        }))
+        })
     }
-
-    fn cancel(&self) {}
 }
 
 fn clock_seed() -> u64 {

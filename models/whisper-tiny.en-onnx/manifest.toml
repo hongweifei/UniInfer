@@ -9,7 +9,7 @@ streaming_capable = false
 context_len = 448
 
 [audio]
-architecture = "whisper"
+family = "whisper"
 sample_rate = 16000
 channels = 1
 

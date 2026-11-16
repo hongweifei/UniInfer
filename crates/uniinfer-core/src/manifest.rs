@@ -268,8 +268,11 @@ pub struct TextConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct VisionConfig {
-    /// Family name, e.g. `qwen3_vl`, `llama_mtmd`, `onnx_smolvlm`.
-    pub architecture: String,
+    /// Vision adapter/family name.
+    pub family: String,
+    /// Image preprocessing profile selected by the ONNX pipeline.
+    #[serde(default)]
+    pub preprocessor: Option<String>,
     #[serde(default)]
     pub mmproj_file: Option<PathBuf>,
     #[serde(default)]
@@ -310,10 +313,9 @@ pub struct AudioConfig {
     pub input: String,
     #[serde(default = "default_audio_output")]
     pub output: String,
-    /// Adapter selector for models that need a multi-graph or model-specific
-    /// preprocessing/decoding pipeline.
+    /// Audio adapter/family name.
     #[serde(default)]
-    pub architecture: Option<String>,
+    pub family: Option<String>,
     /// Adapter-owned configuration. Core does not interpret these keys.
     #[serde(default)]
     pub options: Option<toml::Value>,
@@ -342,7 +344,7 @@ impl Default for AudioConfig {
             channels: default_channels(),
             input: default_audio_input(),
             output: default_audio_output(),
-            architecture: None,
+            family: None,
             options: None,
         }
     }
@@ -520,9 +522,9 @@ impl ModelManifest {
                     "audio tensor names must not be empty".into(),
                 ));
             }
-            if audio.architecture.as_deref() == Some("") {
+            if audio.family.as_deref() == Some("") {
                 return Err(EngineError::ManifestInvalid(
-                    "audio.architecture must not be empty".into(),
+                    "audio.family must not be empty".into(),
                 ));
             }
         }
@@ -644,6 +646,20 @@ sha256 = "0000000000000000000000000000000000000000000000000000000000000000"
             + "\n[audio]\nchannels = 2\n";
         let error = parse(&raw).validate().expect_err("must reject");
         assert!(error.to_string().contains("channels"));
+    }
+
+    #[test]
+    fn rejects_empty_capabilities() {
+        let raw = base().replace("capabilities = [\"text_generation\"]", "capabilities = []");
+        let error = parse(&raw).validate().expect_err("must reject");
+        assert!(error.to_string().contains("capabilities"));
+    }
+
+    #[test]
+    fn rejects_empty_implementation() {
+        let raw = base().replace("implementation = \"onnx.graph\"", "implementation = \"\"");
+        let error = parse(&raw).validate().expect_err("must reject");
+        assert!(error.to_string().contains("implementation"));
     }
 
     #[test]

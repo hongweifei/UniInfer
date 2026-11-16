@@ -25,14 +25,14 @@ pub(crate) fn load(
         .audio
         .as_ref()
         .ok_or_else(|| EngineError::ManifestInvalid("missing [audio] config".into()))?;
-    match audio.architecture.as_deref() {
+    match audio.family.as_deref() {
         Some("whisper") => Ok(Box::new(whisper::load(environment, spec, class)?)),
         Some("ctc") => Ok(Box::new(ctc::load(environment, spec, class)?)),
         Some(other) => Err(EngineError::UnsupportedEngine(format!(
             "ONNX speech architecture {other:?} is not registered"
         ))),
         None => Err(EngineError::ManifestInvalid(
-            "audio.architecture is required for a multi-graph speech model".into(),
+            "audio.family is required for a multi-graph speech model".into(),
         )),
     }
 }

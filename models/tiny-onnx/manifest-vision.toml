@@ -19,7 +19,7 @@ allow_cpu_fallback = true
 vocab_size = 256
 
 [vision]
-architecture = "onnx_vlm"
+family = "onnx_vlm"
 image_token = "<image>"
 
 [[files]]

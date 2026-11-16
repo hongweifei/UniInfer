@@ -177,7 +177,7 @@ pub fn inspect(root: &Path, options: &InspectOptions) -> Result<Inspection> {
             let primary = choose_primary(&ggml, "ggml-model.bin");
             let selected = with_metadata(primary, None, config_path.as_deref());
             let audio = AudioConfig {
-                architecture: Some("whisper".into()),
+                family: Some("whisper".into()),
                 sample_rate: preprocessor
                     .as_ref()
                     .and_then(|config| config.sampling_rate)

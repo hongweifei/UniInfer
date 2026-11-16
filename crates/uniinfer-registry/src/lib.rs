@@ -138,21 +138,23 @@ impl EngineRegistry {
         let mut saw_modality = false;
 
         for engine in &self.engines {
-            if engine.runtime() != manifest.runtime {
-                continue;
-            }
-            saw_runtime = true;
-            if !engine
-                .implementations()
-                .iter()
-                .any(|name| *name == manifest.implementation)
-            {
-                saw_implementation = true;
-                tracing::debug!(
-                    implementation = %manifest.implementation,
-                    "engine does not implement manifest"
-                );
-                continue;
+            if !engine.is_transport() {
+                if engine.runtime() != manifest.runtime {
+                    continue;
+                }
+                saw_runtime = true;
+                if !engine
+                    .implementations()
+                    .iter()
+                    .any(|name| *name == manifest.implementation)
+                {
+                    saw_implementation = true;
+                    tracing::debug!(
+                        implementation = %manifest.implementation,
+                        "engine does not implement manifest"
+                    );
+                    continue;
+                }
             }
             if !engine.supported_formats().contains(&manifest.format) {
                 continue;

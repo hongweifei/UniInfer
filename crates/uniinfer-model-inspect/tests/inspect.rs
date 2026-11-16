@@ -39,7 +39,7 @@ fn detects_onnx_encoder_decoder_asr() {
     assert_eq!(inspection.manifest.modalities, vec![Modality::Audio]);
     assert_eq!(inspection.manifest.context_len, 448);
     let audio = inspection.manifest.audio.expect("audio");
-    assert_eq!(audio.architecture.as_deref(), Some("whisper"));
+    assert_eq!(audio.family.as_deref(), Some("whisper"));
     assert!(audio.options.is_some());
 }
 

@@ -237,7 +237,11 @@ impl InferenceEngine for ProcessEngine {
     }
 
     fn implementations(&self) -> &[&'static str] {
-        &["process.*"]
+        &[]
+    }
+
+    fn is_transport(&self) -> bool {
+        true
     }
 
     fn supported_formats(&self) -> &[ModelFormat] {

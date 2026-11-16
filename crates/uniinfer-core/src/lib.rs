@@ -13,7 +13,7 @@ pub use device::{
 };
 pub use engine::{
     EngineCapabilities, EngineLoadSpec, EngineSession, InferenceEngine, NativeFinish,
-    NativeTextOutput, NativeTextRequest,
+    NativeTextDecoder, NativeTextOutput, NativeTextRequest,
 };
 pub use error::{EngineError, Result};
 pub use manifest::{

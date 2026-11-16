@@ -297,7 +297,7 @@ impl ModelSlot {
     /// Whether the engine decodes tokens internally.
     #[must_use]
     pub fn supports_native_generation(&self) -> bool {
-        self.session().supports_native_generation()
+        self.session().native_decoder().is_some()
     }
 
     /// Whether the engine session accepts an image tensor alongside token ids.
@@ -349,22 +349,29 @@ impl ModelSlot {
         on_bytes: &mut dyn FnMut(&[u8]) -> bool,
     ) -> Result<GenerationOutput> {
         spec.sampling.validate()?;
-        if let Some(output) = self.session().generate_text(
-            NativeTextRequest {
-                prompt,
-                images,
-                max_tokens: spec.max_tokens,
-                temperature: spec.sampling.temperature,
-                top_p: spec.sampling.top_p,
-                top_k: spec.sampling.top_k,
-                seed: spec.sampling.seed,
-                frequency_penalty: spec.sampling.frequency_penalty,
-                presence_penalty: spec.sampling.presence_penalty,
-                deadline: spec.deadline,
-                cancel,
-            },
-            on_bytes,
-        )? {
+        if let Some(output) = self
+            .session()
+            .native_decoder()
+            .map(|decoder| {
+                decoder.generate_text(
+                    NativeTextRequest {
+                        prompt,
+                        images,
+                        max_tokens: spec.max_tokens,
+                        temperature: spec.sampling.temperature,
+                        top_p: spec.sampling.top_p,
+                        top_k: spec.sampling.top_k,
+                        seed: spec.sampling.seed,
+                        frequency_penalty: spec.sampling.frequency_penalty,
+                        presence_penalty: spec.sampling.presence_penalty,
+                        deadline: spec.deadline,
+                        cancel,
+                    },
+                    on_bytes,
+                )
+            })
+            .transpose()?
+        {
             return Ok(GenerationOutput {
                 bytes: output.bytes,
                 tokens: output.tokens,

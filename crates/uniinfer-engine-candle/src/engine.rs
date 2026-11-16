@@ -104,10 +104,6 @@ impl InferenceEngine for CandleEngine {
             .text
             .as_ref()
             .ok_or_else(|| EngineError::ManifestInvalid("text config required".into()))?;
-        let family_name = text
-            .family
-            .as_deref()
-            .ok_or_else(|| EngineError::ManifestInvalid("text.family is required".into()))?;
         let model_paths = match spec.manifest.format {
             ModelFormat::Gguf => spec
                 .manifest
@@ -147,15 +143,18 @@ impl InferenceEngine for CandleEngine {
         );
         if spec.manifest.implementation == "candle.vision" {
             vision::verify_safetensors(spec.manifest.format)?;
-            return vision::load(
-                &spec,
-                family_name,
-                dtype,
-                &device,
-                &config_path,
-                &model_paths,
-            );
+            let family = spec
+                .manifest
+                .vision
+                .as_ref()
+                .map(|vision| vision.family.as_str())
+                .ok_or_else(|| EngineError::ManifestInvalid("vision config required".into()))?;
+            return vision::load(&spec, family, dtype, &device, &config_path, &model_paths);
         }
+        let family_name = text
+            .family
+            .as_deref()
+            .ok_or_else(|| EngineError::ManifestInvalid("text.family is required".into()))?;
         let family =
             self.text
                 .get(family_name)

@@ -11,7 +11,7 @@ use llama_cpp_2::model::params::LlamaModelParams;
 use std::sync::Arc;
 use uniinfer_core::{
     Device as CoreDevice, DeviceClass, EngineError, EngineLoadSpec, EngineSession, InferenceEngine,
-    Modality, ModelFormat, Quantization, Result, TensorDtype, TensorSpec,
+    Modality, ModelFormat, Quantization, Result, Runtime, TensorDtype, TensorSpec,
 };
 
 mod mtmd;

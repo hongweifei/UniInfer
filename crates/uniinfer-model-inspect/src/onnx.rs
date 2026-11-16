@@ -82,7 +82,7 @@ pub(crate) fn onnx_layout(
         );
         options.insert("max_tokens".into(), toml::Value::Integer(128));
         let audio = AudioConfig {
-            architecture: Some(architecture.unwrap_or("whisper").into()),
+            family: Some(architecture.unwrap_or("whisper").into()),
             sample_rate: preprocessor
                 .and_then(|config| config.sampling_rate)
                 .unwrap_or(16_000),

@@ -144,7 +144,12 @@ impl InferenceEngine for OnnxEngine {
     }
 
     fn implementations(&self) -> &[&'static str] {
-        &["onnx.graph", "onnx.vlm", "onnx.asr.whisper", "onnx.asr.ctc"]
+        &[
+            "onnx.graph",
+            "onnx.vision",
+            "onnx.asr.whisper",
+            "onnx.asr.ctc",
+        ]
     }
 
     fn supported_formats(&self) -> &[ModelFormat] {
@@ -200,7 +205,7 @@ impl InferenceEngine for OnnxEngine {
             .ok_or_else(|| EngineError::PlacementUnsatisfiable("empty placement".into()))?;
         spec.manifest.verify_files(&spec.base_dir)?;
 
-        if spec.manifest.implementation == "onnx.vlm" {
+        if spec.manifest.implementation == "onnx.vision" {
             return vlm::load(&self.environment, &spec, class);
         }
 

@@ -56,7 +56,13 @@ pub(crate) fn load(
         .grid_input
         .clone()
         .unwrap_or_else(|| "pixel_attention_mask".into());
-    let processor = Preprocessor::load(&spec.base_dir.join(preprocessor))?;
+    let processor = create_preprocessor(
+        spec.manifest
+            .vision
+            .as_ref()
+            .and_then(|vision| vision.preprocessor.as_deref()),
+        &spec.base_dir.join(preprocessor),
+    )?;
     let vision_graph = Graph::load(
         environment,
         class,
@@ -125,7 +131,7 @@ struct VlmState {
     vision_graph: Graph,
     embed_graph: Graph,
     decoder_graph: Graph,
-    processor: Preprocessor,
+    processor: Box<dyn ImagePreprocessor>,
     pixel_input: String,
     mask_input: String,
     image_token_id: i64,
@@ -328,7 +334,23 @@ fn empty_kv_cache(graph: &Graph) -> Result<Vec<Tensor>> {
         .collect()
 }
 
-struct Preprocessor {
+trait ImagePreprocessor: Send + Sync {
+    fn preprocess(&self, bytes: &[u8]) -> Result<Preprocessed>;
+}
+
+fn create_preprocessor(name: Option<&str>, path: &Path) -> Result<Box<dyn ImagePreprocessor>> {
+    match name {
+        Some("smolvlm") => Ok(Box::new(SmolVlmPreprocessor::load(path)?)),
+        Some(other) => Err(EngineError::UnsupportedEngine(format!(
+            "image preprocessor {other:?}"
+        ))),
+        None => Err(EngineError::ManifestInvalid(
+            "vision.preprocessor is required".into(),
+        )),
+    }
+}
+
+struct SmolVlmPreprocessor {
     size: u32,
     mean: [f32; 3],
     std: [f32; 3],
@@ -341,7 +363,7 @@ struct Preprocessed {
     width: usize,
 }
 
-impl Preprocessor {
+impl SmolVlmPreprocessor {
     fn load(path: &Path) -> Result<Self> {
         let raw = std::fs::read_to_string(path).map_err(|error| {
             EngineError::ManifestInvalid(format!("preprocessor config: {error}"))
@@ -354,8 +376,7 @@ impl Preprocessor {
             .unwrap_or(false)
         {
             return Err(EngineError::UnsupportedEngine(
-                "onnx_smolvlm image splitting is not implemented; set do_image_splitting=false"
-                    .into(),
+                "smolvlm image splitting is not implemented; set do_image_splitting=false".into(),
             ));
         }
         let size = value
@@ -372,7 +393,9 @@ impl Preprocessor {
             std: array(&value["image_std"], 0.5),
         })
     }
+}
 
+impl ImagePreprocessor for SmolVlmPreprocessor {
     fn preprocess(&self, bytes: &[u8]) -> Result<Preprocessed> {
         let image = image::load_from_memory(bytes)
             .map_err(|error| EngineError::InvalidAudio(format!("image: {error}")))?;

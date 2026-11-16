@@ -110,12 +110,10 @@ impl TextGenerator {
         spec: GenerationSpec,
         on_bytes: &mut dyn FnMut(&[u8]) -> bool,
     ) -> Result<GenerationOutput> {
-        self.generate_with_images(session, prompt, &[], cancel, spec, on_bytes)
+        self.generate_with_augmented(session, prompt, &[], cancel, spec, on_bytes)
     }
 
-    /// Generate from a prompt plus at most one image. The session receives the
-    /// encoded image alongside every forward pass; vision sessions expand the
-    /// image placeholder in `input_ids` to the processor's token count.
+    /// Generate from a prompt plus at most one image.
     pub fn generate_with_images(
         &self,
         session: &dyn EngineSession,
@@ -125,6 +123,36 @@ impl TextGenerator {
         spec: GenerationSpec,
         on_bytes: &mut dyn FnMut(&[u8]) -> bool,
     ) -> Result<GenerationOutput> {
+        if images.len() > 1 {
+            return Err(EngineError::Other(
+                "only one image per generation is supported".into(),
+            ));
+        }
+        let extra = images
+            .iter()
+            .map(|image| Tensor::new("image", vec![image.len()], TensorData::U8(image.clone())))
+            .collect::<Result<Vec<_>>>()?;
+        self.generate_with_augmented(session, prompt, &extra, cancel, spec, on_bytes)
+    }
+
+    /// Generate with arbitrary auxiliary tensors sent on every forward pass.
+    pub fn generate_with_augmented(
+        &self,
+        session: &dyn EngineSession,
+        prompt: &str,
+        extra: &[Tensor],
+        cancel: &CancelToken,
+        spec: GenerationSpec,
+        on_bytes: &mut dyn FnMut(&[u8]) -> bool,
+    ) -> Result<GenerationOutput> {
+        for tensor in extra {
+            if !session.inputs().iter().any(|spec| spec.name == tensor.name) {
+                return Err(EngineError::Other(format!(
+                    "session has no auxiliary input {}",
+                    tensor.name
+                )));
+            }
+        }
         let GenerationSpec {
             max_tokens,
             sampling,
@@ -167,16 +195,6 @@ impl TextGenerator {
         let mask_spec = find_input(session, "attention_mask");
         let logits_spec = find_logits(session)
             .ok_or_else(|| EngineError::Other("model has no float logits output".into()))?;
-        let image_spec = find_image_input(session);
-        if !images.is_empty() && image_spec.is_none() {
-            return Err(EngineError::Other("model has no uint8 image input".into()));
-        }
-        if images.len() > 1 {
-            return Err(EngineError::Other(
-                "only one image per generation is supported".into(),
-            ));
-        }
-
         let mut generated = Vec::with_capacity(max_tokens);
         let mut generated_tokens = Vec::with_capacity(max_tokens);
         let mut tokens = 0usize;
@@ -203,13 +221,7 @@ impl TextGenerator {
                     TensorData::I64(vec![1; length]),
                 )?);
             }
-            if let (Some(spec), Some(image)) = (&image_spec, images.first()) {
-                tensors.push(Tensor::new(
-                    spec.name.clone(),
-                    vec![image.len()],
-                    TensorData::U8(image.clone()),
-                )?);
-            }
+            tensors.extend(extra.iter().cloned());
 
             let outputs = session.run_with_deadline(tensors, deadline)?;
             if deadline.is_some_and(|deadline| Instant::now() >= deadline) {
@@ -263,14 +275,6 @@ fn find_i64_input(session: &dyn EngineSession) -> Option<TensorSpec> {
         .inputs()
         .iter()
         .find(|spec| spec.dtype == TensorDtype::I64)
-        .cloned()
-}
-
-fn find_image_input(session: &dyn EngineSession) -> Option<TensorSpec> {
-    session
-        .inputs()
-        .iter()
-        .find(|spec| spec.dtype == TensorDtype::U8 && spec.name == "image")
         .cloned()
 }
 

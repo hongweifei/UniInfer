@@ -15,7 +15,7 @@ prefer = ["gpu", "cpu"]
 allow_cpu_fallback = true
 
 [vision]
-architecture = "llama_mtmd"
+family = "llama_mtmd"
 mmproj_file = "mmproj-Qwen2.5-VL-7B-Instruct-Q8_0.gguf"
 image_token = "<__media__>"
 

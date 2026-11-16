@@ -61,6 +61,15 @@ pub struct NativeTextOutput {
     pub finish: NativeFinish,
 }
 
+/// Optional capability for engines that own tokenization and decoding.
+pub trait NativeTextDecoder: Send + Sync {
+    fn generate_text(
+        &self,
+        request: NativeTextRequest<'_>,
+        on_bytes: &mut dyn FnMut(&[u8]) -> bool,
+    ) -> Result<NativeTextOutput>;
+}
+
 /// A loaded model session.
 pub trait EngineSession: Send + Sync {
     fn inputs(&self) -> &[TensorSpec];
@@ -92,22 +101,9 @@ pub trait EngineSession: Send + Sync {
         Ok(())
     }
 
-    /// Whether this session implements `generate_text`.
-    fn supports_native_generation(&self) -> bool {
-        false
-    }
-
-    /// Generate text inside the engine when it owns its own tokenizer/decoder.
-    ///
-    /// The default `None` keeps logits-based sessions on `TextGenerator`.
-    /// Returning `Some` opts into the native path, including streaming through
-    /// `on_bytes`.
-    fn generate_text(
-        &self,
-        _request: NativeTextRequest<'_>,
-        _on_bytes: &mut dyn FnMut(&[u8]) -> bool,
-    ) -> Result<Option<NativeTextOutput>> {
-        Ok(None)
+    /// Optional native decoder capability.
+    fn native_decoder(&self) -> Option<&dyn NativeTextDecoder> {
+        None
     }
 
     /// Idempotent cancellation. Pending and subsequent runs return `Cancelled`.
@@ -123,6 +119,11 @@ pub trait InferenceEngine: Send + Sync {
 
     /// Declarative implementation names accepted by this engine.
     fn implementations(&self) -> &[&'static str];
+
+    /// A transport forwards manifests to another runtime (e.g. worker process).
+    fn is_transport(&self) -> bool {
+        false
+    }
 
     fn supported_formats(&self) -> &[ModelFormat];
 

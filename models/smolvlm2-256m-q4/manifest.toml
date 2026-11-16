@@ -22,7 +22,7 @@ family = "smolvlm2"
 tokenizer_file = "tokenizer.json"
 
 [vision]
-architecture = "llama_mtmd"
+family = "llama_mtmd"
 mmproj_file = "mmproj-SmolVLM2-256M-Video-Instruct-Q8_0.gguf"
 image_token = "<__media__>"
 
