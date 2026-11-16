@@ -88,11 +88,16 @@ fn main() {
             pick_model_folder,
             model_store::search_models,
             model_store::plan_model,
-            model_store::install_model,
+            model_store::download::start_download,
+            model_store::download::list_downloads,
+            model_store::download::cancel_download,
+            model_store::download::remove_download,
+            model_store::download::clear_downloads,
             model_store::delete_model
         ])
         .setup(|app| {
             let startup = api_server::start();
+            app.manage(model_store::DownloadManager::new());
             app.manage(DesktopState {
                 status: DesktopStatus {
                     info: startup.info,

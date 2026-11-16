@@ -4,6 +4,7 @@ import { toast } from './ui.js';
 import { openVariantDialog } from './variant-dialog.js';
 import { MODEL_CATEGORIES } from '../model-meta.js';
 import { clampPage, filterOnlineItems, onlineFacets } from '../catalog-utils.js';
+import { cancelDownload, findDownload, isTerminalStatus, removeDownload, startDownload, subscribeDownloads } from '../downloads.js';
 
 const invoke = (command, args) => window.__TAURI__?.core?.invoke(command, args);
 
@@ -31,8 +32,6 @@ export function mountCatalog(root, ctx) {
       onClick: () => { query.value = term; void search(); },
     }));
   }
-  const progress = new Map();
-  let unlisten = null;
   let disposed = false;
   let currentPage = 1;
   let hasMore = false;
@@ -113,9 +112,13 @@ export function mountCatalog(root, ctx) {
     }
     for (const entry of visible) {
       const button = h('button', {
-        class: 'btn sm primary', type: 'button',
-        onClick: () => void chooseVariant(entry, button),
+        class: 'btn sm primary', type: 'button', dataset: { action: 'download' },
+        onClick: () => void handleDownload(entry, button),
       }, h('span', { html: icon('download', 13) }), h('span', { text: '下载' }));
+      const cancelButton = h('button', {
+        class: 'btn sm ghost', type: 'button', text: '取消', hidden: true, dataset: { action: 'cancel' },
+        onClick: () => void handleCancel(entry),
+      });
       const progressBar = h('div', { class: 'progress', hidden: true }, h('span'));
       const progressText = h('div', { class: 'faint catalog-progress-text', hidden: true });
       const card = h('article', { class: 'search-card', dataset: { repo: entry.id } },
@@ -128,12 +131,11 @@ export function mountCatalog(root, ctx) {
           h('span', { class: 'chip', text: formatDownloads(entry.downloads) }),
         ),
         entry.tags?.length ? h('div', { class: 'model-tags' }, ...entry.tags.slice(0, 4).map((tag) => h('span', { class: 'chip', text: tag }))) : null,
-        h('div', { class: 'catalog-actions' }, button),
+        h('div', { class: 'catalog-actions' }, cancelButton, button),
         progressBar, progressText,
       );
       results.append(card);
-      const state = progress.get(entry.id);
-      if (state) updateProgress(entry.id, state, button, progressBar, progressText);
+      applyTask(findDownload(entry.id, source.value), button, cancelButton, progressBar, progressText);
     }
     const totalPages = totalResults ? Math.max(1, Math.ceil(totalResults / PAGE_SIZE)) : null;
     const pageInput = h('input', {
@@ -245,48 +247,68 @@ export function mountCatalog(root, ctx) {
     openVariantDialog({ entry, plan, onInstall: (key) => { button.disabled = false; button.textContent = '下载'; void install(entry, button, key); } });
   }
 
+  async function handleDownload(entry, button) {
+    const task = findDownload(entry.id, source.value);
+    if (task && !isTerminalStatus(task.status)) return;
+    if (task && task.status !== 'done') {
+      try {
+        await removeDownload(task.id);
+      } catch (error) {
+        toast(error?.message ?? String(error), 'error');
+        return;
+      }
+      await install(entry, button, task.variant);
+      return;
+    }
+    await chooseVariant(entry, button);
+  }
+
+  async function handleCancel(entry) {
+    const task = findDownload(entry.id, source.value);
+    if (!task || isTerminalStatus(task.status)) return;
+    try {
+      await cancelDownload(task.id);
+    } catch (error) {
+      toast(error?.message ?? String(error), 'error');
+    }
+  }
+
   async function install(entry, button, variant) {
     button.disabled = true;
-    button.textContent = '准备下载…';
-    progress.set(entry.id, { status: 'downloading', variant, file: '', downloaded: 0, total: 1 });
-    const card = results.querySelector(`[data-repo="${CSS.escape(entry.id)}"]`);
-    const bar = card?.querySelector('.progress');
-    const text = card?.querySelector('.catalog-progress-text');
-    updateProgress(entry.id, progress.get(entry.id), button, bar, text);
-    status.textContent = `正在下载 ${entry.id}，首次下载可能需要一些时间…`;
+    button.textContent = '加入队列…';
+    status.textContent = `已加入下载队列：${entry.id}`;
     try {
-      const result = await invoke('install_model', { repo: entry.id, source: source.value, variant });
-      await ctx.api.request('/v1/models/refresh', { method: 'POST' }).catch(() => {});
-      await ctx.refreshModels({ silent: true });
-      progress.set(entry.id, { status: 'done', variant });
-      updateProgress(entry.id, progress.get(entry.id), button, bar, text);
-      status.textContent = `已安装 ${result.id}`;
-      toast(`${entry.id} 下载完成并已加入模型库`, 'success');
+      const task = await startDownload({ repo: entry.id, source: source.value, variant });
+      const card = results.querySelector(`[data-repo="${CSS.escape(entry.id)}"]`);
+      if (card) {
+        applyTask(
+          task,
+          card.querySelector('[data-action="download"]'),
+          card.querySelector('[data-action="cancel"]'),
+          card.querySelector('.progress'),
+          card.querySelector('.catalog-progress-text'),
+        );
+      }
+      toast(`${entry.id} 已加入下载队列`, 'success');
     } catch (error) {
       const message = error?.message ?? String(error);
-      progress.set(entry.id, { status: 'error', message });
-      updateProgress(entry.id, progress.get(entry.id), button, bar, text);
       status.textContent = message;
       toast(message, 'error');
     }
   }
 
-  if (window.__TAURI__?.event?.listen) {
-    window.__TAURI__.event.listen('model-download', (event) => {
-      const data = event.payload;
-      const state = progress.get(data.repo) ?? { status: 'downloading', downloaded: 0, total: data.total };
-      progress.set(data.repo, { ...state, ...data });
-      const card = results.querySelector(`[data-repo="${CSS.escape(data.repo)}"]`);
-      if (!card) return;
-      updateProgress(
-        data.repo,
-        progress.get(data.repo),
-        card.querySelector('.catalog-actions .btn'),
+  const unsubscribe = subscribeDownloads(() => {
+    for (const card of results.querySelectorAll('.search-card')) {
+      const repo = card.dataset.repo;
+      applyTask(
+        findDownload(repo, source.value),
+        card.querySelector('[data-action="download"]'),
+        card.querySelector('[data-action="cancel"]'),
         card.querySelector('.progress'),
         card.querySelector('.catalog-progress-text'),
       );
-    }).then((fn) => { unlisten = fn; });
-  }
+    }
+  });
 
   root.append(h('div', { class: 'card' },
     h('div', { class: 'section-title' }, h('h2', { text: '在线模型' }), h('span', { class: 'spacer' }),
@@ -299,23 +321,49 @@ export function mountCatalog(root, ctx) {
 
   return () => {
     disposed = true;
-    if (unlisten) unlisten();
+    unsubscribe();
   };
 }
 
-function updateProgress(_repo, state, button, bar, text) {
+function applyTask(task, button, cancelButton, bar, text) {
   if (!button) return;
-  if (state?.status === 'error') {
+  if (!task) {
+    button.disabled = false;
+    button.textContent = '下载';
+    if (cancelButton) cancelButton.hidden = true;
+    if (bar) bar.hidden = true;
+    if (text) text.hidden = true;
+    return;
+  }
+  const active = !isTerminalStatus(task.status);
+  const total = Number(task.total) || 0;
+  const downloaded = Number(task.downloaded) || 0;
+  const percent = total > 0 ? Math.min(100, Math.round((downloaded / total) * 100)) : 0;
+  if (cancelButton) {
+    cancelButton.hidden = !active;
+    cancelButton.disabled = false;
+  }
+  if (task.status === 'failed') {
     button.disabled = false;
     button.textContent = '重试';
     if (bar) bar.hidden = true;
     if (text) {
       text.hidden = false;
-      text.textContent = state.message ?? '下载失败';
+      text.textContent = task.message ?? '下载失败';
     }
     return;
   }
-  if (state?.status === 'done') {
+  if (task.status === 'cancelled') {
+    button.disabled = false;
+    button.textContent = '重新下载';
+    if (bar) bar.hidden = true;
+    if (text) {
+      text.hidden = false;
+      text.textContent = '已取消';
+    }
+    return;
+  }
+  if (task.status === 'done') {
     button.disabled = true;
     button.textContent = '已安装';
     if (bar) bar.hidden = true;
@@ -325,19 +373,32 @@ function updateProgress(_repo, state, button, bar, text) {
     }
     return;
   }
-  const total = Number(state?.total) || 0;
-  const downloaded = Number(state?.downloaded) || 0;
-  const percent = total > 0 ? Math.min(100, Math.round((downloaded / total) * 100)) : 0;
   button.disabled = true;
-  button.textContent = `下载 ${percent}%`;
+  const labels = {
+    queued: '排队中', preparing: '准备中…', downloading: `下载 ${percent}%`,
+    verifying: '校验中…', inspecting: '生成配置…', committing: '安装中…',
+  };
+  button.textContent = labels[task.status] ?? '下载中…';
   if (bar) {
     bar.hidden = false;
+    bar.classList.toggle('determinate', total > 0);
     const fill = bar.querySelector('span');
-    if (fill) fill.style.width = `${Math.max(4, percent)}%`;
+    if (fill) fill.style.width = total > 0 ? `${percent}%` : '36%';
   }
   if (text) {
     text.hidden = false;
-    text.textContent = state?.file ? `${state.file} · ${percent}%` : `准备中 · ${percent}%`;
+    const detail = task.status === 'queued'
+      ? '等待其他下载完成'
+      : task.status === 'preparing'
+        ? '读取仓库文件'
+        : task.status === 'verifying'
+          ? '校验文件完整性'
+          : task.status === 'inspecting'
+            ? '生成模型配置'
+            : task.status === 'committing'
+              ? '安装到模型库'
+              : task.file ? task.file.split('/').pop() : '';
+    text.textContent = total > 0 ? `${detail} · ${percent}%` : detail;
   }
 }
 

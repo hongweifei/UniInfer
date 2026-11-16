@@ -280,7 +280,7 @@
   background: var(--surface-2);
 }
 .search-card-head { display: flex; align-items: center; gap: 9px; }
-.search-card .catalog-actions { display: flex; justify-content: flex-end; }
+.search-card .catalog-actions { display: flex; justify-content: flex-end; gap: 6px; align-items: center; }
 .search-card .progress { margin-top: 2px; }
 .pager { display: flex; align-items: center; justify-content: flex-end; gap: 8px; margin-top: 10px; }
 .page-jump-input { width: 64px; flex: 0 0 64px; text-align: center; padding-left: 6px; padding-right: 6px; }
@@ -450,3 +450,22 @@
   .message-body { max-width: 88%; }
   .param-grid { grid-template-columns: 1fr; }
 }
+
+/* Download manager */
+.download-summary { align-items: center; margin-top: 10px; min-width: 0; }
+.download-list { display: grid; gap: 10px; margin-top: 10px; }
+.download-card {
+  display: grid;
+  gap: 9px;
+  padding: 13px 14px;
+  border: 1px solid var(--border-soft);
+  border-radius: 10px;
+  background: var(--surface-2);
+}
+.download-head { display: flex; align-items: center; gap: 9px; min-width: 0; }
+.download-card .progress { margin-top: 1px; }
+.download-stats { display: flex; flex-wrap: wrap; gap: 10px; font-variant-numeric: tabular-nums; }
+.download-message { font-size: 12px; overflow-wrap: anywhere; }
+.download-message.error { color: var(--error); }
+.download-path { font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.download-actions { display: flex; justify-content: flex-end; gap: 6px; }

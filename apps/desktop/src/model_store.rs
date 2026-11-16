@@ -2,19 +2,16 @@
 
 use std::path::{Path, PathBuf};
 
-use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
-use tauri::{AppHandle, Emitter};
-use tokio::io::AsyncWriteExt;
 use uniinfer_core::ModelManifest;
-use uniinfer_model_inspect::{InspectOptions, inspect};
 
+pub(crate) mod download;
 mod plan;
 mod repo;
 mod search;
 
-use plan::{build_plan_with_variant, build_variants, choose_variant};
+pub(crate) use download::DownloadManager;
+use plan::{build_variants, choose_variant};
 use repo::fetch_repo_files;
 use search::{search_huggingface, search_modelscope};
 
@@ -72,28 +69,10 @@ pub(crate) struct InstallPlan {
 
 #[derive(Clone, Debug)]
 struct RemoteFile {
-    repo: String,
     path: String,
     url: String,
     sha256: Option<String>,
     size: u64,
-}
-
-#[derive(Clone, Serialize)]
-struct DownloadEvent {
-    repo: String,
-    file: String,
-    downloaded: u64,
-    total: u64,
-    status: &'static str,
-    message: Option<String>,
-}
-
-#[derive(Serialize)]
-pub(crate) struct InstallResult {
-    pub(crate) id: String,
-    pub(crate) path: String,
-    pub(crate) restart_required: bool,
 }
 
 #[tauri::command]
@@ -208,148 +187,6 @@ fn delete_model_inner(id: &str) -> Result<DeleteResult, String> {
     })
 }
 
-#[tauri::command]
-pub(crate) async fn install_model(
-    app: AppHandle,
-    repo: String,
-    source: Source,
-    variant: Option<String>,
-) -> Result<InstallResult, String> {
-    let (repo_files, base_files) = fetch_repo_files(&repo, source).await?;
-    let plan = build_plan_with_variant(&repo_files, base_files.as_ref(), variant.as_deref())?;
-    let id = slug(&repo);
-    let target = models_root().join(&id);
-    let staging = temp_model_path(&models_root(), &id, "installing");
-    if staging.exists() {
-        tokio::fs::remove_dir_all(&staging)
-            .await
-            .map_err(|error| format!("清理临时目录 {}: {error}", staging.display()))?;
-    }
-    tokio::fs::create_dir_all(&staging)
-        .await
-        .map_err(|error| format!("create {}: {error}", staging.display()))?;
-    let _staging_cleanup = StagingCleanup(staging.clone());
-    let total = plan.files.iter().map(|file| file.size).sum::<u64>();
-    if source == Source::ModelScope {
-        let files = plan.files.clone();
-        let staging_dir = staging.clone();
-        let app_handle = app.clone();
-        tokio::task::spawn_blocking(move || download_modelscope(&app_handle, &files, &staging_dir))
-            .await
-            .map_err(|error| format!("modelscope download task: {error}"))??;
-    } else {
-        let client = reqwest::Client::builder()
-            .user_agent("UniInfer-Desktop/0.0")
-            .build()
-            .map_err(|error| format!("http client: {error}"))?;
-        let mut done = 0u64;
-        for file in &plan.files {
-            let target = staging.join(&file.path);
-            if let Some(parent) = target.parent() {
-                tokio::fs::create_dir_all(parent)
-                    .await
-                    .map_err(|error| format!("create {}: {error}", parent.display()))?;
-            }
-            if target.is_file() {
-                done += file.size;
-                continue;
-            }
-            let response = client
-                .get(&file.url)
-                .send()
-                .await
-                .map_err(|error| format!("download {}: {error}", file.url))?;
-            if !response.status().is_success() {
-                return Err(format!("download {}: HTTP {}", file.url, response.status()));
-            }
-            let part = target.with_extension("part");
-            let mut output = tokio::fs::File::create(&part)
-                .await
-                .map_err(|error| format!("create {}: {error}", part.display()))?;
-            let mut hasher = Sha256::new();
-            let mut current = 0u64;
-            let mut stream = response.bytes_stream();
-            while let Some(chunk) = stream.next().await {
-                let chunk = chunk.map_err(|error| format!("download {}: {error}", file.url))?;
-                current += chunk.len() as u64;
-                hasher.update(&chunk);
-                output
-                    .write_all(&chunk)
-                    .await
-                    .map_err(|error| format!("write {}: {error}", part.display()))?;
-                let _ = app.emit(
-                    "model-download",
-                    DownloadEvent {
-                        repo: repo.clone(),
-                        file: file.path.clone(),
-                        downloaded: done + current,
-                        total: total.max(1),
-                        status: "downloading",
-                        message: None,
-                    },
-                );
-            }
-            output
-                .flush()
-                .await
-                .map_err(|error| format!("flush {}: {error}", part.display()))?;
-            drop(output);
-            if let Some(expected) = &file.sha256 {
-                let actual = hex::encode(hasher.finalize());
-                if !actual.eq_ignore_ascii_case(expected) {
-                    let _ = tokio::fs::remove_file(&part).await;
-                    return Err(format!(
-                        "checksum mismatch for {}: expected {expected}, got {actual}",
-                        file.path
-                    ));
-                }
-            }
-            tokio::fs::rename(&part, &target)
-                .await
-                .map_err(|error| format!("rename {}: {error}", target.display()))?;
-            done += file.size;
-        }
-    }
-    let directory = staging.clone();
-    let model_id = id.clone();
-    let _manifest = tokio::task::spawn_blocking(move || -> Result<PathBuf, String> {
-        let inspection = inspect(
-            &directory,
-            &InspectOptions {
-                id: Some(model_id),
-                ..InspectOptions::default()
-            },
-        )
-        .map_err(|error| format!("无法为下载的模型生成 manifest: {error}"))?;
-        inspection
-            .write_manifest()
-            .map_err(|error| format!("写入 manifest: {error}"))
-    })
-    .await
-    .map_err(|error| format!("inspect task: {error}"))??;
-    let _ = app.emit(
-        "model-download",
-        DownloadEvent {
-            repo: repo.clone(),
-            file: String::new(),
-            downloaded: total,
-            total: total.max(1),
-            status: "done",
-            message: Some("下载完成，默认运行配置已生成".into()),
-        },
-    );
-    let commit_staging = staging.clone();
-    let commit_target = target.clone();
-    tokio::task::spawn_blocking(move || commit_install(&commit_staging, &commit_target))
-        .await
-        .map_err(|error| format!("install commit task: {error}"))??;
-    Ok(InstallResult {
-        id,
-        path: target.display().to_string(),
-        restart_required: false,
-    })
-}
-
 fn slug(repo: &str) -> String {
     repo.chars()
         .map(|ch| {
@@ -409,97 +246,6 @@ fn commit_install(staging: &Path, target: &Path) -> Result<(), String> {
         let _ = std::fs::remove_dir_all(&backup);
     }
     Ok(())
-}
-
-#[derive(Clone)]
-struct CatProgress {
-    app: AppHandle,
-    repo: String,
-    done: u64,
-    total: u64,
-}
-
-impl models_cat::Progress for CatProgress {
-    fn on_start(&mut self, unit: &models_cat::ProgressUnit) -> Result<(), models_cat::OpsError> {
-        let _ = self.app.emit(
-            "model-download",
-            DownloadEvent {
-                repo: self.repo.clone(),
-                file: unit.filename().to_string(),
-                downloaded: self.done,
-                total: self.total.max(1),
-                status: "downloading",
-                message: None,
-            },
-        );
-        Ok(())
-    }
-
-    fn on_progress(&mut self, unit: &models_cat::ProgressUnit) -> Result<(), models_cat::OpsError> {
-        let _ = self.app.emit(
-            "model-download",
-            DownloadEvent {
-                repo: self.repo.clone(),
-                file: unit.filename().to_string(),
-                downloaded: self.done + unit.current(),
-                total: self.total.max(1),
-                status: "downloading",
-                message: None,
-            },
-        );
-        Ok(())
-    }
-
-    fn on_finish(&mut self, _unit: &models_cat::ProgressUnit) -> Result<(), models_cat::OpsError> {
-        Ok(())
-    }
-}
-
-fn download_modelscope(app: &AppHandle, files: &[RemoteFile], target: &Path) -> Result<(), String> {
-    let cache = models_root().join(".modelscope-cache");
-    let mut done = 0u64;
-    let total = files.iter().map(|file| file.size).sum::<u64>();
-    for file in files {
-        let dest = target.join(&file.path);
-        if dest.is_file() {
-            done += file.size;
-            continue;
-        }
-        if let Some(parent) = dest.parent() {
-            std::fs::create_dir_all(parent)
-                .map_err(|error| format!("create {}: {error}", parent.display()))?;
-        }
-        let mut repo = models_cat::Repo::new_model(&file.repo);
-        repo.set_cache_dir(&cache);
-        let cat = models_cat::ModelsCat::new(repo.clone());
-        let progress = CatProgress {
-            app: app.clone(),
-            repo: file.repo.clone(),
-            done,
-            total,
-        };
-        cat.download_with_progress(&file.path, progress)
-            .map_err(|error| format!("modelscope download {}: {error}", file.path))?;
-        let source = locate_cache_file(&repo, &file.path)?;
-        std::fs::copy(&source, &dest)
-            .map_err(|error| format!("copy {}: {error}", dest.display()))?;
-        done += file.size;
-        let _ = std::fs::remove_dir_all(repo.cache_dir());
-    }
-    Ok(())
-}
-
-fn locate_cache_file(repo: &models_cat::Repo, path: &str) -> Result<PathBuf, String> {
-    let snapshots = repo.cache_dir().join("snapshots");
-    let entries = std::fs::read_dir(&snapshots)
-        .map_err(|error| format!("read {}: {error}", snapshots.display()))?;
-    for entry in entries.flatten() {
-        let candidate = entry.path().join(path);
-        if candidate.is_file() {
-            return Ok(candidate);
-        }
-    }
-    Err(format!("downloaded file not found in cache: {path}"))
 }
 
 #[cfg(test)]

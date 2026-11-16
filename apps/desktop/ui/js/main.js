@@ -5,6 +5,7 @@ import { loadState, saveState, newConversation, deleteConversation, recentConver
 import { isAudioModel, isChatModel, isImageModel, modelTitle, errorMessage } from './format.js';
 import { toast, themeIcon, confirmDialog } from './components/ui.js';
 import { deleteMedia } from './media-store.js';
+import { initDownloads, subscribeDownloads, activeDownloads } from './downloads.js';
 import { mountChat } from './views/chat.js';
 import { mountTranscribe } from './views/transcribe.js';
 import { mountImages } from './views/images.js';
@@ -138,6 +139,7 @@ function sidebar() {
   } else if (state.view === 'models') {
     const links = [
       ['online', '在线模型', 'cloud'],
+      ['downloads', '下载', 'download'],
       ['installed', '已安装', 'models'],
       ['import', '导入', 'folder'],
       ['devices', '设备', 'cpu'],
@@ -145,10 +147,12 @@ function sidebar() {
     const nav = h('div', { class: 'sidebar-section' });
     nav.append(h('div', { class: 'sidebar-heading' }, h('span', { text: '模型分类' })));
     for (const [id, label, iconName] of links) {
+      const count = id === 'downloads' ? activeDownloads().length : 0;
       nav.append(h('button', {
         class: `nav-item ${state.subview === id ? 'active' : ''}`, type: 'button',
         onClick: () => setSubview(id),
-      }, h('span', { html: icon(iconName, 16) }), h('span', { text: label })));
+      }, h('span', { html: icon(iconName, 16) }), h('span', { text: label }),
+        count ? h('span', { class: 'filter-count', text: String(count) }) : null));
     }
     context.push(nav);
   }
@@ -291,7 +295,7 @@ function cycleTheme() {
 function navigate(view) {
   if (!views[view]) return;
   state.view = view;
-  if (view === 'models' && !['online', 'installed', 'devices', 'import'].includes(state.subview)) state.subview = 'online';
+  if (view === 'models' && !['online', 'downloads', 'installed', 'devices', 'import'].includes(state.subview)) state.subview = 'online';
   persist();
   chooseModelForView(view);
   renderShell();
@@ -303,6 +307,26 @@ function setSubview(subview) {
   persist();
   renderShell();
   renderView();
+}
+
+function watchDownloads() {
+  const previous = new Map();
+  let activeCount = -1;
+  subscribeDownloads((tasks) => {
+    const active = tasks.filter((task) => !['done', 'failed', 'cancelled'].includes(task.status));
+    if (active.length !== activeCount) {
+      activeCount = active.length;
+      renderSidebarOnly();
+    }
+    for (const task of tasks) {
+      const before = previous.get(task.id);
+      previous.set(task.id, task.status);
+      if (before && before !== 'done' && task.status === 'done') {
+        toast(`${task.repo} 下载完成并已加入模型库`, 'success');
+        void refreshModels({ silent: true }).catch(() => {});
+      }
+    }
+  });
 }
 
 async function refreshModels({ silent = false } = {}) {
@@ -352,6 +376,8 @@ async function boot() {
     return;
   }
   api = new ApiClient(desktop.info);
+  await initDownloads();
+  watchDownloads();
   try {
     const [modelBody, deviceBody] = await Promise.all([api.models(), api.devices()]);
     models = sortModels((modelBody.data ?? []).filter((model) => !model.id.startsWith('tiny-')));

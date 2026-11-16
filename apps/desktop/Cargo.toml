@@ -52,7 +52,7 @@ uniinfer-config = { path = "../../crates/uniinfer-config" }
 uniinfer-core = { path = "../../crates/uniinfer-core" }
 uniinfer-model-inspect = { path = "../../crates/uniinfer-model-inspect" }
 tauri = { version = "2.12.5" }
-tokio = { version = "1.54.1", features = ["rt-multi-thread", "fs", "io-util"] }
+tokio = { version = "1.54.1", features = ["rt-multi-thread", "fs", "io-util", "sync", "time", "macros"] }
 serde = { version = "1.0.229", features = ["derive"] }
 hex = "0.4.3"
 getrandom = "0.4.3"
@@ -62,7 +62,6 @@ sha2 = "0.11.1"
 futures-util = "0.3"
 serde_json = "1"
 urlencoding = "2"
-models-cat = "0.1.0"
 
 [lints.rust]
 unsafe_code = "forbid"

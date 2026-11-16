@@ -3,6 +3,7 @@
 use super::RemoteFile;
 use super::repo::{RemoteInfo, RepoFiles, file_url};
 
+#[cfg(test)]
 pub(super) struct PlannedFiles {
     #[cfg_attr(not(test), allow(dead_code))]
     pub(super) format: String,
@@ -28,6 +29,7 @@ pub(super) fn build_plan(
     build_plan_with_variant(repo_files, base_files, None)
 }
 
+#[cfg(test)]
 pub(super) fn build_plan_with_variant(
     repo_files: &RepoFiles,
     base_files: Option<&RepoFiles>,
@@ -269,7 +271,6 @@ pub(super) fn quant_label(path: &str) -> String {
 
 pub(super) fn remote_file(repo: &RepoFiles, info: &RemoteInfo) -> RemoteFile {
     RemoteFile {
-        repo: repo.repo.clone(),
         path: info.path.clone(),
         url: file_url(repo.source, &repo.repo, &info.path),
         sha256: info.sha256.clone(),
