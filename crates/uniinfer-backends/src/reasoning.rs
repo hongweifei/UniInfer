@@ -103,8 +103,7 @@ impl ReasoningSplitter {
         loop {
             let found = match self.phase {
                 Phase::Content => find_any(&self.buffer, OPEN_MARKERS).map(|found| (found, false)),
-                Phase::Reasoning => find_any_any(&self.buffer, OPEN_MARKERS, CLOSE_MARKERS)
-                    .map(|(found, closing)| (found, closing)),
+                Phase::Reasoning => find_any_any(&self.buffer, OPEN_MARKERS, CLOSE_MARKERS),
             };
             let Some(((index, length), closing)) = found else {
                 let markers = match self.phase {

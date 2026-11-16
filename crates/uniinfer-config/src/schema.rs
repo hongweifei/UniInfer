@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use crate::error::{ConfigError, Result};
 use crate::format::ConfigFormat;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct UniInferConfig {
     #[serde(default)]
@@ -61,14 +61,6 @@ impl Default for ServerConfig {
             request_timeout_ms: 0,
             model_load_timeout_ms: 0,
             isolate_models: false,
-        }
-    }
-}
-
-impl Default for UniInferConfig {
-    fn default() -> Self {
-        Self {
-            server: ServerConfig::default(),
         }
     }
 }
