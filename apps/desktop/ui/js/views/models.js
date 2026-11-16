@@ -1,7 +1,8 @@
 import { h, clear } from '../dom.js';
 import { icon } from '../icons.js';
 import { formatBytes, formatName, isAudioModel, isChatModel, isImageModel, modality, errorMessage, friendlyRouteError, capabilitySummary } from '../format.js';
-import { toast, emptyState, chip, setBusy } from '../components/ui.js';
+import { toast, emptyState, chip, setBusy, openModal, confirmDialog } from '../components/ui.js';
+import { mountCatalog } from '../components/catalog.js';
 
 function filtersFor(model) {
   const filters = ['全部'];
@@ -15,6 +16,8 @@ function filtersFor(model) {
 export function mountModels(root, ctx) {
   let filter = '全部';
   let query = '';
+  let formatFilter = 'all';
+  let loadFilter = 'all';
   let inspection = null;
   let importing = false;
 
@@ -24,6 +27,21 @@ export function mountModels(root, ctx) {
     class: 'input', type: 'search', placeholder: '搜索模型、格式或能力',
     onInput: (event) => { query = event.target.value.trim().toLowerCase(); renderList(); },
   });
+  const formatSelect = h('select', { class: 'select filter-select', attrs: { 'aria-label': '按格式筛选' } },
+    h('option', { value: 'all', text: '全部格式' }),
+    h('option', { value: 'onnx', text: 'ONNX' }),
+    h('option', { value: 'gguf', text: 'GGUF' }),
+    h('option', { value: 'safetensors', text: 'Safetensors' }),
+    h('option', { value: 'ggml', text: 'GGML' }),
+  );
+  formatSelect.addEventListener('change', () => { formatFilter = formatSelect.value; renderList(); });
+  const loadSelect = h('select', { class: 'select filter-select', attrs: { 'aria-label': '按加载状态筛选' } },
+    h('option', { value: 'all', text: '全部状态' }),
+    h('option', { value: 'loaded', text: '已加载' }),
+    h('option', { value: 'idle', text: '未加载' }),
+    h('option', { value: 'error', text: '不可用' }),
+  );
+  loadSelect.addEventListener('change', () => { loadFilter = loadSelect.value; renderList(); });
   const tabs = h('div', { class: 'row' });
   const deviceList = h('div', { class: 'device-list' });
   const importPath = h('input', { class: 'input', placeholder: '模型目录或 manifest.toml 路径' });
@@ -77,11 +95,17 @@ export function mountModels(root, ctx) {
       class: 'btn sm', type: 'button', disabled: loaded || Boolean(routeError) || imageOnly,
       onClick: async () => {
         setBusy(loadButton, true, '加载中…');
+        stateChip.textContent = '加载中';
+        stateChip.className = 'chip';
         try {
           await ctx.api.loadModel(model.id);
+          stateChip.textContent = '已加载';
+          stateChip.className = 'chip success';
           toast(`${model.id} 已加载`, 'success');
           await ctx.refreshModels();
         } catch (error) {
+          stateChip.textContent = '加载失败';
+          stateChip.className = 'chip warn';
           toast(errorMessage(error), 'error');
         } finally {
           setBusy(loadButton, false);
@@ -104,6 +128,9 @@ export function mountModels(root, ctx) {
       },
     }, h('span', { text: '卸载' }));
 
+    const stateChip = routeError
+      ? chip('不可用', 'warn')
+      : chip(loaded ? '已加载' : '未加载', loaded ? 'success' : '');
     return h('article', { class: 'model-card' },
       h('div', { class: 'model-card-head' },
         h('div', { class: 'brand-mark', style: 'width:32px;height:32px;border-radius:9px', html: icon(isAudioModel(model) ? 'wave' : isImageModel(model) ? 'image' : 'chat', 16) }),
@@ -125,13 +152,21 @@ export function mountModels(root, ctx) {
         h('strong', { text: '设备' }), h('span', { text: (model.devices ?? []).join(' / ') || '待放置' }),
       ),
       routeError ? h('div', { class: 'notice warn', text: friendlyRouteError(routeError.message) }) : null,
-      h('div', { class: 'model-card-actions' }, useButton, loadButton, unloadButton),
+      h('div', { class: 'model-card-actions' }, useButton, loadButton, h('button', {
+        class: 'btn sm ghost', type: 'button', onClick: () => void openConfig(model),
+      }, h('span', { html: icon('settings', 13) }), h('span', { text: '配置' })), unloadButton, h('button', {
+        class: 'btn sm danger', type: 'button', onClick: () => void removeModel(model),
+      }, h('span', { html: icon('trash', 13) }), h('span', { text: '删除' }))),
     );
   }
 
   function renderList() {
     const models = ctx.models().filter((model) => {
       if (filter !== '全部' && !filtersFor(model).includes(filter)) return false;
+      if (formatFilter !== 'all' && model.format !== formatFilter) return false;
+      if (loadFilter === 'loaded' && !model.loaded) return false;
+      if (loadFilter === 'idle' && model.loaded) return false;
+      if (loadFilter === 'error' && !model.route_error) return false;
       if (!query) return true;
       const text = [model.id, model.format, model.quantization, model.runtime, model.implementation, ...(model.inputs ?? []), ...(model.outputs ?? [])].join(' ').toLowerCase();
       return text.includes(query);
@@ -213,28 +248,114 @@ export function mountModels(root, ctx) {
     }
   }
 
+  async function openConfig(model) {
+    let manifest;
+    try {
+      const data = await ctx.api.request(`/v1/models/${encodeURIComponent(model.id)}/manifest`);
+      manifest = data.manifest;
+    } catch (error) {
+      toast(errorMessage(error), 'error');
+      return;
+    }
+    const placement = manifest.placement ?? {};
+    const policy = h('select', { class: 'select' },
+      ['auto', 'pinned', 'strict'].map((value) => h('option', { value, text: { auto: '自动', pinned: '固定', strict: '严格' }[value] })),
+    );
+    policy.value = placement.policy ?? 'auto';
+    const prefers = new Set(placement.prefer ?? []);
+    const prefRow = h('div', { class: 'row' });
+    for (const [value, label] of [['cpu', 'CPU'], ['gpu', 'GPU'], ['npu', 'NPU']]) {
+      const box = h('input', { type: 'checkbox', checked: prefers.has(value), onChange: (event) => {
+        if (event.target.checked) prefers.add(value); else prefers.delete(value);
+      } });
+      prefRow.append(h('label', { class: 'row', style: 'gap:5px;font-size:12px;color:var(--muted)' }, box, label));
+    }
+    const fallback = h('input', { type: 'checkbox', checked: placement.allow_cpu_fallback !== false });
+    const context = h('input', { class: 'input', type: 'number', min: '1', value: String(manifest.context_len ?? 2048) });
+    const body = h('div', { style: 'display:grid;gap:12px' },
+      h('div', { class: 'notice', text: '这里是模型的默认运行配置。保存后重启应用生效；下载模型会自动生成一份默认配置。' }),
+      h('div', { class: 'field' }, h('label', { text: '设备放置策略' }), policy),
+      h('div', { class: 'field' }, h('label', { text: '优先设备' }), prefRow),
+      h('label', { class: 'row', style: 'gap:7px;font-size:13px' }, fallback, h('span', { text: '允许回退到 CPU' })),
+      h('div', { class: 'field' }, h('label', { text: '上下文长度' }), context),
+    );
+    openModal({
+      title: `运行配置 · ${model.id}`,
+      body,
+      actions: [
+        { label: '取消', kind: 'ghost' },
+        {
+          label: '保存配置', kind: 'primary',
+          onClick: async () => {
+            manifest.placement = {
+              ...placement,
+              policy: policy.value,
+              prefer: [...prefers],
+              allow_cpu_fallback: fallback.checked,
+            };
+            manifest.context_len = Math.max(1, Number(context.value) || 2048);
+            try {
+              const result = await ctx.api.request(`/v1/models/${encodeURIComponent(model.id)}/manifest`, {
+                method: 'PUT', body: manifest,
+              });
+              toast(result.restart_required ? '配置已保存，重启后生效' : '配置已保存', 'success');
+            } catch (error) {
+              toast(errorMessage(error), 'error');
+              return false;
+            }
+          },
+        },
+      ],
+    });
+  }
+
+  async function removeModel(model) {
+    const ok = await confirmDialog({
+      title: '删除模型？',
+      message: `${model.id} 的文件和配置会从本地删除，删除后需要重启应用。`,
+      confirmLabel: '删除并重启',
+      danger: true,
+    });
+    if (!ok) return;
+    try {
+      await ctx.api.unloadModel(model.id).catch(() => {});
+      const result = await window.__TAURI__?.core?.invoke('delete_model', { id: model.id });
+      toast(result?.removed ? '模型已删除，正在重启' : '模型配置已移除，正在重启', 'success');
+      setTimeout(() => ctx.restart?.(), 800);
+    } catch (error) {
+      toast(errorMessage(error), 'error');
+    }
+  }
+
   renderTabs();
   renderList();
   renderDevices();
+  const subview = ctx.subview?.() ?? 'online';
+  const headings = {
+    online: ['在线模型', '搜索 ModelScope 或 Hugging Face，下载后自动生成默认运行配置。'],
+    installed: ['已安装模型', '管理本地模型、加载状态与运行配置。'],
+    devices: ['设备', '查看运行时探测到的 CPU、GPU、NPU 与放置结果。'],
+    import: ['导入模型', '从已有目录导入 manifest；适合离线模型。'],
+  };
+  const [heading, description] = headings[subview] ?? headings.online;
+  const onlineHost = h('div', { attrs: { id: 'online-models' }, hidden: subview !== 'online' });
+  ctx.onModelDownloaded = () => toast('模型下载完成，配置已写入；点击“重启并启用”后可用', 'success');
+  const onlineCleanup = mountCatalog(onlineHost, ctx);
 
   root.append(h('div', { class: 'models-view' }, h('div', { class: 'page' },
     h('div', { class: 'page-head' },
-      h('h2', { text: '模型' }),
-      h('p', { text: '选择要使用的本地模型。未加载的模型会在第一次请求时按需加载。' }),
+      h('h2', { text: heading }),
+      h('p', { text: description }),
     ),
-    h('div', { class: 'card' },
-      h('div', { class: 'section-title' }, h('h2', { text: '模型库' }), h('span', { class: 'spacer' }), count,
+    onlineHost,
+    h('div', { class: 'card', attrs: { id: 'installed-models' }, hidden: subview !== 'installed' },
+      h('div', { class: 'section-title' }, h('h2', { text: '已安装模型' }), h('span', { class: 'spacer' }), count,
         h('button', { class: 'btn sm ghost', type: 'button', onClick: () => void ctx.refreshModels(), html: `${icon('refresh', 14)} 刷新` }),
       ),
-      h('div', { class: 'toolbar', style: 'margin-bottom:12px' }, search, tabs),
+      h('div', { class: 'toolbar', style: 'margin-bottom:12px' }, search, formatSelect, loadSelect, tabs),
       list,
     ),
-    h('div', { class: 'card' },
-      h('div', { class: 'section-title' }, h('h2', { text: '设备' }), h('span', { class: 'spacer' }),
-        h('span', { class: 'faint', text: '运行时探测结果' })),
-      deviceList,
-    ),
-    h('div', { class: 'card' },
+    h('div', { class: 'card', attrs: { id: 'import-model' }, hidden: subview !== 'import' },
       h('div', { class: 'section-title' }, h('h2', { text: '导入模型' }), h('span', { class: 'spacer' }),
         promoteButton),
       h('div', { class: 'import-box' },
@@ -242,7 +363,12 @@ export function mountModels(root, ctx) {
         importResult,
       ),
     ),
+    h('div', { class: 'card', attrs: { id: 'devices' }, hidden: subview !== 'devices' },
+      h('div', { class: 'section-title' }, h('h2', { text: '设备' }), h('span', { class: 'spacer' }),
+        h('span', { class: 'faint', text: '运行时探测结果' })),
+      deviceList,
+    ),
   )));
 
-  return () => {};
+  return () => onlineCleanup?.();
 }

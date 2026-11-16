@@ -1,7 +1,7 @@
 import { h, clear, autoGrow } from '../dom.js';
 import { icon } from '../icons.js';
 import { appendMessage, ensureConversation } from '../state.js';
-import { readAsDataURL, errorMessage, timeAgo } from '../format.js';
+import { readAsDataURL, errorMessage, timeAgo, isChatModel } from '../format.js';
 import { toast, emptyState, renderText, copyText } from '../components/ui.js';
 
 const MAX_ATTACHMENTS = 8;
@@ -70,6 +70,12 @@ export function mountChat(root, ctx) {
   });
   const hint = h('span', { class: 'composer-hint' });
   const modelHint = h('span', { class: 'faint' });
+  const modelSelect = h('select', { class: 'composer-model', attrs: { 'aria-label': '对话模型' } });
+  for (const model of ctx.models().filter((item) => isChatModel(item) && !item.route_error)) {
+    modelSelect.append(h('option', { value: model.id, text: model.id }));
+  }
+  if (ctx.currentModel()) modelSelect.value = ctx.currentModel().id;
+  modelSelect.addEventListener('change', () => ctx.setModel(modelSelect.value));
   const form = h('form', { class: 'composer', onSubmit: (event) => { event.preventDefault(); void submit(); } },
     attachmentRow,
     h('div', { class: 'composer-row' },
@@ -79,7 +85,7 @@ export function mountChat(root, ctx) {
       textarea,
       h('div', { class: 'composer-tools' }, stop, send),
     ),
-    h('div', { class: 'composer-meta' }, modelHint, h('span', { class: 'spacer' }), hint),
+    h('div', { class: 'composer-meta' }, modelSelect, modelHint, h('span', { class: 'spacer' }), hint),
     fileInput,
   );
   const composerWrap = h('div', { class: 'composer-wrap' }, form);
@@ -129,7 +135,8 @@ export function mountChat(root, ctx) {
 
   function updateHint() {
     const model = ctx.currentModel();
-    modelHint.textContent = model?.id ?? '未选择模型';
+    modelHint.textContent = '';
+    if (model) modelSelect.value = model.id;
     hint.textContent = model
       ? `Enter 发送 · ${model.loaded ? '已加载' : '按需加载'}`
       : '先选择一个模型';

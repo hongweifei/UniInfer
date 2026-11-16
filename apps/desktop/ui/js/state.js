@@ -7,6 +7,7 @@ const defaultOptions = { maxTokens: 512, temperature: 0.7 };
 function freshState() {
   return {
     view: 'chat',
+    subview: 'online',
     theme: 'system',
     selectedModel: null,
     conversations: [],

@@ -85,118 +85,125 @@ function chooseModelForView(view) {
 }
 
 function sidebar() {
-  const nav = h('nav', { class: 'nav', attrs: { 'aria-label': '主导航' } });
-  for (const [id, label, iconName] of navItems) {
-    nav.append(h('button', {
-      class: `nav-item ${state.view === id ? 'active' : ''}`,
-      type: 'button',
-      onClick: () => navigate(id),
-      title: label,
-    }, h('span', { html: icon(iconName, 17) }), h('span', { text: label })));
-  }
-  const recent = h('div', { class: 'recent-list' });
-  const conversations = recentConversations(state, 8);
-  for (const conversation of conversations) {
-    recent.append(h('div', { class: 'recent-row' },
-      h('button', {
-        class: `recent-item ${conversation.id === state.activeId ? 'active' : ''}`,
-        type: 'button',
-        title: conversation.title,
-        onClick: () => {
-          state.activeId = conversation.id;
-          state.view = 'chat';
-          persist();
-          renderShell();
-          renderView();
-        },
-      }, h('span', { html: icon('chat', 13) }), h('span', { text: conversation.title })),
-      h('button', {
-        class: 'recent-delete', type: 'button', title: '删除会话', html: icon('trash', 12),
-        onClick: async (event) => {
-          event.stopPropagation();
-          const ok = await confirmDialog({
-            title: '删除这个会话？',
-            message: conversation.title,
-            confirmLabel: '删除',
-            danger: true,
-          });
-          if (!ok) return;
-          const wasActive = state.activeId === conversation.id;
-          deleteConversation(state, conversation.id);
-          if (!state.activeId && state.conversations.length) {
-            state.activeId = recentConversations(state, 1)[0]?.id ?? null;
-          }
-          if (wasActive) {
-            renderShell();
-            renderView();
-          } else {
-            renderSidebarOnly();
-          }
-          toast('会话已删除', 'success', 1400);
-        },
-      }),
-    ));
-  }
-  if (!conversations.length) recent.append(h('div', { class: 'faint', style: 'padding:6px 9px;font-size:11.5px', text: '还没有对话' }));
-  const loaded = models.filter((model) => model.loaded).length;
-  const deviceClasses = [...new Set(devices.map((device) => device.class))];
-  return h('aside', { class: 'sidebar' },
-    h('div', { class: 'brand' },
-      h('div', { class: 'brand-mark', html: icon('sparkles', 18) }),
-      h('div', { class: 'brand-text' }, h('strong', { text: 'UniInfer' }), h('span', { text: '本地统一推理' })),
-    ),
-    h('button', {
+  const context = [];
+  if (state.view === 'chat') {
+    context.push(h('button', {
       class: 'btn primary', type: 'button',
       onClick: () => { newConversation(state, currentModel()?.id); state.view = 'chat'; persist(); renderShell(); renderView(); },
-    }, h('span', { html: icon('plus', 15) }), h('span', { text: '新对话' })),
-    nav,
-    h('div', { class: 'sidebar-section' },
+    }, h('span', { html: icon('plus', 15) }), h('span', { text: '新对话' })));
+    const recent = h('div', { class: 'recent-list' });
+    const conversations = recentConversations(state, 8);
+    for (const conversation of conversations) {
+      recent.append(h('div', { class: 'recent-row' },
+        h('button', {
+          class: `recent-item ${conversation.id === state.activeId ? 'active' : ''}`,
+          type: 'button', title: conversation.title,
+          onClick: () => {
+            state.activeId = conversation.id;
+            state.view = 'chat';
+            persist();
+            renderShell();
+            renderView();
+          },
+        }, h('span', { html: icon('chat', 13) }), h('span', { text: conversation.title })),
+        h('button', {
+          class: 'recent-delete', type: 'button', title: '删除会话', html: icon('trash', 12),
+          onClick: async (event) => {
+            event.stopPropagation();
+            const ok = await confirmDialog({
+              title: '删除这个会话？', message: conversation.title,
+              confirmLabel: '删除', danger: true,
+            });
+            if (!ok) return;
+            const wasActive = state.activeId === conversation.id;
+            deleteConversation(state, conversation.id);
+            if (!state.activeId && state.conversations.length) {
+              state.activeId = recentConversations(state, 1)[0]?.id ?? null;
+            }
+            if (wasActive) { renderShell(); renderView(); } else { renderSidebarOnly(); }
+            toast('会话已删除', 'success', 1400);
+          },
+        }),
+      ));
+    }
+    if (!conversations.length) recent.append(h('div', { class: 'faint', style: 'padding:6px 9px;font-size:11.5px', text: '还没有对话' }));
+    context.push(h('div', { class: 'sidebar-section' },
       h('div', { class: 'sidebar-heading' }, h('span', { text: '最近' }), h('span', { text: String(state.conversations.length) })),
       recent,
+    ));
+  } else if (state.view === 'models') {
+    const links = [
+      ['online', '在线模型', 'cloud'],
+      ['installed', '已安装', 'models'],
+      ['import', '导入', 'folder'],
+      ['devices', '设备', 'cpu'],
+    ];
+    const nav = h('div', { class: 'sidebar-section' });
+    nav.append(h('div', { class: 'sidebar-heading' }, h('span', { text: '模型分类' })));
+    for (const [id, label, iconName] of links) {
+      nav.append(h('button', {
+        class: `nav-item ${state.subview === id ? 'active' : ''}`, type: 'button',
+        onClick: () => setSubview(id),
+      }, h('span', { html: icon(iconName, 16) }), h('span', { text: label })));
+    }
+    context.push(nav);
+  }
+  const loaded = models.filter((model) => model.loaded).length;
+  const deviceClasses = [...new Set(devices.map((device) => device.class))];
+  context.push(h('div', { class: 'sidebar-footer' },
+    h('div', { class: 'runtime-card' },
+      h('div', { class: 'runtime-row' }, h('span', { class: 'status-dot' }), h('strong', { text: '本地运行时' })),
+      h('div', { class: 'runtime-row runtime-detail' }, h('span', { text: `${loaded} 已加载 · ${models.length} 已配置` })),
+      h('div', { class: 'runtime-row runtime-detail' }, h('span', { html: icon('cpu', 12) }), h('span', { text: deviceClasses.join(' / ') || '未检测设备' })),
     ),
-    h('div', { class: 'sidebar-footer' },
-      h('div', { class: 'runtime-card' },
-        h('div', { class: 'runtime-row' }, h('span', { class: 'status-dot' }), h('strong', { text: '本地运行时' })),
-        h('div', { class: 'runtime-row runtime-detail' }, h('span', { text: `${loaded} 已加载 · ${models.length} 已配置` })),
-        h('div', { class: 'runtime-row runtime-detail' }, h('span', { html: icon('cpu', 12) }), h('span', { text: deviceClasses.join(' / ') || '未检测设备' })),
-      ),
+  ));
+  return h('aside', { class: 'sidebar' }, ...context);
+}
+
+function titlebar() {
+  const tabs = h('nav', { class: 'top-tabs', attrs: { 'aria-label': '主导航' } });
+  for (const [id, label, iconName] of navItems) {
+    tabs.append(h('button', {
+      class: `tab ${state.view === id ? 'active' : ''}`,
+      type: 'button', onClick: () => navigate(id),
+    }, h('span', { html: icon(iconName, 15) }), h('span', { text: label })));
+  }
+  const actions = h('div', { class: 'titlebar-actions' });
+  actions.append(h('button', {
+    class: 'btn btn-icon ghost', type: 'button', title: `主题：${themeLabel(state.theme)}`,
+    attrs: { 'data-theme-toggle': '' }, onClick: () => cycleTheme(),
+    html: icon(themeIcon(state.theme), 16),
+  }));
+  const controls = h('div', { class: 'window-controls' },
+    h('button', { class: 'window-btn', type: 'button', title: '最小化', onClick: () => windowCommand('window_minimize'), html: icon('minus', 14) }),
+    h('button', { class: 'window-btn', type: 'button', title: '最大化', onClick: () => windowCommand('window_toggle_maximize'), html: icon('square', 12) }),
+    h('button', { class: 'window-btn close', type: 'button', title: '关闭', onClick: () => windowCommand('window_close'), html: icon('x', 14) }),
+  );
+  return h('header', {
+    class: 'titlebar',
+    attrs: { 'data-tauri-drag-region': '' },
+    onMousedown: (event) => {
+      if (event.button !== 0) return;
+      if (event.target.closest('button, select, input, a, .window-controls')) return;
+      windowCommand('window_start_dragging');
+    },
+    onDblclick: (event) => {
+      if (event.target.closest('button, select, input, a, .window-controls')) return;
+      windowCommand('window_toggle_maximize');
+    },
+  },
+    h('div', { class: 'topbar-brand', attrs: { 'data-tauri-drag-region': '' } },
+      h('div', { class: 'brand-mark', html: icon('sparkles', 15) }),
+      h('div', { class: 'brand-text' }, h('strong', { text: 'UniInfer' }), h('span', { text: '本地统一推理' })),
     ),
+    tabs,
+    actions,
+    controls,
   );
 }
 
-function topbar() {
-  const meta = views[state.view];
-  const candidates = modelsForView(state.view);
-  const select = h('select', {
-    class: 'select model-select',
-    'aria-label': '选择模型',
-    disabled: candidates.length === 0,
-    onChange: (event) => setModel(event.target.value),
-  });
-  for (const model of candidates) {
-    select.append(h('option', { value: model.id, text: modelTitle(model) + (model.loaded ? ' · 已加载' : '') }));
-  }
-  if (state.selectedModel) select.value = state.selectedModel;
-  const actions = h('div', { class: 'topbar-actions' });
-  if (state.view === 'chat') {
-    actions.append(select, h('button', {
-      class: 'btn btn-icon ghost', type: 'button', title: '新对话',
-      onClick: () => { newConversation(state, currentModel()?.id); persist(); renderShell(); renderView(); },
-      html: icon('plus', 17),
-    }));
-  } else {
-    actions.append(h('span', { class: 'chip', text: '工作台' }));
-  }
-  actions.append(h('button', {
-    class: 'btn btn-icon ghost', type: 'button', title: `主题：${themeLabel(state.theme)}`,
-    attrs: { 'data-theme-toggle': '' },
-    onClick: () => cycleTheme(),
-    html: icon(themeIcon(state.theme), 17),
-  }));
-  return h('header', { class: 'topbar' },
-    h('div', { class: 'topbar-title' }, h('h1', { text: meta.title }), h('p', { text: meta.subtitle })),
-    actions,
-  );
+function windowCommand(command) {
+  window.__TAURI__?.core?.invoke(command).catch?.(() => {});
 }
 
 function themeLabel(theme) {
@@ -205,8 +212,9 @@ function themeLabel(theme) {
 
 function renderShell() {
   chooseModelForView(state.view);
+  app.dataset.view = state.view;
   const main = h('main', { class: 'main', id: 'view' });
-  app.replaceChildren(sidebar(), h('div', { class: 'workspace' }, topbar(), main));
+  app.replaceChildren(titlebar(), sidebar(), h('div', { class: 'workspace' }, main));
 }
 
 function renderView() {
@@ -230,6 +238,8 @@ function createContext() {
     currentModel,
     setModel,
     navigate,
+    subview: () => state.subview,
+    setSubview,
     refreshModels,
     persist,
     setTheme,
@@ -277,8 +287,16 @@ function cycleTheme() {
 function navigate(view) {
   if (!views[view]) return;
   state.view = view;
+  if (view === 'models' && !['online', 'installed', 'devices', 'import'].includes(state.subview)) state.subview = 'online';
   persist();
   chooseModelForView(view);
+  renderShell();
+  renderView();
+}
+
+function setSubview(subview) {
+  state.subview = subview;
+  persist();
   renderShell();
   renderView();
 }

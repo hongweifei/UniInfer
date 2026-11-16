@@ -24,8 +24,9 @@ export function openModal({ title, body, actions = [], width }) {
       class: `btn ${action.kind ?? ''}`,
       type: 'button',
       onClick: () => {
-        const result = action.onClick?.();
-        if (action.close !== false && result !== false) close();
+        Promise.resolve(action.onClick?.()).then((result) => {
+          if (action.close !== false && result !== false) close();
+        });
       },
       text: action.label,
     }));
