@@ -1,20 +1,12 @@
 import { h, clear } from '../dom.js';
 import { icon } from '../icons.js';
-import { formatBytes, formatName, isAudioModel, isChatModel, isImageModel, modality, errorMessage, friendlyRouteError, capabilitySummary } from '../format.js';
+import { formatBytes, isAudioModel, isImageModel, errorMessage, friendlyRouteError, capabilitySummary, modelCategories, modelTags, MODEL_CATEGORIES } from '../format.js';
 import { toast, emptyState, chip, setBusy, openModal, confirmDialog } from '../components/ui.js';
 import { mountCatalog } from '../components/catalog.js';
 
-function filtersFor(model) {
-  const filters = ['全部'];
-  if (isChatModel(model)) filters.push('对话');
-  if (model.inputs?.includes('image')) filters.push('视觉');
-  if (isAudioModel(model)) filters.push('转写');
-  if (isImageModel(model)) filters.push('图像');
-  return filters;
-}
-
 export function mountModels(root, ctx) {
-  let filter = '全部';
+  let filter = 'all';
+  let tagFilter = 'all';
   let query = '';
   let formatFilter = 'all';
   let loadFilter = 'all';
@@ -24,7 +16,7 @@ export function mountModels(root, ctx) {
   const list = h('div', { class: 'model-grid' });
   const count = h('span', { class: 'faint' });
   const search = h('input', {
-    class: 'input', type: 'search', placeholder: '搜索模型、格式或能力',
+    class: 'input', type: 'search', placeholder: '搜索模型、格式、能力或标签',
     onInput: (event) => { query = event.target.value.trim().toLowerCase(); renderList(); },
   });
   const formatSelect = h('select', { class: 'select filter-select', attrs: { 'aria-label': '按格式筛选' } },
@@ -42,7 +34,9 @@ export function mountModels(root, ctx) {
     h('option', { value: 'error', text: '不可用' }),
   );
   loadSelect.addEventListener('change', () => { loadFilter = loadSelect.value; renderList(); });
-  const tabs = h('div', { class: 'row' });
+  const tagSelect = h('select', { class: 'select filter-select', attrs: { 'aria-label': '按标签筛选' } });
+  tagSelect.addEventListener('change', () => { tagFilter = tagSelect.value; renderList(); });
+  const tabs = h('div', { class: 'filter-chips' });
   const deviceList = h('div', { class: 'device-list' });
   const importPath = h('input', { class: 'input', placeholder: '模型目录或 manifest.toml 路径' });
   const inspectButton = h('button', { class: 'btn', type: 'button', onClick: () => void inspect() },
@@ -67,14 +61,32 @@ export function mountModels(root, ctx) {
   }
 
   function renderTabs() {
+    const models = ctx.models();
     clear(tabs);
-    for (const name of ['全部', '对话', '视觉', '转写', '图像']) {
+    const all = h('button', {
+      class: `btn sm ${filter === 'all' ? '' : 'ghost'}`,
+      type: 'button',
+      onClick: () => { filter = 'all'; renderTabs(); renderList(); },
+    }, h('span', { text: '全部' }), h('span', { class: 'filter-count', text: String(models.length) }));
+    tabs.append(all);
+    for (const category of MODEL_CATEGORIES) {
+      const count = models.filter((model) => modelCategories(model).includes(category.id)).length;
+      if (category.id === 'other' && !count) continue;
       tabs.append(h('button', {
-        class: `btn sm ${filter === name ? '' : 'ghost'}`,
-        type: 'button', text: name,
-        onClick: () => { filter = name; renderTabs(); renderList(); },
-      }));
+        class: `btn sm ${filter === category.id ? '' : 'ghost'}`,
+        type: 'button',
+        onClick: () => { filter = category.id; renderTabs(); renderList(); },
+      }, h('span', { text: category.label }), h('span', { class: 'filter-count', text: String(count) })));
     }
+  }
+
+  function renderTagSelect() {
+    const tags = [...new Set(ctx.models().flatMap((model) => modelTags(model)))].sort((a, b) => a.localeCompare(b, 'zh-CN'));
+    if (tagFilter !== 'all' && !tags.includes(tagFilter)) tagFilter = 'all';
+    clear(tagSelect);
+    tagSelect.append(h('option', { value: 'all', text: '全部标签' }));
+    for (const tag of tags) tagSelect.append(h('option', { value: tag, text: tag }));
+    tagSelect.value = tagFilter;
   }
 
   function modelCard(model) {
@@ -141,10 +153,7 @@ export function mountModels(root, ctx) {
         h('span', { class: 'model-state' }, routeError ? chip('不可用', 'warn') : chip(loaded ? '已加载' : '按需', loaded ? 'success' : '')),
       ),
       h('div', { class: 'model-tags' },
-        chip(formatName(model.format)),
-        chip(model.quantization ?? 'unknown'),
-        ...(model.inputs ?? []).map((item) => chip(modality(item), item === 'image' ? 'accent' : '')),
-        ...(model.outputs ?? []).map((item) => chip(`→ ${modality(item)}`, item === 'image' ? 'accent' : '')),
+        ...modelTags(model).map((tag) => chip(tag, tag.startsWith('→') || tag === '图像' ? 'accent' : '')),
       ),
       h('div', { class: 'model-kv' },
         h('strong', { text: '能力' }), h('span', { text: capabilitySummary(model) }),
@@ -162,19 +171,20 @@ export function mountModels(root, ctx) {
 
   function renderList() {
     const models = ctx.models().filter((model) => {
-      if (filter !== '全部' && !filtersFor(model).includes(filter)) return false;
+      if (filter !== 'all' && !modelCategories(model).includes(filter)) return false;
+      if (tagFilter !== 'all' && !modelTags(model).includes(tagFilter)) return false;
       if (formatFilter !== 'all' && model.format !== formatFilter) return false;
       if (loadFilter === 'loaded' && !model.loaded) return false;
       if (loadFilter === 'idle' && model.loaded) return false;
       if (loadFilter === 'error' && !model.route_error) return false;
       if (!query) return true;
-      const text = [model.id, model.format, model.quantization, model.runtime, model.implementation, ...(model.inputs ?? []), ...(model.outputs ?? [])].join(' ').toLowerCase();
+      const text = [model.id, model.format, model.quantization, model.runtime, model.implementation, ...(model.inputs ?? []), ...(model.outputs ?? []), ...modelTags(model)].join(' ').toLowerCase();
       return text.includes(query);
     });
     count.textContent = `${models.length} / ${ctx.models().length}`;
     clear(list);
     if (!models.length) {
-      list.append(emptyState({ iconName: 'models', title: '没有匹配的模型', description: '调整筛选，或在下方导入本地模型。' }));
+      list.append(emptyState({ iconName: 'models', title: '没有匹配的模型', description: '调整筛选条件，或切换到「导入模型」添加本地模型。' }));
       return;
     }
     for (const model of models) list.append(modelCard(model));
@@ -330,6 +340,7 @@ export function mountModels(root, ctx) {
     }
   }
 
+  renderTagSelect();
   renderTabs();
   renderList();
   renderDevices();
@@ -355,7 +366,8 @@ export function mountModels(root, ctx) {
       h('div', { class: 'section-title' }, h('h2', { text: '已安装模型' }), h('span', { class: 'spacer' }), count,
         h('button', { class: 'btn sm ghost', type: 'button', onClick: () => void ctx.refreshModels(), html: `${icon('refresh', 14)} 刷新` }),
       ),
-      h('div', { class: 'toolbar', style: 'margin-bottom:12px' }, search, formatSelect, loadSelect, tabs),
+      h('div', { class: 'toolbar', style: 'margin-bottom:10px' }, search, formatSelect, loadSelect, tagSelect),
+      h('div', { class: 'filter-chips', style: 'margin-bottom:12px' }, tabs),
       list,
     ),
     h('div', { class: 'card', attrs: { id: 'import-model' }, hidden: subview !== 'import' },
