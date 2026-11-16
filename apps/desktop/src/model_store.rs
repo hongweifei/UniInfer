@@ -11,8 +11,12 @@ use uniinfer_core::ModelManifest;
 use uniinfer_model_inspect::{InspectOptions, inspect};
 
 mod plan;
+mod repo;
+mod search;
 
 use plan::{build_plan_with_variant, build_variants, choose_variant};
+use repo::fetch_repo_files;
+use search::{search_huggingface, search_modelscope};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -73,21 +77,6 @@ struct RemoteFile {
     url: String,
     sha256: Option<String>,
     size: u64,
-}
-
-#[derive(Clone, Debug)]
-struct RepoFiles {
-    repo: String,
-    source: Source,
-    files: Vec<RemoteInfo>,
-    base_model: Option<String>,
-}
-
-#[derive(Clone, Debug)]
-struct RemoteInfo {
-    path: String,
-    size: u64,
-    sha256: Option<String>,
 }
 
 #[derive(Clone, Serialize)]
@@ -229,16 +218,22 @@ pub(crate) async fn install_model(
     let (repo_files, base_files) = fetch_repo_files(&repo, source).await?;
     let plan = build_plan_with_variant(&repo_files, base_files.as_ref(), variant.as_deref())?;
     let id = slug(&repo);
-    let dir = models_root().join(&id);
-    tokio::fs::create_dir_all(&dir)
+    let target = models_root().join(&id);
+    let staging = temp_model_path(&models_root(), &id, "installing");
+    if staging.exists() {
+        tokio::fs::remove_dir_all(&staging)
+            .await
+            .map_err(|error| format!("清理临时目录 {}: {error}", staging.display()))?;
+    }
+    tokio::fs::create_dir_all(&staging)
         .await
-        .map_err(|error| format!("create {}: {error}", dir.display()))?;
+        .map_err(|error| format!("create {}: {error}", staging.display()))?;
     let total = plan.files.iter().map(|file| file.size).sum::<u64>();
     if source == Source::ModelScope {
         let files = plan.files.clone();
-        let target = dir.clone();
+        let staging_dir = staging.clone();
         let app_handle = app.clone();
-        tokio::task::spawn_blocking(move || download_modelscope(&app_handle, &files, &target))
+        tokio::task::spawn_blocking(move || download_modelscope(&app_handle, &files, &staging_dir))
             .await
             .map_err(|error| format!("modelscope download task: {error}"))??;
     } else {
@@ -248,7 +243,7 @@ pub(crate) async fn install_model(
             .map_err(|error| format!("http client: {error}"))?;
         let mut done = 0u64;
         for file in &plan.files {
-            let target = dir.join(&file.path);
+            let target = staging.join(&file.path);
             if let Some(parent) = target.parent() {
                 tokio::fs::create_dir_all(parent)
                     .await
@@ -314,7 +309,7 @@ pub(crate) async fn install_model(
             done += file.size;
         }
     }
-    let directory = dir.clone();
+    let directory = staging.clone();
     let model_id = id.clone();
     let _manifest = tokio::task::spawn_blocking(move || -> Result<PathBuf, String> {
         let inspection = inspect(
@@ -342,9 +337,14 @@ pub(crate) async fn install_model(
             message: Some("下载完成，默认运行配置已生成".into()),
         },
     );
+    let commit_staging = staging.clone();
+    let commit_target = target.clone();
+    tokio::task::spawn_blocking(move || commit_install(&commit_staging, &commit_target))
+        .await
+        .map_err(|error| format!("install commit task: {error}"))??;
     Ok(InstallResult {
         id,
-        path: dir.display().to_string(),
+        path: target.display().to_string(),
         restart_required: false,
     })
 }
@@ -365,6 +365,39 @@ fn slug(repo: &str) -> String {
 
 fn models_root() -> PathBuf {
     crate::api_server::models_root()
+}
+
+fn temp_model_path(parent: &Path, id: &str, kind: &str) -> PathBuf {
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |duration| duration.as_nanos());
+    parent.join(format!(".{id}.{kind}-{nanos}"))
+}
+
+fn commit_install(staging: &Path, target: &Path) -> Result<(), String> {
+    let backup = temp_model_path(
+        target.parent().unwrap_or_else(|| Path::new(".")),
+        target
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("model"),
+        "backup",
+    );
+    let had_target = target.exists();
+    if had_target {
+        std::fs::rename(target, &backup)
+            .map_err(|error| format!("暂存旧模型 {}: {error}", target.display()))?;
+    }
+    if let Err(error) = std::fs::rename(staging, target) {
+        if had_target {
+            let _ = std::fs::rename(&backup, target);
+        }
+        return Err(format!("提交模型 {}: {error}", target.display()));
+    }
+    if had_target {
+        let _ = std::fs::remove_dir_all(&backup);
+    }
+    Ok(())
 }
 
 #[derive(Clone)]
@@ -458,278 +491,10 @@ fn locate_cache_file(repo: &models_cat::Repo, path: &str) -> Result<PathBuf, Str
     Err(format!("downloaded file not found in cache: {path}"))
 }
 
-async fn search_huggingface(query: &str, page: u32, page_size: u32) -> Result<SearchPage, String> {
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(25))
-        .user_agent("UniInfer-Desktop/0.0")
-        .build()
-        .map_err(|error| format!("search client: {error}"))?;
-    let mut last_error = String::new();
-    let offset = (page - 1) * page_size;
-    let fetch = offset + page_size + 1;
-    for base in ["https://hf-mirror.com", "https://huggingface.co"] {
-        let response = client
-            .get(format!("{base}/api/models"))
-            .header("Accept", "application/json")
-            .query(&[
-                ("search", query.to_string()),
-                ("limit", fetch.to_string()),
-                ("sort", "downloads".to_string()),
-                ("direction", "-1".to_string()),
-            ])
-            .send()
-            .await;
-        let response = match response {
-            Ok(response) => response,
-            Err(error) => {
-                last_error = format!("{base}: {error}");
-                continue;
-            }
-        };
-        if !response.status().is_success() {
-            last_error = format!("{base}: HTTP {}", response.status());
-            continue;
-        }
-        let items: Vec<serde_json::Value> = response
-            .json()
-            .await
-            .map_err(|error| format!("search huggingface: {error}"))?;
-        let has_more = items.len() > (offset + page_size) as usize;
-        let items = items
-            .into_iter()
-            .skip(offset as usize)
-            .take(page_size as usize)
-            .filter_map(|item| {
-                let id = item.get("id")?.as_str()?.to_string();
-                Some(SearchResult {
-                    id,
-                    downloads: item
-                        .get("downloads")
-                        .and_then(serde_json::Value::as_u64)
-                        .unwrap_or(0),
-                    task: item
-                        .get("pipeline_tag")
-                        .and_then(serde_json::Value::as_str)
-                        .unwrap_or("")
-                        .to_string(),
-                    tags: item
-                        .get("tags")
-                        .and_then(serde_json::Value::as_array)
-                        .map(|tags| {
-                            tags.iter()
-                                .filter_map(|tag| tag.as_str().map(str::to_string))
-                                .take(4)
-                                .collect()
-                        })
-                        .unwrap_or_default(),
-                })
-            })
-            .collect();
-        return Ok(SearchPage {
-            items,
-            page,
-            page_size,
-            has_more,
-            total: None,
-        });
-    }
-    Err(format!("Hugging Face 搜索失败：{last_error}"))
-}
-
-async fn search_modelscope(query: &str, page: u32, page_size: u32) -> Result<SearchPage, String> {
-    let response = reqwest::Client::new()
-        .get("https://modelscope.cn/openapi/v1/models")
-        .query(&[
-            ("page_number", page.to_string()),
-            ("page_size", page_size.to_string()),
-            ("search", query.to_string()),
-        ])
-        .send()
-        .await
-        .map_err(|error| format!("search modelscope: {error}"))?
-        .error_for_status()
-        .map_err(|error| format!("search modelscope: {error}"))?;
-    let value: serde_json::Value = response
-        .json()
-        .await
-        .map_err(|error| format!("search modelscope: {error}"))?;
-    if value.get("success").and_then(serde_json::Value::as_bool) == Some(false) {
-        return Err("ModelScope 搜索失败".into());
-    }
-    let items = value
-        .pointer("/data/models")
-        .and_then(serde_json::Value::as_array)
-        .cloned()
-        .unwrap_or_default();
-    let total = value
-        .pointer("/data/total_count")
-        .and_then(serde_json::Value::as_u64);
-    let items: Vec<SearchResult> = items
-        .into_iter()
-        .filter_map(|item| {
-            let id = item.get("id")?.as_str()?.to_string();
-            Some(SearchResult {
-                id,
-                downloads: item
-                    .get("downloads")
-                    .and_then(serde_json::Value::as_u64)
-                    .unwrap_or(0),
-                task: item
-                    .get("tasks")
-                    .and_then(serde_json::Value::as_array)
-                    .and_then(|tasks| tasks.first())
-                    .and_then(serde_json::Value::as_str)
-                    .unwrap_or("")
-                    .to_string(),
-                tags: item
-                    .get("tags")
-                    .and_then(serde_json::Value::as_array)
-                    .map(|tags| {
-                        tags.iter()
-                            .filter_map(|tag| tag.as_str().map(str::to_string))
-                            .take(4)
-                            .collect()
-                    })
-                    .unwrap_or_default(),
-            })
-        })
-        .collect();
-    let has_more = total.map_or(items.len() >= page_size as usize, |total| {
-        (page as u64) * (page_size as u64) < total
-    });
-    Ok(SearchPage {
-        items,
-        page,
-        page_size,
-        has_more,
-        total,
-    })
-}
-
-async fn fetch_repo_files(
-    repo: &str,
-    source: Source,
-) -> Result<(RepoFiles, Option<RepoFiles>), String> {
-    let repo_files = match source {
-        Source::HuggingFace => fetch_hf_repo(repo).await?,
-        Source::ModelScope => fetch_modelscope_repo(repo).await?,
-    };
-    let base_files = match &repo_files.base_model {
-        Some(base) => Some(match source {
-            Source::HuggingFace => fetch_hf_repo(base).await?,
-            Source::ModelScope => fetch_modelscope_repo(base).await?,
-        }),
-        None => None,
-    };
-    Ok((repo_files, base_files))
-}
-
-async fn fetch_hf_repo(repo: &str) -> Result<RepoFiles, String> {
-    let value = reqwest::get(format!(
-        "https://hf-mirror.com/api/models/{repo}?blobs=true"
-    ))
-    .await
-    .map_err(|error| format!("repo metadata: {error}"))?
-    .error_for_status()
-    .map_err(|error| format!("repo metadata: {error}"))?
-    .json::<serde_json::Value>()
-    .await
-    .map_err(|error| format!("repo metadata: {error}"))?;
-    let files = value
-        .get("siblings")
-        .and_then(serde_json::Value::as_array)
-        .into_iter()
-        .flatten()
-        .filter_map(|item| {
-            let path = item.get("rfilename")?.as_str()?.to_string();
-            let lfs = item.get("lfs");
-            let size = lfs
-                .and_then(|lfs| lfs.get("size"))
-                .and_then(serde_json::Value::as_u64)
-                .or_else(|| item.get("size").and_then(serde_json::Value::as_u64))
-                .unwrap_or(0);
-            let sha256 = lfs
-                .and_then(|lfs| lfs.get("oid"))
-                .and_then(serde_json::Value::as_str)
-                .map(str::to_string);
-            Some(RemoteInfo { path, size, sha256 })
-        })
-        .collect::<Vec<_>>();
-    let base_model = value
-        .pointer("/cardData/base_model")
-        .and_then(serde_json::Value::as_str)
-        .map(str::to_string);
-    Ok(RepoFiles {
-        repo: repo.to_string(),
-        source: Source::HuggingFace,
-        files,
-        base_model,
-    })
-}
-
-async fn fetch_modelscope_repo(repo: &str) -> Result<RepoFiles, String> {
-    let value = reqwest::get(format!(
-        "https://modelscope.cn/api/v1/models/{repo}/repo/files?Revision=master&Root=&Recursive=true"
-    ))
-    .await
-    .map_err(|error| format!("repo files: {error}"))?
-    .error_for_status()
-    .map_err(|error| format!("repo files: {error}"))?
-    .json::<serde_json::Value>()
-    .await
-    .map_err(|error| format!("repo files: {error}"))?;
-    let files = value
-        .pointer("/Data/Files")
-        .and_then(serde_json::Value::as_array)
-        .into_iter()
-        .flatten()
-        .filter_map(|item| {
-            let path = item.get("Path")?.as_str()?.to_string();
-            let size = item
-                .get("Size")
-                .and_then(serde_json::Value::as_u64)
-                .unwrap_or(0);
-            let sha256 = item
-                .get("Sha256")
-                .and_then(serde_json::Value::as_str)
-                .map(str::to_string);
-            Some(RemoteInfo { path, size, sha256 })
-        })
-        .collect::<Vec<_>>();
-    let detail = match reqwest::get(format!("https://modelscope.cn/api/v1/models/{repo}")).await {
-        Ok(response) => response.json::<serde_json::Value>().await.ok(),
-        Err(_) => None,
-    };
-    let base_model = detail
-        .as_ref()
-        .and_then(|value| value.pointer("/Data/BaseModel/0"))
-        .and_then(serde_json::Value::as_str)
-        .map(str::to_string);
-    Ok(RepoFiles {
-        repo: repo.to_string(),
-        source: Source::ModelScope,
-        files,
-        base_model,
-    })
-}
-
-fn file_url(source: Source, repo: &str, path: &str) -> String {
-    let path = path
-        .split('/')
-        .map(|segment| urlencoding::encode(segment).into_owned())
-        .collect::<Vec<_>>()
-        .join("/");
-    match source {
-        Source::HuggingFace => format!("https://hf-mirror.com/{repo}/resolve/main/{path}"),
-        Source::ModelScope => {
-            format!("https://modelscope.cn/models/{repo}/resolve/master/{path}")
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::plan::{build_plan, build_plan_with_variant, build_variants};
+    use super::repo::{RemoteInfo, RepoFiles, fetch_hf_repo, fetch_modelscope_repo};
     use super::*;
 
     fn repo(repo: &str, source: Source, files: &[(&str, u64)]) -> RepoFiles {
@@ -952,6 +717,28 @@ mod tests {
             assert!(page.total.unwrap_or(0) > 0);
             assert!(!page.items.is_empty());
         });
+    }
+
+    #[test]
+    fn commit_install_replaces_existing_model_atomically() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let staging = dir.path().join("staging");
+        let target = dir.path().join("model");
+        std::fs::create_dir_all(&staging).expect("staging");
+        std::fs::create_dir_all(&target).expect("target");
+        std::fs::write(staging.join("new.txt"), b"new").expect("new");
+        std::fs::write(target.join("old.txt"), b"old").expect("old");
+        commit_install(&staging, &target).expect("commit");
+        assert!(target.join("new.txt").is_file());
+        assert!(!target.join("old.txt").exists());
+        assert!(!staging.exists());
+        assert!(std::fs::read_dir(dir.path()).expect("dir").all(|entry| {
+            !entry
+                .expect("entry")
+                .file_name()
+                .to_string_lossy()
+                .contains(".backup-")
+        }));
     }
 
     #[test]

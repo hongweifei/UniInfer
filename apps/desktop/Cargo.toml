@@ -44,6 +44,9 @@ uniinfer-api = { path = "../../crates/uniinfer-api", features = ["ep-coreml", "c
 [target.'cfg(all(unix, not(target_os = "macos")))'.dependencies]
 uniinfer-api = { path = "../../crates/uniinfer-api" }
 
+[dev-dependencies]
+tempfile = "3"
+
 [dependencies]
 uniinfer-config = { path = "../../crates/uniinfer-config" }
 uniinfer-core = { path = "../../crates/uniinfer-core" }

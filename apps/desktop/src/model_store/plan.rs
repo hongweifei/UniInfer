@@ -1,6 +1,7 @@
 //! Download planning and variant selection for online models.
 
-use super::{RemoteFile, RemoteInfo, RepoFiles, file_url};
+use super::RemoteFile;
+use super::repo::{RemoteInfo, RepoFiles, file_url};
 
 pub(super) struct PlannedFiles {
     #[cfg_attr(not(test), allow(dead_code))]
