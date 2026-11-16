@@ -4,6 +4,7 @@ import { appendMessage, ensureConversation } from '../state.js';
 import { readAsDataURL, errorMessage, isChatModel, isImageModel, isAudioModel } from '../format.js';
 import { toast, emptyState, renderText, openModal } from '../components/ui.js';
 import { messageNode } from '../components/chat-message.js';
+import { putMedia, hydrateMedia } from '../media-store.js';
 
 const MAX_ATTACHMENTS = 8;
 
@@ -173,12 +174,19 @@ export function mountChat(root, ctx) {
               const image = response.data?.[0];
               if (!image?.b64_json) throw new Error('响应中没有图片');
               const url = `data:${image.mime_type ?? 'image/png'};base64,${image.b64_json}`;
-              appendMessage(state, conversation, {
+              const generated = appendMessage(state, conversation, {
                 role: 'assistant',
                 content: `生成图片：${text}`,
                 images: [url],
                 generated: true,
               });
+              try {
+                await putMedia(generated.id, url);
+                generated.mediaKey = generated.id;
+                ctx.persist();
+              } catch {
+                toast('图片已生成，但本地缓存失败', 'error');
+              }
               renderHistory();
               scroller.scrollTop = scroller.scrollHeight;
               toast('图片已生成', 'success');
@@ -229,6 +237,10 @@ export function mountChat(root, ctx) {
       h('p', { text: '对话、看图、转写和生成都在本机完成。选择模型后直接输入，或从下面开始。' }),
       h('div', { class: 'suggestion-grid' }, cards),
     ));
+  }
+
+  async function hydrateConversationMedia() {
+    if (await hydrateMedia(conversation.messages)) renderHistory();
   }
 
   function renderHistory() {
@@ -438,6 +450,7 @@ export function mountChat(root, ctx) {
   updateThinkingToggle();
   renderHistory();
   updateHint();
+  void hydrateConversationMedia();
   requestAnimationFrame(() => textarea.focus());
 
   const onModel = () => updateHint();

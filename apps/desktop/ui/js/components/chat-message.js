@@ -37,7 +37,7 @@ export function messageNode(message) {
   if (!message.pending) {
     if (!isUser && message.content) {
       actions.append(h('button', {
-        class: 'btn btn-icon ghost', type: 'button', title: '朗读回答',
+        class: 'btn btn-icon ghost', type: 'button', title: '系统朗读（本地 TTS 未接入）',
         onClick: () => speakText(message.content),
         html: icon('volume', 13),
       }));
@@ -59,6 +59,8 @@ export function messageNode(message) {
       gallery.append(h('img', { src: url, alt: message.content || '生成图片' }));
     }
     body.insertBefore(gallery, text);
+  } else if (message.generated && message.mediaKey) {
+    body.insertBefore(h('div', { class: 'notice faint', text: '生成图片缓存不可用' }), text);
   } else if (message.images?.length) {
     const gallery = h('div', { class: 'attachments' });
     for (const url of message.images) {

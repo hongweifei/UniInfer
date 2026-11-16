@@ -4,6 +4,7 @@ import { ApiClient } from './api.js';
 import { loadState, saveState, newConversation, deleteConversation, recentConversations } from './state.js';
 import { isAudioModel, isChatModel, isImageModel, modelTitle, errorMessage } from './format.js';
 import { toast, themeIcon, confirmDialog } from './components/ui.js';
+import { deleteMedia } from './media-store.js';
 import { mountChat } from './views/chat.js';
 import { mountTranscribe } from './views/transcribe.js';
 import { mountImages } from './views/images.js';
@@ -117,6 +118,9 @@ function sidebar() {
             if (!ok) return;
             const wasActive = state.activeId === conversation.id;
             deleteConversation(state, conversation.id);
+            for (const message of conversation.messages) {
+              if (message.mediaKey) void deleteMedia(message.mediaKey).catch(() => {});
+            }
             if (!state.activeId && state.conversations.length) {
               state.activeId = recentConversations(state, 1)[0]?.id ?? null;
             }
@@ -301,14 +305,19 @@ function setSubview(subview) {
   renderView();
 }
 
-async function refreshModels() {
+async function refreshModels({ silent = false } = {}) {
   try {
     const [modelBody, deviceBody] = await Promise.all([api.models(), api.devices()]);
     models = sortModels((modelBody.data ?? []).filter((model) => !model.id.startsWith('tiny-')));
     devices = deviceBody.devices ?? [];
     chooseModelForView(state.view);
-    renderShell();
-    renderView();
+    if (silent) {
+      renderSidebarOnly();
+      document.dispatchEvent(new CustomEvent('uniinfer:model'));
+    } else {
+      renderShell();
+      renderView();
+    }
     return models;
   } catch (error) {
     toast(`刷新模型失败：${errorMessage(error)}`, 'error');
