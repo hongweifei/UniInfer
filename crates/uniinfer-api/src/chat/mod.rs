@@ -144,7 +144,7 @@ pub(crate) async fn chat(
                 )
             })?,
     };
-    if !state.catalog.contains_key(&model) {
+    if !state.has_model(&model) {
         return Err(ApiError::not_found(
             "model_not_found",
             format!("model {model} is not configured"),

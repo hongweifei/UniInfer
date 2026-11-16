@@ -244,7 +244,7 @@ async fn select_asr(
     requested: Option<&str>,
 ) -> Result<Option<Arc<AudioSlot>>, String> {
     if let Some(model) = requested {
-        if !state.catalog.contains_key(model) {
+        if !state.has_model(model) {
             return Err(format!("ASR model {model} is not configured"));
         }
         return state

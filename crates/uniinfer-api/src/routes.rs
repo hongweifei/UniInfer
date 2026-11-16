@@ -198,9 +198,14 @@ fn catalog_placement_json(state: &AppState, id: &str, entry: &crate::state::Cata
 async fn models(State(state): State<AppState>) -> Json<Value> {
     let data = state
         .catalog
-        .iter()
-        .map(|(id, entry)| catalog_model_json(&state, id, entry))
-        .collect::<Vec<_>>();
+        .read()
+        .map(|catalog| {
+            catalog
+                .iter()
+                .map(|(id, entry)| catalog_model_json(&state, id, entry))
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
     Json(json!({"object": "list", "data": data}))
 }
 
@@ -220,9 +225,14 @@ async fn devices(State(state): State<AppState>) -> Json<Value> {
         .collect::<Vec<_>>();
     let models = state
         .catalog
-        .iter()
-        .map(|(id, entry)| catalog_placement_json(&state, id, entry))
-        .collect::<Vec<_>>();
+        .read()
+        .map(|catalog| {
+            catalog
+                .iter()
+                .map(|(id, entry)| catalog_placement_json(&state, id, entry))
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
     Json(json!({"devices": devices, "models": models}))
 }
 

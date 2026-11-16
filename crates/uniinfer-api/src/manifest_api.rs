@@ -39,9 +39,11 @@ pub(crate) async fn put(
         ));
     }
     manifest.save(path)?;
+    state.update_manifest(&id, manifest)?;
     Ok(Json(json!({
         "saved": true,
-        "restart_required": true,
+        "reloaded": true,
+        "restart_required": false,
         "path": path,
     })))
 }

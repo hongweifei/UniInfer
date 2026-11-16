@@ -1,6 +1,6 @@
 use std::collections::{HashMap, VecDeque};
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, RwLock};
 
 use tokio::sync::Mutex as AsyncMutex;
 use uniinfer_config::ConfigHandle;
@@ -31,7 +31,7 @@ pub struct AppState {
     pub(crate) manifest_paths: Arc<HashMap<String, PathBuf>>,
     pub(crate) request_timeout: Option<std::time::Duration>,
     model_load_timeout: Option<std::time::Duration>,
-    pub(crate) catalog: Arc<HashMap<String, CatalogEntry>>,
+    pub(crate) catalog: Arc<RwLock<HashMap<String, CatalogEntry>>>,
     load_lock: Arc<AsyncMutex<()>>,
     audio_lru: Arc<Mutex<VecDeque<String>>>,
     max_loaded_models: usize,
@@ -86,7 +86,7 @@ impl AppState {
                 .then_some(config.request_timeout),
             model_load_timeout: (config.model_load_timeout > std::time::Duration::ZERO)
                 .then_some(config.model_load_timeout),
-            catalog: Arc::new(catalog),
+            catalog: Arc::new(RwLock::new(catalog)),
             load_lock: Arc::new(AsyncMutex::new(())),
             audio_lru: Arc::new(Mutex::new(VecDeque::new())),
             max_loaded_models: config.max_loaded_models,
@@ -101,8 +101,10 @@ impl AppState {
         audio_only: bool,
         image_only: bool,
     ) -> Option<String> {
-        let mut ids = self
-            .catalog
+        let Ok(catalog) = self.catalog.read() else {
+            return None;
+        };
+        let mut ids = catalog
             .iter()
             .filter(|(_, entry)| entry.audio_only == audio_only && entry.image_only == image_only)
             .filter(|(_, entry)| entry.manifest.supports(request))
@@ -128,14 +130,48 @@ impl AppState {
             return Some(id.clone());
         }
         ids.into_iter().find(|id| {
-            self.catalog
+            catalog
                 .get(id)
                 .is_some_and(|entry| self.runtime.probe_manifest(&entry.manifest).is_ok())
         })
     }
 
     pub(crate) fn catalog_entry(&self, id: &str) -> Option<CatalogEntry> {
-        self.catalog.get(id).cloned()
+        self.catalog.read().ok()?.get(id).cloned()
+    }
+
+    pub(crate) fn has_model(&self, id: &str) -> bool {
+        self.catalog
+            .read()
+            .is_ok_and(|catalog| catalog.contains_key(id))
+    }
+
+    /// Replace a model's manifest and unload its live slot so the next
+    /// request loads with the new placement/context configuration.
+    pub(crate) fn update_manifest(&self, id: &str, manifest: ModelManifest) -> Result<()> {
+        let mut catalog = self
+            .catalog
+            .write()
+            .map_err(|_| EngineError::Other("catalog lock poisoned".into()))?;
+        let entry = catalog
+            .get_mut(id)
+            .ok_or_else(|| EngineError::ManifestInvalid(format!("model {id} is not configured")))?;
+        entry.audio_only = manifest.audio.is_some() && manifest.text.is_none();
+        entry.image_only = manifest.image.is_some();
+        entry.manifest = manifest;
+        drop(catalog);
+
+        self.router.remove_slot(id);
+        if let Ok(mut slots) = self.audio_slots.lock() {
+            slots.remove(id);
+        }
+        if let Ok(mut slots) = self.image_slots.lock() {
+            slots.remove(id);
+        }
+        if let Ok(mut lru) = self.audio_lru.lock() {
+            lru.retain(|entry| entry != id);
+        }
+        Ok(())
     }
 
     pub(crate) async fn image_slot(&self, id: &str) -> Result<Arc<ImageSlot>> {
@@ -321,10 +357,15 @@ impl AppState {
 
     pub(crate) fn audio_catalog_ids(&self) -> Vec<String> {
         self.catalog
-            .iter()
-            .filter(|(_, entry)| entry.audio_only)
-            .map(|(id, _)| id.clone())
-            .collect()
+            .read()
+            .map(|catalog| {
+                catalog
+                    .iter()
+                    .filter(|(_, entry)| entry.audio_only)
+                    .map(|(id, _)| id.clone())
+                    .collect()
+            })
+            .unwrap_or_default()
     }
 }
 
@@ -345,6 +386,20 @@ mod tests {
             std::thread::sleep(std::time::Duration::from_millis(200));
             Ok(())
         })
+    }
+
+    #[test]
+    fn update_manifest_refreshes_catalog_without_restart() {
+        let state = state(std::time::Duration::ZERO);
+        let path =
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../models/tiny-onnx/manifest.toml");
+        let mut manifest = ModelManifest::load(&path).expect("manifest");
+        manifest.context_len = 123;
+        state
+            .update_manifest("tiny-byte-onnx", manifest)
+            .expect("update");
+        let entry = state.catalog_entry("tiny-byte-onnx").expect("catalog");
+        assert_eq!(entry.manifest.context_len, 123);
     }
 
     #[tokio::test]
