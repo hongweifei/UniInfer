@@ -127,6 +127,7 @@ graph(s) + declared inputs/outputs + adapter profile
 - `TextGenerator` 的 image 特例改为通用 auxiliary tensor 输入。
 - process isolation 改为 transport 能力，不再伪装成 runtime。
 - ASR 的 Whisper/CTC 通过 `onnx.pipeline` 的 `adapter` step 加载，`onnx.asr.*` 实现名删除。
+- 增加 `ModelExecutor` / `ModelOutput`：所有 slot 统一返回 text/audio/image/video，流式用 `ModelEvent`。
 
 待完成：
 

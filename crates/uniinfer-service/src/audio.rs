@@ -4,13 +4,14 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
+use uniinfer_backends::{ModelEvent, ModelOutput};
 use uniinfer_core::{
     AudioConfig, EngineError, EngineSession, ModelManifest, PlacementPlan, Result, Tensor,
     TensorData, TensorDtype,
 };
 use uniinfer_registry::SessionLease;
 
-use crate::ModelView;
+use crate::{ModelExecutor, ModelRequest, ModelView};
 
 /// A loaded speech model plus its request permit.
 pub struct AudioSlot {
@@ -117,5 +118,24 @@ impl AudioSlot {
                 .map_err(|error| EngineError::InvalidAudio(format!("transcript: {error}"))),
             _ => Err(EngineError::Other("text output must be u8".into())),
         }
+    }
+}
+
+impl ModelExecutor for AudioSlot {
+    fn execute(
+        &self,
+        request: ModelRequest,
+        _cancel: &uniinfer_core::CancelToken,
+        on_event: &mut dyn FnMut(ModelEvent),
+    ) -> Result<ModelOutput> {
+        let ModelRequest::Audio { samples, deadline } = request else {
+            return Err(EngineError::UnsupportedModality {
+                format: self.manifest().format,
+                modality: uniinfer_core::Modality::Text,
+            });
+        };
+        let text = self.transcribe_with_deadline(samples, deadline)?;
+        on_event(ModelEvent::TextDelta(text.clone()));
+        Ok(ModelOutput::Text(text))
     }
 }

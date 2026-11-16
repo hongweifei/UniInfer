@@ -7,7 +7,7 @@ use std::time::Duration;
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use uniinfer_backends::{
     ByteTokenizer, ChatMessage, ChatTemplate, GenerationOutput, GenerationSpec,
-    HuggingFaceTokenizer, TextGenerator, Tokenizer, fallback_prompt,
+    HuggingFaceTokenizer, ModelEvent, ModelOutput, TextGenerator, Tokenizer, fallback_prompt,
 };
 use uniinfer_core::{
     Device, EngineError, EngineSession, ModelManifest, NativeFinish, NativeTextRequest,
@@ -29,6 +29,29 @@ pub(crate) async fn acquire_permit(
         Ok(Err(_)) => Err(EngineError::Other("slot semaphore closed".into())),
         Err(_) => Err(EngineError::Busy),
     }
+}
+
+/// One request executed against a loaded model.
+pub enum ModelRequest {
+    Text {
+        prompt: String,
+        images: Vec<Vec<u8>>,
+        spec: GenerationSpec,
+    },
+    Audio {
+        samples: Vec<f32>,
+        deadline: Option<std::time::Instant>,
+    },
+}
+
+/// Common execution contract for every loaded model slot.
+pub trait ModelExecutor: ModelView {
+    fn execute(
+        &self,
+        request: ModelRequest,
+        cancel: &CancelToken,
+        on_event: &mut dyn FnMut(ModelEvent),
+    ) -> Result<ModelOutput>;
 }
 
 /// Read-only view shared by text and speech slots.
@@ -387,6 +410,43 @@ impl ModelSlot {
     }
 }
 
+impl ModelExecutor for ModelSlot {
+    fn execute(
+        &self,
+        request: ModelRequest,
+        cancel: &CancelToken,
+        on_event: &mut dyn FnMut(ModelEvent),
+    ) -> Result<ModelOutput> {
+        let ModelRequest::Text {
+            prompt,
+            images,
+            spec,
+        } = request
+        else {
+            return Err(EngineError::UnsupportedModality {
+                format: self.manifest().format,
+                modality: uniinfer_core::Modality::Audio,
+            });
+        };
+        let mut decoder = uniinfer_backends::utf8::Utf8Decoder::new();
+        let output = self.generate_with_images(&prompt, &images, cancel, spec, &mut |chunk| {
+            for byte in chunk {
+                if let Some(text) = decoder.push(*byte) {
+                    on_event(ModelEvent::TextDelta(text));
+                }
+            }
+            true
+        })?;
+        let tail = decoder.finish();
+        if !tail.is_empty() {
+            on_event(ModelEvent::TextDelta(tail));
+        }
+        Ok(ModelOutput::Text(
+            String::from_utf8_lossy(&output.bytes).into_owned(),
+        ))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::path::Path;
@@ -415,6 +475,25 @@ mod tests {
             .expect_err("must time out");
         assert!(matches!(error, EngineError::Busy));
         drop(first);
+    }
+
+    #[test]
+    fn executor_returns_text_output_and_events() {
+        let (_runtime, slot) = slot();
+        let mut events = Vec::new();
+        let output = slot
+            .execute(
+                ModelRequest::Text {
+                    prompt: "ab".into(),
+                    images: Vec::new(),
+                    spec: GenerationSpec::greedy(3),
+                },
+                &CancelToken::new(),
+                &mut |event| events.push(event),
+            )
+            .expect("execute");
+        assert_eq!(output, ModelOutput::Text("cde".into()));
+        assert!(!events.is_empty());
     }
 
     #[test]
