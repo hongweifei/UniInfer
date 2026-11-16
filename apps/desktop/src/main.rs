@@ -1,6 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod api_server;
+mod model_store;
 
 use serde::Serialize;
 use tauri::Manager;
@@ -20,6 +21,30 @@ struct DesktopState {
 #[tauri::command]
 fn api_info(state: tauri::State<'_, DesktopState>) -> DesktopStatus {
     state.status.clone()
+}
+
+#[tauri::command]
+fn window_start_dragging(window: tauri::WebviewWindow) {
+    let _ = window.start_dragging();
+}
+
+#[tauri::command]
+fn window_minimize(window: tauri::WebviewWindow) {
+    let _ = window.minimize();
+}
+
+#[tauri::command]
+fn window_toggle_maximize(window: tauri::WebviewWindow) {
+    if window.is_maximized().unwrap_or(false) {
+        let _ = window.unmaximize();
+    } else {
+        let _ = window.maximize();
+    }
+}
+
+#[tauri::command]
+fn window_close(window: tauri::WebviewWindow) {
+    let _ = window.close();
 }
 
 #[tauri::command]
@@ -55,8 +80,16 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             api_info,
             restart_app,
+            window_start_dragging,
+            window_minimize,
+            window_toggle_maximize,
+            window_close,
             set_window_theme,
-            pick_model_folder
+            pick_model_folder,
+            model_store::search_models,
+            model_store::plan_model,
+            model_store::install_model,
+            model_store::delete_model
         ])
         .setup(|app| {
             let startup = api_server::start();

@@ -38,7 +38,7 @@ pub(crate) fn manifest_paths() -> Vec<std::path::PathBuf> {
     }
 }
 
-fn project_root() -> Option<std::path::PathBuf> {
+pub(crate) fn project_root() -> Option<std::path::PathBuf> {
     roots()
         .into_iter()
         .find(|root| root.join("models").is_dir())
