@@ -61,6 +61,9 @@
 .message:hover .message-actions { opacity: 1; }
 .message-actions .btn-icon { width: 26px; height: 26px; min-height: 26px; color: var(--faint); }
 .message.error .message-text { border-color: color-mix(in srgb, var(--error) 42%, var(--border)); color: var(--error); }
+.generated-media { display: flex; flex-wrap: wrap; gap: 8px; }
+.generated-media img { display: block; max-width: min(420px, 100%); height: auto; border: 1px solid var(--border-soft); border-radius: 10px; }
+.tool-modal { display: grid; gap: 12px; }
 .typing { display: inline-flex; gap: 4px; padding: 4px 2px; }
 .typing i { width: 5px; height: 5px; border-radius: 50%; background: var(--muted); animation: blink 1s infinite; }
 .typing i:nth-child(2) { animation-delay: 0.15s; }

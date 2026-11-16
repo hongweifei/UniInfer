@@ -1,10 +1,22 @@
 import { h, clear, autoGrow } from '../dom.js';
 import { icon } from '../icons.js';
 import { appendMessage, ensureConversation } from '../state.js';
-import { readAsDataURL, errorMessage, timeAgo, isChatModel } from '../format.js';
-import { toast, emptyState, renderText, copyText } from '../components/ui.js';
+import { readAsDataURL, errorMessage, timeAgo, isChatModel, isImageModel, isAudioModel } from '../format.js';
+import { toast, emptyState, renderText, copyText, openModal } from '../components/ui.js';
 
 const MAX_ATTACHMENTS = 8;
+
+function speakText(text) {
+  const synth = window.speechSynthesis;
+  if (!synth) {
+    toast('当前环境不支持语音朗读', 'error');
+    return;
+  }
+  synth.cancel();
+  const utterance = new SpeechSynthesisUtterance(String(text ?? '').replace(/```[\s\S]*?```/g, '代码块'));
+  utterance.lang = 'zh-CN';
+  synth.speak(utterance);
+}
 
 function messageNode(message) {
   const isUser = message.role === 'user';
@@ -26,6 +38,13 @@ function messageNode(message) {
   if (reasoning && message.reasoning) renderText(reasoningBody, message.reasoning);
   const actions = h('div', { class: 'message-actions' });
   if (!message.pending) {
+    if (!isUser && message.content) {
+      actions.append(h('button', {
+        class: 'btn btn-icon ghost', type: 'button', title: '朗读回答',
+        onClick: () => speakText(message.content),
+        html: icon('volume', 13),
+      }));
+    }
     actions.append(h('button', {
       class: 'btn btn-icon ghost', type: 'button', title: '复制',
       onClick: () => copyText(message.content ?? ''),
@@ -37,7 +56,13 @@ function messageNode(message) {
     h('div', { class: 'avatar', text: isUser ? '你' : 'U' }),
     body,
   );
-  if (message.images?.length) {
+  if (message.generated && message.images?.length) {
+    const gallery = h('div', { class: 'generated-media' });
+    for (const url of message.images) {
+      gallery.append(h('img', { src: url, alt: message.content || '生成图片' }));
+    }
+    body.insertBefore(gallery, text);
+  } else if (message.images?.length) {
     const gallery = h('div', { class: 'attachments' });
     for (const url of message.images) {
       gallery.append(h('div', { class: 'attachment' }, h('img', { src: url, alt: '图片附件' })));
@@ -67,6 +92,12 @@ export function mountChat(root, ctx) {
     type: 'file', accept: 'image/*', multiple: true, class: 'visually-hidden',
     onChange: (event) => addFiles([...event.target.files]),
   });
+  const audioInput = h('input', {
+    type: 'file', accept: '.wav,audio/wav,audio/x-wav', class: 'visually-hidden',
+    onChange: (event) => { const file = event.target.files?.[0]; if (file) void transcribeAudio(file); audioInput.value = ''; },
+  });
+  const imageModels = ctx.models().filter((model) => isImageModel(model) && !model.route_error);
+  const audioModels = ctx.models().filter((model) => isAudioModel(model) && !model.route_error);
   const textarea = h('textarea', {
     rows: 1,
     placeholder: '输入消息，Enter 发送，Shift+Enter 换行',
@@ -78,6 +109,14 @@ export function mountChat(root, ctx) {
   const stop = h('button', {
     class: 'btn btn-icon ghost', type: 'button', title: '停止', html: icon('stop', 15), onClick: () => controller?.abort(),
   });
+  const audioButton = audioModels.length ? h('button', {
+    class: 'btn btn-icon ghost', type: 'button', title: '音频转写',
+    onClick: () => audioInput.click(), html: icon('wave', 17),
+  }) : null;
+  const imageButton = imageModels.length ? h('button', {
+    class: 'btn btn-icon ghost', type: 'button', title: '生成图片',
+    onClick: () => openImageDialog(), html: icon('image', 17),
+  }) : null;
   const hint = h('span', { class: 'composer-hint' });
   const modelHint = h('span', { class: 'faint' });
   const modelSelect = h('select', { class: 'composer-model', attrs: { 'aria-label': '对话模型' } });
@@ -102,15 +141,126 @@ export function mountChat(root, ctx) {
     h('div', { class: 'composer-row' },
       h('div', { class: 'composer-tools' },
         h('button', { class: 'btn btn-icon ghost', type: 'button', title: '添加图片', onClick: () => fileInput.click(), html: icon('paperclip', 17) }),
+        audioButton,
+        imageButton,
       ),
       textarea,
       h('div', { class: 'composer-tools' }, stop, send),
     ),
     h('div', { class: 'composer-meta' }, modelSelect, thinkingToggle, modelHint, h('span', { class: 'spacer' }), hint),
     fileInput,
+    audioInput,
   );
   const composerWrap = h('div', { class: 'composer-wrap' }, form);
   root.append(h('div', { class: 'chat-view' }, scroller, composerWrap));
+
+  async function transcribeAudio(file) {
+    if (!audioModels.length) {
+      toast('没有可用的语音转写模型', 'error');
+      return;
+    }
+    if (!/audio\/|wav/i.test(file.type || file.name) || !file.name.toLowerCase().endsWith('.wav')) {
+      toast('语音输入目前支持 WAV', 'error');
+      return;
+    }
+    if (file.size > 128 * 1024 * 1024) {
+      toast('音频文件超过 128 MiB', 'error');
+      return;
+    }
+    const button = audioButton;
+    if (button) button.disabled = true;
+    hint.textContent = '正在转写音频…';
+    try {
+      const result = await ctx.api.transcribe(file, audioModels[0].id);
+      const transcript = String(result.text ?? '').trim();
+      if (!transcript) throw new Error('转写结果为空');
+      textarea.value = textarea.value.trim()
+        ? `${textarea.value.trimEnd()}\n${transcript}`
+        : transcript;
+      autoGrow(textarea);
+      updateHint();
+      toast('音频已转写为文字', 'success');
+    } catch (error) {
+      toast(errorMessage(error), 'error');
+      updateHint();
+    } finally {
+      if (button) button.disabled = false;
+    }
+  }
+
+  function openImageDialog() {
+    if (!imageModels.length) {
+      toast('没有可用的图像生成模型', 'error');
+      return;
+    }
+    const prompt = h('textarea', {
+      class: 'textarea', rows: 3,
+      placeholder: '描述要生成的图片',
+      value: textarea.value.trim(),
+    });
+    const model = h('select', { class: 'select' },
+      ...imageModels.map((item) => h('option', { value: item.id, text: item.id })),
+    );
+    const size = h('select', { class: 'select' },
+      ['512x512', '768x768', '1024x1024'].map((value) => h('option', { value, text: value })),
+    );
+    const steps = h('input', { class: 'input', type: 'number', min: '1', max: '100', value: '20' });
+    const guidance = h('input', { class: 'input', type: 'number', min: '0', max: '30', step: '0.5', value: '7' });
+    let generating = false;
+    openModal({
+      title: '生成图片',
+      body: h('div', { class: 'tool-modal' },
+        h('div', { class: 'field' }, h('label', { text: '模型' }), model),
+        h('div', { class: 'field' }, h('label', { text: '提示词' }), prompt),
+        h('div', { class: 'param-grid' },
+          h('div', { class: 'field' }, h('label', { text: '尺寸' }), size),
+          h('div', { class: 'field' }, h('label', { text: '步数' }), steps),
+          h('div', { class: 'field' }, h('label', { text: '引导强度' }), guidance),
+        ),
+      ),
+      actions: [
+        { label: '取消', kind: 'ghost' },
+        {
+          label: '生成图片', kind: 'primary',
+          onClick: async () => {
+            if (generating) return false;
+            const text = prompt.value.trim();
+            if (!text) { toast('请先输入提示词', 'error'); return false; }
+            generating = true;
+            try {
+              const response = await ctx.api.generateImage({
+                model: model.value,
+                prompt: text,
+                n: 1,
+                size: size.value,
+                response_format: 'b64_json',
+                steps: Number(steps.value) || 1,
+                guidance: Number(guidance.value) || 0,
+              });
+              const image = response.data?.[0];
+              if (!image?.b64_json) throw new Error('响应中没有图片');
+              const url = `data:${image.mime_type ?? 'image/png'};base64,${image.b64_json}`;
+              appendMessage(state, conversation, {
+                role: 'assistant',
+                content: `生成图片：${text}`,
+                images: [url],
+                generated: true,
+              });
+              renderHistory();
+              scroller.scrollTop = scroller.scrollHeight;
+              toast('图片已生成', 'success');
+              return true;
+            } catch (error) {
+              toast(errorMessage(error), 'error');
+              return false;
+            } finally {
+              generating = false;
+            }
+          },
+        },
+      ],
+    });
+  }
 
   function updateThinkingToggle() {
     const enabled = Boolean(state.chatOptions.thinking);
@@ -306,21 +456,21 @@ export function mountChat(root, ctx) {
         reasoningSummary.textContent = '思考过程';
         renderText(reasoningBody, assistant.reasoning);
       }
-      node.querySelector('.message-meta').replaceWith(messageNode(assistant).node.querySelector('.message-meta'));
+      node.replaceWith(messageNode(assistant).node);
       conversation.updatedAt = Date.now();
     } catch (error) {
       if (error.name === 'AbortError') {
         assistant.pending = false;
         assistant.content = `${assistant.content}\n\n[已停止]`;
         renderText(textNode, assistant.content);
-        const meta = messageNode(assistant).node.querySelector('.message-meta');
-        node.querySelector('.message-meta').replaceWith(meta);
+        node.replaceWith(messageNode(assistant).node);
       } else {
         assistant.pending = false;
         assistant.error = true;
         assistant.content = errorMessage(error);
         node.classList.add('error');
         renderText(textNode, assistant.content);
+        node.replaceWith(messageNode(assistant).node);
         toast(assistant.content, 'error');
       }
     } finally {
@@ -343,7 +493,11 @@ export function mountChat(root, ctx) {
   scroller.addEventListener('dragover', (event) => event.preventDefault());
   scroller.addEventListener('drop', (event) => {
     event.preventDefault();
-    void addFiles([...event.dataTransfer.files]);
+    const files = [...event.dataTransfer.files];
+    const audio = files.find((file) => file.name.toLowerCase().endsWith('.wav') || file.type.startsWith('audio/'));
+    if (audio) void transcribeAudio(audio);
+    const images = files.filter((file) => file.type.startsWith('image/'));
+    if (images.length) void addFiles(images);
   });
   send.disabled = true;
   stop.disabled = true;
