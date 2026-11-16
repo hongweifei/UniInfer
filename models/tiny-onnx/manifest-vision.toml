@@ -3,8 +3,6 @@ runtime = "onnx"
 implementation = "onnx.graph"
 format = "onnx"
 quantization = "fp32"
-modalities = ["text", "image"]
-capabilities = ["text_generation", "vision_chat"]
 streaming_capable = false
 context_len = 64
 tokenizer = "bytes"
@@ -25,3 +23,19 @@ image_token = "<image>"
 [[files]]
 path = "vision.onnx"
 sha256 = "85ce76aacbdef6659679b418fb33f089ff8f53728a8d337f6f8816eac0a006b2"
+
+[[capabilities]]
+name = "text_chat"
+operation = "generate"
+required_inputs = ["text"]
+optional_inputs = ["image"]
+outputs = ["text"]
+mode = "stream"
+
+[[capabilities]]
+name = "image_understand"
+operation = "understand"
+required_inputs = ["image"]
+optional_inputs = ["text"]
+outputs = ["text"]
+mode = "batch"

@@ -3,8 +3,6 @@ runtime = "whisper"
 implementation = "whisper.ggml"
 format = "ggml"
 quantization = "fp16"
-modalities = ["audio"]
-capabilities = ["audio_transcription"]
 streaming_capable = false
 context_len = 448
 
@@ -18,3 +16,10 @@ policy = "auto"
 [[files]]
 path = "ggml-model.bin"
 sha256 = "a2094962a33f48ce1fc59ab6f34ca9bb4408443bf8a86361b6b1775aaa4bc1f3"
+
+[[capabilities]]
+name = "transcribe"
+operation = "transcribe"
+required_inputs = ["audio"]
+outputs = ["text"]
+mode = "batch"

@@ -19,7 +19,7 @@ manifest.capabilities     user-visible capability set
 `EngineRegistry` 只匹配：
 
 ```text
-runtime + implementation + format + quantization + modalities + placement
+runtime + implementation + format + quantization + input modalities + placement
 ```
 
 它不调用 `supports_architecture`，不比较 Qwen/SmolVLM/Whisper 之类的名字。
@@ -49,13 +49,27 @@ flowchart TB
 id = "example"
 runtime = "onnx"
 implementation = "onnx.vision"
-capabilities = ["text_generation", "vision_chat"]
 format = "onnx"
 quantization = "int4"
-modalities = ["text", "image"]
+
+[[capabilities]]
+name = "text_chat"
+operation = "generate"
+required_inputs = ["text"]
+optional_inputs = ["image"]
+outputs = ["text"]
+mode = "stream"
+
+[[capabilities]]
+name = "image_to_video"
+operation = "generate"
+required_inputs = ["image"]
+optional_inputs = ["text"]
+outputs = ["video"]
+mode = "batch"
 ```
 
-模型相关配置按能力分组：
+capability 是唯一的路由签名：`operation + required_inputs + optional_inputs + outputs + mode`。模型相关配置按能力分组：
 
 ```toml
 [text]      # tokenizer / vocab / chat template

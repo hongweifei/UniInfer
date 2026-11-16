@@ -3,8 +3,6 @@ runtime = "onnx"
 implementation = "onnx.vision"
 format = "onnx"
 quantization = "int4"
-modalities = ["text", "image"]
-capabilities = ["text_generation", "vision_chat"]
 streaming_capable = false
 context_len = 4096
 tokenizer = "hf"
@@ -59,3 +57,19 @@ sha256 = "8b262ec2acb7773caac7b1e59edf921671cdb4c7c815a9c714242540d3fcb531"
 [[files]]
 path = "preprocessor_config_512.json"
 sha256 = "0a2f391492a6cb8e344d5b491d7293d7755f376e87f6286bb6e2bdd56c956e64"
+
+[[capabilities]]
+name = "text_chat"
+operation = "generate"
+required_inputs = ["text"]
+optional_inputs = ["image"]
+outputs = ["text"]
+mode = "stream"
+
+[[capabilities]]
+name = "image_understand"
+operation = "understand"
+required_inputs = ["image"]
+optional_inputs = ["text"]
+outputs = ["text"]
+mode = "batch"

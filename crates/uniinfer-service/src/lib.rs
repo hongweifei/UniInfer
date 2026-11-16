@@ -108,7 +108,7 @@ impl Runtime {
         cancel: CancelToken,
     ) -> Result<Arc<AudioSlot>> {
         if !manifest
-            .modalities
+            .input_modalities()
             .contains(&uniinfer_core::Modality::Audio)
         {
             return Err(EngineError::ManifestInvalid(

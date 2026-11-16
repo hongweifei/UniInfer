@@ -3,8 +3,6 @@ runtime = "llama"
 implementation = "llama.mtmd"
 format = "gguf"
 quantization = "q4_k_m"
-modalities = ["text", "image"]
-capabilities = ["text_generation", "vision_chat"]
 streaming_capable = false
 context_len = 4096
 tokenizer = "hf"
@@ -41,3 +39,19 @@ sha256 = "5ece781dc8d2b2f3e2f289ca0ae50b17cfc27dd27bfe7971bb8241e0b964331a"
 [[files]]
 path = "tokenizer_config.json"
 sha256 = "8b262ec2acb7773caac7b1e59edf921671cdb4c7c815a9c714242540d3fcb531"
+
+[[capabilities]]
+name = "text_chat"
+operation = "generate"
+required_inputs = ["text"]
+optional_inputs = ["image"]
+outputs = ["text"]
+mode = "stream"
+
+[[capabilities]]
+name = "image_understand"
+operation = "understand"
+required_inputs = ["image"]
+optional_inputs = ["text"]
+outputs = ["text"]
+mode = "batch"

@@ -21,18 +21,74 @@ pub enum Runtime {
     Process,
 }
 
-/// High-level capability declared by a model manifest.
+/// Operation a capability performs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum Capability {
-    TextGeneration,
-    VisionChat,
-    AudioTranscription,
-    SpeechSynthesis,
-    ImageGeneration,
-    VideoGeneration,
-    Embeddings,
-    Realtime,
+pub enum Operation {
+    Generate,
+    Understand,
+    Transcribe,
+    Synthesize,
+    Edit,
+    Embed,
+}
+
+/// Execution mode of a capability.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Mode {
+    Batch,
+    Stream,
+    Duplex,
+}
+
+/// One model capability: operation, input contract, output contract and mode.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Capability {
+    pub name: String,
+    pub operation: Operation,
+    #[serde(default)]
+    pub required_inputs: Vec<Modality>,
+    #[serde(default)]
+    pub optional_inputs: Vec<Modality>,
+    pub outputs: Vec<Modality>,
+    pub mode: Mode,
+}
+
+impl Capability {
+    /// Match a concrete request against this capability.
+    #[must_use]
+    pub fn matches(&self, request: &CapabilityRequest) -> bool {
+        if self.operation != request.operation || self.mode != request.mode {
+            return false;
+        }
+        if self
+            .required_inputs
+            .iter()
+            .any(|modality| !request.present_inputs.contains(modality))
+        {
+            return false;
+        }
+        if request.present_inputs.iter().any(|modality| {
+            !self.required_inputs.contains(modality) && !self.optional_inputs.contains(modality)
+        }) {
+            return false;
+        }
+        request
+            .requested_outputs
+            .iter()
+            .all(|modality| self.outputs.contains(modality))
+    }
+}
+
+/// Concrete request signature used for capability matching.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CapabilityRequest {
+    pub operation: Operation,
+    pub present_inputs: Vec<Modality>,
+    pub requested_outputs: Vec<Modality>,
+    pub mode: Mode,
 }
 
 /// Model container formats understood by the runtime.
@@ -395,7 +451,6 @@ pub struct ModelManifest {
     pub capabilities: Vec<Capability>,
     pub format: ModelFormat,
     pub quantization: Quantization,
-    pub modalities: Vec<Modality>,
     #[serde(default)]
     pub streaming_capable: bool,
     pub context_len: usize,
@@ -464,11 +519,49 @@ impl ModelManifest {
                 "implementation must be a non-empty [A-Za-z0-9._-] string".into(),
             ));
         }
-        if self.modalities.is_empty() {
-            return Err(EngineError::ManifestInvalid("modalities is empty".into()));
-        }
         if self.capabilities.is_empty() {
             return Err(EngineError::ManifestInvalid("capabilities is empty".into()));
+        }
+        let mut names = std::collections::BTreeSet::new();
+        for capability in &self.capabilities {
+            if capability.name.is_empty()
+                || !capability
+                    .name
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
+            {
+                return Err(EngineError::ManifestInvalid(
+                    "capability.name must be a non-empty [A-Za-z0-9._-] string".into(),
+                ));
+            }
+            if !names.insert(&capability.name) {
+                return Err(EngineError::ManifestInvalid(format!(
+                    "duplicate capability {}",
+                    capability.name
+                )));
+            }
+            if capability.required_inputs.is_empty() {
+                return Err(EngineError::ManifestInvalid(format!(
+                    "capability {} has no required inputs",
+                    capability.name
+                )));
+            }
+            if capability.outputs.is_empty() {
+                return Err(EngineError::ManifestInvalid(format!(
+                    "capability {} has no outputs",
+                    capability.name
+                )));
+            }
+            if capability
+                .required_inputs
+                .iter()
+                .any(|modality| capability.optional_inputs.contains(modality))
+            {
+                return Err(EngineError::ManifestInvalid(format!(
+                    "capability {} marks an input both required and optional",
+                    capability.name
+                )));
+            }
         }
         if self.context_len == 0 || self.context_len > 1_048_576 {
             return Err(EngineError::ManifestInvalid(
@@ -531,6 +624,46 @@ impl ModelManifest {
         Ok(())
     }
 
+    /// Whether any declared capability satisfies the request.
+    #[must_use]
+    pub fn supports(&self, request: &CapabilityRequest) -> bool {
+        self.capabilities
+            .iter()
+            .any(|capability| capability.matches(request))
+    }
+
+    /// Union of required and optional input modalities.
+    #[must_use]
+    pub fn input_modalities(&self) -> Vec<Modality> {
+        let mut out = Vec::new();
+        for capability in &self.capabilities {
+            for modality in capability
+                .required_inputs
+                .iter()
+                .chain(capability.optional_inputs.iter())
+            {
+                if !out.contains(modality) {
+                    out.push(*modality);
+                }
+            }
+        }
+        out
+    }
+
+    /// Union of output modalities.
+    #[must_use]
+    pub fn output_modalities(&self) -> Vec<Modality> {
+        let mut out = Vec::new();
+        for capability in &self.capabilities {
+            for modality in &capability.outputs {
+                if !out.contains(modality) {
+                    out.push(*modality);
+                }
+            }
+        }
+        out
+    }
+
     /// Verify every listed weight file against its digest.
     pub fn verify_files(&self, base_dir: &Path) -> Result<()> {
         for file in &self.files {
@@ -557,10 +690,8 @@ mod tests {
 id = "tiny-fixture"
 runtime = "onnx"
 implementation = "onnx.graph"
-capabilities = ["text_generation"]
 format = "onnx"
 quantization = "fp32"
-modalities = ["text"]
 context_len = 64
 tokenizer = "bytes"
 [placement]
@@ -573,6 +704,13 @@ vocab_size = 256
 [[files]]
 path = "model.onnx"
 sha256 = "0000000000000000000000000000000000000000000000000000000000000000"
+
+[[capabilities]]
+name = "text_chat"
+operation = "generate"
+required_inputs = ["text"]
+outputs = ["text"]
+mode = "stream"
 "#
         .into()
     }
@@ -629,8 +767,10 @@ sha256 = "0000000000000000000000000000000000000000000000000000000000000000"
 
     #[test]
     fn parses_audio_contract() {
-        let raw = base().replace("modalities = [\"text\"]", "modalities = [\"audio\"]")
-            + "\n[audio]\nsample_rate = 16000\nchannels = 1\n";
+        let raw = base().replace(
+            "required_inputs = [\"text\"]",
+            "required_inputs = [\"audio\"]",
+        ) + "\n[audio]\nsample_rate = 16000\nchannels = 1\n";
         let manifest = parse(&raw);
         manifest.validate().expect("valid");
         assert_eq!(manifest.format, ModelFormat::Onnx);
@@ -642,15 +782,21 @@ sha256 = "0000000000000000000000000000000000000000000000000000000000000000"
 
     #[test]
     fn rejects_stereo_audio_contract() {
-        let raw = base().replace("modalities = [\"text\"]", "modalities = [\"audio\"]")
-            + "\n[audio]\nchannels = 2\n";
+        let raw = base().replace(
+            "required_inputs = [\"text\"]",
+            "required_inputs = [\"audio\"]",
+        ) + "\n[audio]\nchannels = 2\n";
         let error = parse(&raw).validate().expect_err("must reject");
         assert!(error.to_string().contains("channels"));
     }
 
     #[test]
     fn rejects_empty_capabilities() {
-        let raw = base().replace("capabilities = [\"text_generation\"]", "capabilities = []");
+        let raw = base()
+            .split("[[capabilities]]")
+            .next()
+            .expect("base")
+            .replace("[placement]", "capabilities = []\n[placement]");
         let error = parse(&raw).validate().expect_err("must reject");
         assert!(error.to_string().contains("capabilities"));
     }
@@ -663,9 +809,57 @@ sha256 = "0000000000000000000000000000000000000000000000000000000000000000"
     }
 
     #[test]
-    fn rejects_empty_modalities() {
-        let raw = base().replace("modalities = [\"text\"]", "modalities = []");
+    fn capability_keeps_optional_text_separate_from_required_audio() {
+        let capability = Capability {
+            name: "speech_to_speech".into(),
+            operation: Operation::Generate,
+            required_inputs: vec![Modality::Audio],
+            optional_inputs: vec![Modality::Text],
+            outputs: vec![Modality::Audio],
+            mode: Mode::Batch,
+        };
+        let audio_only = CapabilityRequest {
+            operation: Operation::Generate,
+            present_inputs: vec![Modality::Audio],
+            requested_outputs: vec![Modality::Audio],
+            mode: Mode::Batch,
+        };
+        let with_text = CapabilityRequest {
+            present_inputs: vec![Modality::Audio, Modality::Text],
+            ..audio_only.clone()
+        };
+        let text_only = CapabilityRequest {
+            present_inputs: vec![Modality::Text],
+            ..audio_only.clone()
+        };
+        assert!(capability.matches(&audio_only));
+        assert!(capability.matches(&with_text));
+        assert!(!capability.matches(&text_only));
+    }
+
+    #[test]
+    fn image_to_video_capability_matches_image_and_optional_text() {
+        let capability = Capability {
+            name: "image_to_video".into(),
+            operation: Operation::Generate,
+            required_inputs: vec![Modality::Image],
+            optional_inputs: vec![Modality::Text],
+            outputs: vec![Modality::Video],
+            mode: Mode::Batch,
+        };
+        let request = CapabilityRequest {
+            operation: Operation::Generate,
+            present_inputs: vec![Modality::Image, Modality::Text],
+            requested_outputs: vec![Modality::Video],
+            mode: Mode::Batch,
+        };
+        assert!(capability.matches(&request));
+    }
+
+    #[test]
+    fn rejects_empty_required_inputs() {
+        let raw = base().replace("required_inputs = [\"text\"]", "required_inputs = []");
         let error = parse(&raw).validate().expect_err("must reject");
-        assert!(error.to_string().contains("modalities"));
+        assert!(error.to_string().contains("required inputs"));
     }
 }

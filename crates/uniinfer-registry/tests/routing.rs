@@ -2,8 +2,8 @@ use std::path::{Path, PathBuf};
 
 use uniinfer_core::{
     Capability, DeviceClass, EngineError, EngineLoadSpec, EngineSession, InferenceEngine, Modality,
-    ModelFormat, ModelManifest, PlacementConfig, PlacementPolicy, Quantization, Result, Runtime,
-    Tensor, TensorData, TensorSpec,
+    Mode, ModelFormat, ModelManifest, Operation, PlacementConfig, PlacementPolicy, Quantization,
+    Result, Runtime, Tensor, TensorData, TensorSpec,
 };
 use uniinfer_devices::DeviceInventory;
 use uniinfer_registry::EngineRegistry;
@@ -77,10 +77,16 @@ fn manifest() -> ModelManifest {
         id: "routing".into(),
         runtime: Runtime::Onnx,
         implementation: "onnx.fake".into(),
-        capabilities: vec![Capability::TextGeneration],
+        capabilities: vec![Capability {
+            name: "text_chat".into(),
+            operation: Operation::Generate,
+            required_inputs: vec![Modality::Text],
+            optional_inputs: Vec::new(),
+            outputs: vec![Modality::Text],
+            mode: Mode::Stream,
+        }],
         format: ModelFormat::Onnx,
         quantization: Quantization::Fp32,
-        modalities: vec![Modality::Text],
         streaming_capable: false,
         context_len: 16,
         tokenizer: Some("bytes".into()),
@@ -158,7 +164,7 @@ fn rejects_unsupported_implementation() {
 fn rejects_unsupported_modality() {
     let temp = tempfile::tempdir().expect("tempdir");
     let mut manifest = manifest();
-    manifest.modalities = vec![Modality::Audio];
+    manifest.capabilities[0].required_inputs = vec![Modality::Audio];
     let path = write_manifest(temp.path(), &manifest);
     let error = registry().load(&path).err().expect("must reject");
     assert!(matches!(error, EngineError::UnsupportedModality { .. }));

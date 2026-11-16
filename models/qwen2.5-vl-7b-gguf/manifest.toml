@@ -3,8 +3,6 @@ runtime = "llama"
 implementation = "llama.mtmd"
 format = "gguf"
 quantization = "q4_k_m"
-modalities = ["text", "image"]
-capabilities = ["text_generation", "vision_chat"]
 streaming_capable = false
 context_len = 32768
 min_vram = "6GiB"
@@ -26,3 +24,19 @@ sha256 = "9258bf05b12686d097ff3b6b18d968ab393649780aa2b3cd67fec43d50554392"
 [[files]]
 path = "mmproj-Qwen2.5-VL-7B-Instruct-Q8_0.gguf"
 sha256 = "2ddb555391bae966e412deab9e07b58afa18bcc06930ba0f1c78a3695ab9e506"
+
+[[capabilities]]
+name = "text_chat"
+operation = "generate"
+required_inputs = ["text"]
+optional_inputs = ["image"]
+outputs = ["text"]
+mode = "stream"
+
+[[capabilities]]
+name = "image_understand"
+operation = "understand"
+required_inputs = ["image"]
+optional_inputs = ["text"]
+outputs = ["text"]
+mode = "batch"

@@ -17,7 +17,7 @@ pub use engine::{
 };
 pub use error::{EngineError, Result};
 pub use manifest::{
-    AudioConfig, Capability, Modality, ModelFile, ModelFormat, ModelManifest, PlacementConfig,
-    Quantization, Runtime, TextConfig,
+    AudioConfig, Capability, Modality, Mode, ModelFile, ModelFormat, ModelManifest, Operation,
+    PlacementConfig, Quantization, Runtime, TextConfig,
 };
 pub use tensor::{Tensor, TensorData, TensorDtype, TensorSpec};

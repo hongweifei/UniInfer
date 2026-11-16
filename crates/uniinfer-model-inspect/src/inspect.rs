@@ -1,8 +1,8 @@
 use std::path::Path;
 
 use uniinfer_core::{
-    AudioConfig, Capability, Modality, ModelFile, ModelFormat, ModelManifest, PlacementConfig,
-    Quantization, Runtime,
+    AudioConfig, Capability, Modality, Mode, ModelFile, ModelFormat, ModelManifest, Operation,
+    PlacementConfig, Quantization, Runtime,
 };
 
 use crate::error::{InspectError, Result};
@@ -209,15 +209,41 @@ pub fn inspect(root: &Path, options: &InspectOptions) -> Result<Inspection> {
         ModelFormat::Gguf | ModelFormat::Safetensors => ("candle", "candle.text"),
         ModelFormat::Ggml => ("whisper", "whisper.ggml"),
     };
-    let capabilities = modalities
-        .iter()
-        .map(|modality| match modality {
-            Modality::Text => Capability::TextGeneration,
-            Modality::Audio => Capability::AudioTranscription,
-            Modality::Image => Capability::VisionChat,
-            Modality::Video => Capability::VideoGeneration,
-        })
-        .collect::<Vec<_>>();
+    let mut capabilities = Vec::new();
+    if modalities.contains(&Modality::Audio) {
+        capabilities.push(Capability {
+            name: "transcribe".into(),
+            operation: Operation::Transcribe,
+            required_inputs: vec![Modality::Audio],
+            optional_inputs: Vec::new(),
+            outputs: vec![Modality::Text],
+            mode: Mode::Batch,
+        });
+    }
+    if modalities.contains(&Modality::Text) {
+        capabilities.push(Capability {
+            name: "text_chat".into(),
+            operation: Operation::Generate,
+            required_inputs: vec![Modality::Text],
+            optional_inputs: modalities
+                .iter()
+                .copied()
+                .filter(|modality| *modality != Modality::Text)
+                .collect(),
+            outputs: vec![Modality::Text],
+            mode: Mode::Stream,
+        });
+    }
+    if modalities.contains(&Modality::Image) && !modalities.contains(&Modality::Text) {
+        capabilities.push(Capability {
+            name: "image_understand".into(),
+            operation: Operation::Understand,
+            required_inputs: vec![Modality::Image],
+            optional_inputs: vec![Modality::Text],
+            outputs: vec![Modality::Text],
+            mode: Mode::Batch,
+        });
+    }
     let runtime = match runtime {
         "onnx" => Runtime::Onnx,
         "candle" => Runtime::Candle,
@@ -231,7 +257,6 @@ pub fn inspect(root: &Path, options: &InspectOptions) -> Result<Inspection> {
         capabilities,
         format,
         quantization,
-        modalities,
         streaming_capable: false,
         context_len,
         tokenizer: tokenizer.as_ref().map(|_| "hf".into()),

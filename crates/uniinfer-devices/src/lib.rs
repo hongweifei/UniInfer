@@ -13,8 +13,8 @@ mod tests {
 
     use super::*;
     use uniinfer_core::{
-        Capability, Device, DeviceClass, Modality, ModelFile, ModelFormat, ModelManifest,
-        PlacementConfig, PlacementPolicy, Quantization, Runtime,
+        Capability, Device, DeviceClass, Modality, Mode, ModelFile, ModelFormat, ModelManifest,
+        Operation, PlacementConfig, PlacementPolicy, Quantization, Runtime,
     };
 
     fn manifest(placement: PlacementConfig) -> ModelManifest {
@@ -22,10 +22,16 @@ mod tests {
             id: "test".into(),
             runtime: Runtime::Onnx,
             implementation: "onnx.graph".into(),
-            capabilities: vec![Capability::TextGeneration],
+            capabilities: vec![Capability {
+                name: "text_chat".into(),
+                operation: Operation::Generate,
+                required_inputs: vec![Modality::Text],
+                optional_inputs: Vec::new(),
+                outputs: vec![Modality::Text],
+                mode: Mode::Stream,
+            }],
             format: ModelFormat::Onnx,
             quantization: Quantization::Fp32,
-            modalities: vec![Modality::Text],
             streaming_capable: false,
             context_len: 64,
             tokenizer: Some("bytes".into()),

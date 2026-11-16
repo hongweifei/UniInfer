@@ -3,8 +3,6 @@ runtime = "onnx"
 implementation = "onnx.asr.whisper"
 format = "onnx"
 quantization = "fp32"
-modalities = ["audio"]
-capabilities = ["audio_transcription"]
 streaming_capable = false
 context_len = 448
 
@@ -43,3 +41,10 @@ sha256 = "1bb34b47daba40728f488323190dc64765c5338b5196f95c4af926e13a6161c3"
 [[files]]
 path = "config.json"
 sha256 = "79e11e4a0d1415f68dcfaa32e8dbeda0856d44dd1954f0a075867885fa759a70"
+
+[[capabilities]]
+name = "transcribe"
+operation = "transcribe"
+required_inputs = ["audio"]
+outputs = ["text"]
+mode = "batch"

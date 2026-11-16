@@ -183,7 +183,6 @@ def main() -> None:
     manifest = f"""id = "tiny-byte-onnx"
 format = "onnx"
 quantization = "fp32"
-modalities = ["text"]
 streaming_capable = false
 context_len = 64
 tokenizer = "bytes"
@@ -200,6 +199,13 @@ vocab_size = {VOCAB}
 [[files]]
 path = "model.onnx"
 sha256 = "{digest}"
+
+[[capabilities]]
+name = "text_chat"
+operation = "generate"
+required_inputs = ["text"]
+outputs = ["text"]
+mode = "stream"
 """
     (OUT_DIR / "manifest.toml").write_text(manifest, encoding="utf-8", newline="\n")
     (OUT_DIR / "sha256.txt").write_text(
@@ -216,7 +222,6 @@ sha256 = "{digest}"
     vision_manifest = f"""id = "tiny-vision-onnx"
 format = "onnx"
 quantization = "fp32"
-modalities = ["text", "image"]
 streaming_capable = false
 context_len = 64
 tokenizer = "bytes"
@@ -237,6 +242,22 @@ image_token = "<image>"
 [[files]]
 path = "vision.onnx"
 sha256 = "{vision_digest}"
+
+[[capabilities]]
+name = "text_chat"
+operation = "generate"
+required_inputs = ["text"]
+optional_inputs = ["image"]
+outputs = ["text"]
+mode = "stream"
+
+[[capabilities]]
+name = "image_understand"
+operation = "understand"
+required_inputs = ["image"]
+optional_inputs = ["text"]
+outputs = ["text"]
+mode = "batch"
 """
     (OUT_DIR / "manifest-vision.toml").write_text(
         vision_manifest, encoding="utf-8", newline="\n"

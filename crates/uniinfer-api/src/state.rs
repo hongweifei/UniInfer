@@ -4,7 +4,7 @@ use std::sync::{Arc, Mutex};
 
 use tokio::sync::Mutex as AsyncMutex;
 use uniinfer_config::ConfigHandle;
-use uniinfer_core::{CancelToken, EngineError, Modality, ModelManifest, Result};
+use uniinfer_core::{CancelToken, EngineError, ModelManifest, Result};
 use uniinfer_service::{AudioSlot, ModelSlot, Runtime};
 
 use crate::api_config::ApiConfig;
@@ -53,8 +53,7 @@ impl AppState {
                     "duplicate model id {id}"
                 )));
             }
-            let audio_only =
-                manifest.modalities.contains(&Modality::Audio) && manifest.text.is_none();
+            let audio_only = manifest.audio.is_some() && manifest.text.is_none();
             manifest_paths.insert(id.clone(), path.clone());
             catalog.insert(
                 id,

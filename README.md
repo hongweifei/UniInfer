@@ -493,14 +493,20 @@ cargo run -p uniinfer-desktop
 id = "qwen2.5-1.5b-instruct-q4_k_m"
 runtime = "candle"
 implementation = "candle.text"
-capabilities = ["text_generation"]
 format = "gguf"
 quantization = "q4_k_m"
-modalities = ["text"]
 streaming_capable = true
 context_len = 32768
 tokenizer = "qwen2"
 min_vram = "2GiB"
+
+[[capabilities]]
+name = "text_chat"
+operation = "generate"
+required_inputs = ["text"]
+outputs = ["text"]
+mode = "stream"
+
 [placement]
 policy = "auto"
 prefer = ["npu", "gpu", "cpu"]

@@ -163,7 +163,7 @@ impl EngineRegistry {
 
             let modalities = engine.supported_modalities(manifest.format);
             if let Some(missing) = manifest
-                .modalities
+                .input_modalities()
                 .iter()
                 .find(|modality| !modalities.contains(modality))
             {
@@ -208,7 +208,11 @@ impl EngineRegistry {
         if saw_modality {
             return Err(EngineError::UnsupportedModality {
                 format: manifest.format,
-                modality: manifest.modalities[0],
+                modality: manifest
+                    .input_modalities()
+                    .first()
+                    .copied()
+                    .unwrap_or(uniinfer_core::Modality::Text),
             });
         }
         if saw_quantization {

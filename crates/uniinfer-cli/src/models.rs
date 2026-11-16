@@ -49,11 +49,7 @@ pub(crate) fn inspect_model(
     }
     if load {
         let runtime = runtime.as_ref().expect("runtime initialized");
-        let audio_only = inspection
-            .manifest
-            .modalities
-            .contains(&uniinfer_core::Modality::Audio)
-            && inspection.manifest.text.is_none();
+        let audio_only = inspection.manifest.audio.is_some() && inspection.manifest.text.is_none();
         if audio_only {
             runtime
                 .load_audio_manifest(inspection.manifest.clone(), &inspection.root)

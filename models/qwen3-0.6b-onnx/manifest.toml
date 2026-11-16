@@ -3,8 +3,6 @@ runtime = "onnx"
 implementation = "onnx.graph"
 format = "onnx"
 quantization = "int4"
-modalities = ["text"]
-capabilities = ["text_generation"]
 streaming_capable = false
 context_len = 40960
 tokenizer = "hf"
@@ -24,3 +22,10 @@ tokenizer_file = "tokenizer.json"
 [[files]]
 path = "model.onnx"
 sha256 = "35fe34321ea9b1eaa43dfa648dd199903d01d93f97dc2b24fe1d16079ebea957"
+
+[[capabilities]]
+name = "text_chat"
+operation = "generate"
+required_inputs = ["text"]
+outputs = ["text"]
+mode = "stream"

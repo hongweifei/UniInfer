@@ -3,8 +3,6 @@ runtime = "candle"
 implementation = "candle.text"
 format = "gguf"
 quantization = "q4_k_m"
-modalities = ["text"]
-capabilities = ["text_generation"]
 streaming_capable = false
 context_len = 2048
 tokenizer = "hf"
@@ -23,3 +21,10 @@ tokenizer_file = "tokenizer.json"
 [[files]]
 path = "model.gguf"
 sha256 = "ac2d97712095a558e31573f62f466a3f9d93990898b0ec79d7c974c1780d524a"
+
+[[capabilities]]
+name = "text_chat"
+operation = "generate"
+required_inputs = ["text"]
+outputs = ["text"]
+mode = "stream"

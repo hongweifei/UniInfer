@@ -3,8 +3,6 @@ runtime = "candle"
 implementation = "candle.vision"
 format = "safetensors"
 quantization = "bf16"
-modalities = ["text", "image"]
-capabilities = ["text_generation", "vision_chat"]
 streaming_capable = false
 context_len = 4096
 tokenizer = "hf"
@@ -42,3 +40,19 @@ sha256 = "27225450ac9c6529872ee1924fcb0962ff5634834f817040f444118116f4e516"
 family = "qwen3_vl"
 preprocessor_file = "preprocessor_config.json"
 image_token = "<|vision_start|><|image_pad|><|vision_end|>"
+
+[[capabilities]]
+name = "text_chat"
+operation = "generate"
+required_inputs = ["text"]
+optional_inputs = ["image"]
+outputs = ["text"]
+mode = "stream"
+
+[[capabilities]]
+name = "image_understand"
+operation = "understand"
+required_inputs = ["image"]
+optional_inputs = ["text"]
+outputs = ["text"]
+mode = "batch"

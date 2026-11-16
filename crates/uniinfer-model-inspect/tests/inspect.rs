@@ -15,7 +15,11 @@ fn detects_single_onnx_text_model() {
     fs::write(dir.path().join("tokenizer.json"), b"{}").expect("tokenizer");
     let inspection = inspect(dir.path(), &InspectOptions::default()).expect("inspect");
     assert_eq!(inspection.manifest.format, ModelFormat::Onnx);
-    assert_eq!(inspection.manifest.modalities, vec![Modality::Text]);
+    assert_eq!(inspection.manifest.capabilities[0].name, "text_chat");
+    assert_eq!(
+        inspection.manifest.capabilities[0].required_inputs,
+        vec![Modality::Text]
+    );
     assert_eq!(
         inspection.manifest.text.as_ref().expect("text").vocab_size,
         100
@@ -36,7 +40,11 @@ fn detects_onnx_encoder_decoder_asr() {
     )
     .expect("config");
     let inspection = inspect(dir.path(), &InspectOptions::default()).expect("inspect");
-    assert_eq!(inspection.manifest.modalities, vec![Modality::Audio]);
+    assert_eq!(inspection.manifest.capabilities[0].name, "transcribe");
+    assert_eq!(
+        inspection.manifest.capabilities[0].required_inputs,
+        vec![Modality::Audio]
+    );
     assert_eq!(inspection.manifest.context_len, 448);
     let audio = inspection.manifest.audio.expect("audio");
     assert_eq!(audio.family.as_deref(), Some("whisper"));
