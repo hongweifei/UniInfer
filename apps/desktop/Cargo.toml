@@ -13,6 +13,28 @@ description = "UniInfer desktop shell"
 [build-dependencies]
 tauri-build = { version = "2.7.4" }
 
+[features]
+default = []
+ep-cuda = ["uniinfer-api/ep-cuda"]
+ep-tensorrt = ["uniinfer-api/ep-tensorrt"]
+ep-coreml = ["uniinfer-api/ep-coreml"]
+ep-directml = ["uniinfer-api/ep-directml"]
+ep-nnapi = ["uniinfer-api/ep-nnapi"]
+ep-qnn = ["uniinfer-api/ep-qnn"]
+ep-openvino = ["uniinfer-api/ep-openvino"]
+ep-rocm = ["uniinfer-api/ep-rocm"]
+ep-vitis = ["uniinfer-api/ep-vitis"]
+ep-cann = ["uniinfer-api/ep-cann"]
+candle-cuda = ["uniinfer-api/candle-cuda"]
+candle-metal = ["uniinfer-api/candle-metal"]
+llama = ["uniinfer-api/llama"]
+llama-mtmd = ["uniinfer-api/llama-mtmd"]
+llama-vulkan = ["uniinfer-api/llama-vulkan"]
+llama-cuda = ["uniinfer-api/llama-cuda"]
+llama-rocm = ["uniinfer-api/llama-rocm"]
+llama-metal = ["uniinfer-api/llama-metal"]
+whisper = ["uniinfer-api/whisper"]
+
 [dependencies]
 uniinfer-api = { path = "../../crates/uniinfer-api" }
 uniinfer-config = { path = "../../crates/uniinfer-config" }

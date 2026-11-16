@@ -158,6 +158,15 @@ cargo desktop
 
 Windows 也可以双击仓库根目录的 `desktop.cmd`。
 
+默认只启用 CPU。GPU/NPU 通过 feature 开启，例如：
+
+```bash
+cargo desktop --features ep-directml   # Windows ONNX GPU
+cargo desktop --features ep-cuda       # ONNX CUDA
+cargo desktop --features candle-cuda   # Candle CUDA
+cargo desktop --features llama-mtmd,llama-vulkan
+```
+
 ### 启动服务
 
 ```bash
