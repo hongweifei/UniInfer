@@ -9,7 +9,7 @@
 - Candle GGUF/Safetensors 文本与 Safetensors 视觉。
 - llama.cpp GGUF 文本与 mtmd 视觉。
 - whisper.cpp GGML 转写。
-- OpenAI 兼容聊天、单图聊天、语音转写、图像生成管线。
+- OpenAI 兼容聊天、多图聊天、语音转写、图像生成管线。
 - `ModelExecutor` 与 `ModelOutput::{Text,Audio,Image,Video}`。
 - `ImageSlot`、PNG、`b64_json`、`tiny-image-onnx` fixture。
 - Tauri 2 桌面端。
@@ -28,7 +28,7 @@
 
 | 能力 | 输入 | 输出 | 状态 |
 | :--- | :--- | :--- | :--- |
-| 文本聊天 | text (+image) | text | 已实现 |
+| 文本聊天 | text (+image) | text | 已实现，支持多图 |
 | 语音转写 | audio | text | 已实现 |
 | 图像生成 | text | image | 管线已实现，真实扩散后端下一阶段 |
 | 图像编辑 | image (+text) | image | 规划 |

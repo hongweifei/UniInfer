@@ -318,12 +318,6 @@ pub(crate) async fn chat(
                 ),
             ));
         }
-        if images.len() > 1 {
-            return Err(ApiError::bad_request(
-                "unsupported_content",
-                "only one image per request is supported",
-            ));
-        }
     }
     let prompt = slot
         .render_chat_with_tools(&messages, &tools, tool_choice.as_ref())
@@ -419,6 +413,20 @@ mod tests {
         .expect("parse");
         assert_eq!(content.text, "look <image> now");
         assert_eq!(content.images, vec![b"hi".to_vec()]);
+    }
+
+    #[test]
+    fn multiple_data_images_are_collected_with_markers() {
+        let content = parts(serde_json::json!([
+            {"type": "text", "text": "compare "},
+            {"type": "image_url", "image_url": {"url": "data:image/png;base64,aGk="}},
+            {"type": "text", "text": " and "},
+            {"type": "image_url", "image_url": {"url": "data:image/png;base64,enk="}}
+        ]))
+        .into_parts("<image>")
+        .expect("parse");
+        assert_eq!(content.text, "compare <image> and <image>");
+        assert_eq!(content.images, vec![b"hi".to_vec(), b"zy".to_vec()]);
     }
 
     #[test]

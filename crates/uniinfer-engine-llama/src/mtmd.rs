@@ -277,11 +277,6 @@ impl NativeTextDecoder for LlamaMtmdSession {
         request: NativeTextRequest<'_>,
         on_bytes: &mut dyn FnMut(&[u8]) -> bool,
     ) -> Result<NativeTextOutput> {
-        if request.images.len() > 1 {
-            return Err(EngineError::Other(
-                "only one image per generation is supported".into(),
-            ));
-        }
         if request.cancel.is_cancelled() {
             return Err(EngineError::Cancelled);
         }
@@ -297,15 +292,15 @@ impl NativeTextDecoder for LlamaMtmdSession {
             .state
             .lock()
             .map_err(|_| EngineError::Other("mtmd state lock poisoned".into()))?;
-        let bitmap = request
+        let bitmaps = request
             .images
-            .first()
+            .iter()
             .map(|image| {
                 MtmdBitmap::from_buffer(&state.mtmd, image, false)
                     .map_err(|error| EngineError::Other(format!("mtmd bitmap: {error}")))
             })
-            .transpose()?;
-        let bitmaps = bitmap.iter().collect::<Vec<_>>();
+            .collect::<Result<Vec<_>>>()?;
+        let bitmaps = bitmaps.iter().collect::<Vec<_>>();
         let chunks = state
             .mtmd
             .tokenize(

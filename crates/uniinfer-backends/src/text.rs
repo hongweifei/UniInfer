@@ -113,7 +113,7 @@ impl TextGenerator {
         self.generate_with_augmented(session, prompt, &[], cancel, spec, on_bytes)
     }
 
-    /// Generate from a prompt plus at most one image.
+    /// Generate from a prompt plus zero or more images.
     pub fn generate_with_images(
         &self,
         session: &dyn EngineSession,
@@ -123,15 +123,16 @@ impl TextGenerator {
         spec: GenerationSpec,
         on_bytes: &mut dyn FnMut(&[u8]) -> bool,
     ) -> Result<GenerationOutput> {
-        if images.len() > 1 {
-            return Err(EngineError::Other(
-                "only one image per generation is supported".into(),
-            ));
-        }
-        let extra = images
-            .iter()
-            .map(|image| Tensor::new("image", vec![image.len()], TensorData::U8(image.clone())))
-            .collect::<Result<Vec<_>>>()?;
+        let extra = if images.is_empty() {
+            Vec::new()
+        } else {
+            let encoded = uniinfer_core::encode_images(images);
+            vec![Tensor::new(
+                "image",
+                vec![encoded.len()],
+                TensorData::U8(encoded),
+            )?]
+        };
         self.generate_with_augmented(session, prompt, &extra, cancel, spec, on_bytes)
     }
 
@@ -326,7 +327,7 @@ mod tests {
         inputs: Vec<TensorSpec>,
         outputs: Vec<TensorSpec>,
         seen: Mutex<Vec<Vec<i64>>>,
-        image_bytes: Mutex<Vec<usize>>,
+        images: Mutex<Vec<Vec<Vec<u8>>>>,
     }
 
     impl Scripted {
@@ -350,7 +351,7 @@ mod tests {
                     shape: vec![Some(1), None, Some(256)],
                 }],
                 seen: Mutex::new(Vec::new()),
-                image_bytes: Mutex::new(Vec::new()),
+                images: Mutex::new(Vec::new()),
             }
         }
     }
@@ -374,7 +375,8 @@ mod tests {
             if let Some(image) = inputs.iter().find(|tensor| tensor.name == "image")
                 && let TensorData::U8(bytes) = &image.data
             {
-                self.image_bytes.lock().expect("lock").push(bytes.len());
+                let images = uniinfer_core::decode_images(bytes)?;
+                self.images.lock().expect("lock").push(images);
             }
             let mut logits = vec![0.0f32; seq * 256];
             for position in 0..seq {
@@ -435,7 +437,33 @@ mod tests {
             )
             .expect("generate");
         assert_eq!(generated.bytes, b"cd");
-        assert_eq!(*session.image_bytes.lock().expect("lock"), vec![3, 3]);
+        assert_eq!(
+            *session.images.lock().expect("lock"),
+            vec![vec![vec![1, 2, 3]], vec![vec![1, 2, 3]]]
+        );
+    }
+
+    #[test]
+    fn multiple_images_are_sent_as_one_batch() {
+        let session = Scripted::new();
+        let generated = generator()
+            .generate_with_images(
+                &session,
+                "ab",
+                &[vec![1, 2], vec![3, 4, 5]],
+                &CancelToken::new(),
+                GenerationSpec::greedy(2),
+                &mut |_| true,
+            )
+            .expect("generate");
+        assert_eq!(generated.bytes, b"cd");
+        assert_eq!(
+            *session.images.lock().expect("lock"),
+            vec![
+                vec![vec![1, 2], vec![3, 4, 5]],
+                vec![vec![1, 2], vec![3, 4, 5]]
+            ]
+        );
     }
 
     #[test]

@@ -62,7 +62,7 @@ pub(crate) fn load(
             TensorSpec {
                 name: "image_grid_thw".into(),
                 dtype: TensorDtype::I64,
-                shape: vec![Some(1), Some(3)],
+                shape: vec![None, Some(3)],
             },
             TensorSpec {
                 name: "image".into(),
@@ -111,7 +111,7 @@ impl Qwen3VlSession {
                 TensorData::I64(values) => Some(values.clone()),
                 _ => None,
             });
-        let mut image_tokens = None;
+        let mut image_tokens: Option<Vec<usize>> = None;
         if shapes.is_none()
             && let Some(bytes) = inputs
                 .iter()
@@ -121,24 +121,44 @@ impl Qwen3VlSession {
                     _ => None,
                 })
         {
-            let image = self.preprocessor.preprocess(&bytes)?;
-            image_tokens = Some(image.image_tokens);
-            shapes = Some(image.pixel_values);
-            grid = Some(image.grid_thw.to_vec());
+            let processed = uniinfer_core::decode_images(&bytes)?
+                .iter()
+                .map(|image| self.preprocessor.preprocess(image))
+                .collect::<Result<Vec<_>>>()?;
+            let batch = processed.len();
+            let mut pixels = Vec::new();
+            let mut grids = Vec::with_capacity(batch * 3);
+            let mut tokens = Vec::with_capacity(batch);
+            for image in processed {
+                pixels.extend_from_slice(&image.pixel_values);
+                grids.extend_from_slice(&image.grid_thw);
+                tokens.push(image.image_tokens);
+            }
+            image_tokens = Some(tokens);
+            shapes = Some(pixels);
+            grid = Some(grids);
         }
         if let Some(pixel_values) = shapes {
             let grid = grid.ok_or_else(|| EngineError::Other("missing image_grid_thw".into()))?;
-            if grid.len() != 3 {
+            if grid.len() % 3 != 0 {
                 return Err(EngineError::Other(
-                    "image_grid_thw must have 3 values".into(),
+                    "image_grid_thw must have a multiple of 3 values".into(),
                 ));
             }
+            let batch = grid.len() / 3;
             let merge = self.preprocessor.merge_size() as i64;
-            let tokens =
-                image_tokens.unwrap_or_else(|| ((grid[1] / merge) * (grid[2] / merge)) as usize);
-            ids = expand_image_tokens(ids, self.image_token_id, tokens)?;
+            let tokens = image_tokens.unwrap_or_else(|| {
+                (0..batch)
+                    .map(|index| {
+                        ((grid[index * 3 + 1] / merge) * (grid[index * 3 + 2] / merge)) as usize
+                    })
+                    .collect()
+            });
+            ids = expand_image_tokens(ids, self.image_token_id, &tokens)?;
             let spans = image_spans(&ids, self.image_token_id).map_err(EngineError::Other)?;
-            if spans.iter().map(|(s, e)| e - s).sum::<usize>() != tokens {
+            if spans.len() != tokens.len()
+                || spans.iter().map(|(s, e)| e - s).sum::<usize>() != tokens.iter().sum::<usize>()
+            {
                 return Err(EngineError::Other(
                     "image placeholder count does not match image grid".into(),
                 ));
@@ -150,7 +170,7 @@ impl Qwen3VlSession {
                 .into_iter()
                 .map(|value| u32::try_from(value).unwrap_or(0))
                 .collect::<Vec<_>>();
-            let grid = Tensor::from_vec(grid, (1, 3), &self.device)
+            let grid = Tensor::from_vec(grid, (batch, 3), &self.device)
                 .map_err(|error| EngineError::Other(format!("image_grid_thw: {error}")))?;
             let ids = Tensor::from_vec(ids.clone(), (1, ids.len()), &self.device)
                 .map_err(|error| EngineError::Other(format!("input_ids: {error}")))?;
@@ -237,26 +257,26 @@ impl EngineSession for Qwen3VlSession {
     fn cancel(&self) {}
 }
 
-/// Expand the tokenizer's single image marker into the processor's merged
-/// image-token count. One image per prompt is the supported contract.
-fn expand_image_tokens(ids: Vec<i64>, image_token: i64, tokens: usize) -> Result<Vec<i64>> {
+/// Expand each image marker into its processor's merged image-token count.
+fn expand_image_tokens(ids: Vec<i64>, image_token: i64, tokens: &[usize]) -> Result<Vec<i64>> {
     let markers = ids.iter().filter(|id| **id == image_token).count();
-    if markers == 0 {
-        return Err(EngineError::Other(
-            "prompt has no image placeholder token".into(),
-        ));
-    }
-    if markers == tokens {
+    if markers == 0 && tokens.is_empty() {
         return Ok(ids);
     }
-    let mut expanded = Vec::with_capacity(ids.len() + tokens);
-    let mut inserted = false;
+    if markers != tokens.len() {
+        return Err(EngineError::Other(format!(
+            "prompt has {markers} image placeholders for {} images",
+            tokens.len()
+        )));
+    }
+    let mut expanded = Vec::with_capacity(ids.len() + tokens.iter().sum::<usize>());
+    let mut images = tokens.iter();
     for id in ids {
         if id == image_token {
-            if !inserted {
-                expanded.extend(std::iter::repeat_n(image_token, tokens));
-                inserted = true;
-            }
+            let count = *images
+                .next()
+                .ok_or_else(|| EngineError::Other("image count underflow".into()))?;
+            expanded.extend(std::iter::repeat_n(image_token, count));
         } else {
             expanded.push(id);
         }
@@ -290,13 +310,19 @@ mod tests {
 
     #[test]
     fn marker_expands_to_processor_token_count() {
-        let expanded = expand_image_tokens(vec![1, 99, 99, 2], 99, 5).expect("expand");
+        let expanded = expand_image_tokens(vec![1, 99, 2], 99, &[5]).expect("expand");
         assert_eq!(expanded, vec![1, 99, 99, 99, 99, 99, 2]);
     }
 
     #[test]
+    fn multiple_markers_expand_independently() {
+        let expanded = expand_image_tokens(vec![1, 99, 2, 99, 3], 99, &[5, 2]).expect("expand");
+        assert_eq!(expanded, vec![1, 99, 99, 99, 99, 99, 2, 99, 99, 3]);
+    }
+
+    #[test]
     fn missing_marker_is_rejected() {
-        assert!(expand_image_tokens(vec![1, 2], 99, 5).is_err());
+        assert!(expand_image_tokens(vec![1, 2], 99, &[5]).is_err());
     }
 
     #[test]
@@ -354,6 +380,66 @@ mod tests {
             CoreTensor::new("input_ids", vec![1, ids.len()], TensorData::I64(ids)).expect("ids");
         let image_tensor =
             CoreTensor::new("image", vec![png.len()], TensorData::U8(png)).expect("image");
+        let outputs = session.run(vec![input_ids, image_tensor]).expect("run");
+        assert_eq!(outputs[0].name, "logits");
+        let TensorData::F32(logits) = &outputs[0].data else {
+            panic!("expected logits");
+        };
+        assert!(logits.iter().any(|value| value.is_finite()));
+    }
+
+    #[test]
+    #[ignore = "loads the 4 GiB Qwen3-VL-2B fixture"]
+    fn qwen3_vl_accepts_two_images_and_returns_logits() {
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../models/qwen3-vl-2b");
+        let manifest = ModelManifest::load(&dir.join("manifest.toml")).expect("manifest");
+        let inventory = uniinfer_devices::DeviceInventory::probe();
+        let placement = inventory
+            .plan(&manifest, &[DeviceClass::Cpu])
+            .expect("placement");
+        let engine = crate::CandleEngine::new().expect("engine");
+        let session = engine
+            .load_session(EngineLoadSpec {
+                manifest,
+                base_dir: dir.clone(),
+                manifest_path: Some(dir.join("manifest.toml")),
+                placement,
+                budget: DeviceBudget::default(),
+                cancel: uniinfer_core::CancelToken::new(),
+            })
+            .expect("load");
+        let tokenizer =
+            tokenizers::Tokenizer::from_file(dir.join("tokenizer.json")).expect("tokenizer");
+        let prompt = "<|im_start|>user\n<|vision_start|><|image_pad|><|vision_end|><|vision_start|><|image_pad|><|vision_end|>Compare these images.<|im_end|>\n<|im_start|>assistant\n";
+        let ids = tokenizer
+            .encode(prompt, true)
+            .expect("encode")
+            .get_ids()
+            .iter()
+            .map(|id| i64::from(*id))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            ids.iter().filter(|id| **id == 151655).count(),
+            2,
+            "prompt must contain two image tokens"
+        );
+        let mut images = Vec::new();
+        for color in [[200, 80, 30], [30, 80, 200]] {
+            let mut image = image::RgbImage::new(64, 64);
+            for pixel in image.pixels_mut() {
+                *pixel = image::Rgb(color);
+            }
+            let mut png = Vec::new();
+            image
+                .write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)
+                .expect("png");
+            images.push(png);
+        }
+        let encoded = uniinfer_core::encode_images(&images);
+        let input_ids =
+            CoreTensor::new("input_ids", vec![1, ids.len()], TensorData::I64(ids)).expect("ids");
+        let image_tensor =
+            CoreTensor::new("image", vec![encoded.len()], TensorData::U8(encoded)).expect("image");
         let outputs = session.run(vec![input_ids, image_tensor]).expect("run");
         assert_eq!(outputs[0].name, "logits");
         let TensorData::F32(logits) = &outputs[0].data else {

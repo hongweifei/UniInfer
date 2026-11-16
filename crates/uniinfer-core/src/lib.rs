@@ -4,6 +4,7 @@ pub mod cancel;
 pub mod device;
 pub mod engine;
 pub mod error;
+pub mod image_batch;
 pub mod manifest;
 pub mod tensor;
 
@@ -16,6 +17,7 @@ pub use engine::{
     NativeTextDecoder, NativeTextOutput, NativeTextRequest,
 };
 pub use error::{EngineError, Result};
+pub use image_batch::{decode_images, encode_images};
 pub use manifest::{
     AudioConfig, Capability, CapabilityRequest, ImageConfig, Modality, Mode, ModelFile,
     ModelFormat, ModelManifest, Operation, PipelineConfig, PipelineStep, PlacementConfig,

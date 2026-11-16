@@ -89,6 +89,16 @@ mode = "batch"
 
 `family` 是 adapter 注册名；`implementation` 是引擎执行契约。
 
+### 多图输入
+
+聊天请求中的多个 `image_url` 按出现顺序收集，prompt 中为每张图插入一个 `vision.image_token`。`TextGenerator` 把全部图片编码进单个 `image` U8 tensor：
+
+```text
+UIIM | count: u64 | [length: u64 | bytes]*
+```
+
+ONNX pipeline 解码后批量预处理，shape 为 `[N, 1, 3, H, W]`；`merge` 把 vision 特征按标记顺序展开到对应位置。Qwen3-VL 使用 `[N, 3]` 的 `image_grid_thw` 与逐图 span；llama.cpp mtmd 为每张图创建一个 bitmap。原始未编码 payload 按单图处理，兼容直接调用 engine session 的测试。
+
 ## 5. ONNX
 
 ONNX 提供两种实现：

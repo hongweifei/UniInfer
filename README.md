@@ -18,7 +18,7 @@
 
 UniInfer 当前提供以下能力：
 
-- OpenAI 兼容的文本聊天与单图聊天，覆盖 ONNX、GGUF、Safetensors。
+- OpenAI 兼容的文本聊天与多图聊天，覆盖 ONNX、GGUF、Safetensors。
 - ONNX Whisper / CTC 与 GGML Whisper 批量语音转写。
 - `/v1/images/generations` 的图像生成管线，包含 capability 选择、PNG 编码与 `b64_json` 响应。
 - `/v1/realtime` 的文本与 16 kHz PCM16 音频输入、能量 VAD、ASR → 文本响应闭环。
@@ -180,7 +180,7 @@ curl http://127.0.0.1:8080/v1/chat/completions \
 
 `model` 可省略或设为 `"auto"`。服务端按 `operation + required/optional inputs + outputs + mode` 选择匹配且可放置的模型。
 
-### 单图聊天
+### 多图聊天
 
 ```bash
 curl http://127.0.0.1:8080/v1/chat/completions \
@@ -189,13 +189,14 @@ curl http://127.0.0.1:8080/v1/chat/completions \
     "model": "auto",
     "messages": [{"role": "user", "content": [
       {"type": "image_url", "image_url": {"url": "data:image/png;base64,..."}},
-      {"type": "text", "text": "图中是什么颜色？"}
+      {"type": "text", "text": "比较两张图："},
+      {"type": "image_url", "image_url": {"url": "data:image/png;base64,..."}}
     ]}],
     "max_tokens": 32
   }'
 ```
 
-图像输入支持 base64 `data:` URL、单请求单图、20 MiB 上限。音频与视频 content part 返回稳定的 `400 unsupported_content`。
+图像输入支持 base64 `data:` URL、单请求多图、每图 20 MiB 上限。音频与视频 content part 返回稳定的 `400 unsupported_content`。
 
 ### 语音转写
 
@@ -230,7 +231,7 @@ curl http://127.0.0.1:8080/v1/images/generations \
 
 | 端点 | 方法 | 状态 | 用途 |
 | :--- | :--- | :--- | :--- |
-| `/v1/chat/completions` | POST | 已实现 | 文本 / 单图生成，SSE |
+| `/v1/chat/completions` | POST | 已实现 | 文本 / 多图生成，SSE |
 | `/v1/audio/transcriptions` | POST | 已实现 | Whisper / CTC 转写 |
 | `/v1/audio/speech` | POST | 稳定 501 | 语音合成 |
 | `/v1/images/generations` | POST | 管线已实现 | 文生图，`b64_json` |
@@ -362,6 +363,8 @@ apps/desktop           Tauri 2 桌面端
 ## 路线图
 
 **M6 · ONNX 扩散。** 新增 `onnx.diffusion`：CLIP 文本编码器、UNet、VAE 解码器与 Euler 调度器；首个模型 `sd-turbo-onnx`，512×512、1–4 步、固定 seed、逐步进度与 OOM 预检。SD1.5、SDXL、FLUX ONNX 随后接入。
+
+**当前 · 多图输入。** `/v1/chat/completions` 支持单请求多张图片，ONNX pipeline、Qwen3-VL 与 llama.cpp mtmd 按标记顺序处理。
 
 **M7 · 图像编辑与视频。** `/v1/images/edits` 支持 img2img、inpaint、outpaint；`/v1/videos/generations` 提供异步 job、查询、取消；`candle-video` LTX-Video 2B/13B 与 `plakat` AnimateDiff 输出 MP4。
 

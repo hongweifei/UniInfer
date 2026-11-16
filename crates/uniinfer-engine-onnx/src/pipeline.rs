@@ -12,7 +12,7 @@ use image::imageops::FilterType;
 use ort::environment::Environment;
 use uniinfer_core::{
     DeviceClass, EngineError, EngineLoadSpec, EngineSession, PipelineStep, Result, Tensor,
-    TensorData, TensorDtype, TensorSpec,
+    TensorData, TensorDtype, TensorSpec, decode_images,
 };
 
 use crate::graph::Graph;
@@ -116,7 +116,7 @@ pub(crate) fn load(
             global_id,
             fake_id,
             output,
-            cached_image: None,
+            cached_images: None,
         }),
         inputs,
         outputs,
@@ -144,7 +144,7 @@ struct PipelineState {
     global_id: i64,
     fake_id: i64,
     output: String,
-    cached_image: Option<(Vec<u8>, Preprocessed)>,
+    cached_images: Option<(Vec<Vec<u8>>, Vec<Preprocessed>)>,
 }
 
 struct PipelineSession {
@@ -184,26 +184,44 @@ impl EngineSession for PipelineSession {
             .lock()
             .map_err(|_| EngineError::Other("onnx pipeline state poisoned".into()))?;
         if let Some(image) = image {
-            let pre = state.preprocess(&image)?;
+            let images = decode_images(&image)?;
+            let pre = state.preprocess(&images)?;
+            let batch = pre.len();
+            let height = pre[0].height;
+            let width = pre[0].width;
+            if pre
+                .iter()
+                .any(|image| image.height != height || image.width != width)
+            {
+                return Err(EngineError::Other(
+                    "preprocessed images have different sizes".into(),
+                ));
+            }
             let ids = state.expand_ids(ids)?;
             values.insert(
                 "input_ids".into(),
                 Tensor::new("input_ids", vec![1, ids.len()], TensorData::I64(ids))?,
             );
+            let mut pixels = Vec::with_capacity(batch * 3 * height * width);
+            let mut mask = Vec::with_capacity(batch * height * width);
+            for image in &pre {
+                pixels.extend_from_slice(&image.pixels);
+                mask.extend_from_slice(&image.mask);
+            }
             values.insert(
                 "preprocess.pixel_values".into(),
                 Tensor::new(
                     "preprocess.pixel_values",
-                    vec![1, 1, 3, pre.height, pre.width],
-                    TensorData::F32(pre.pixels),
+                    vec![batch, 1, 3, height, width],
+                    TensorData::F32(pixels),
                 )?,
             );
             values.insert(
                 "preprocess.pixel_attention_mask".into(),
                 Tensor::new(
                     "preprocess.pixel_attention_mask",
-                    vec![1, 1, pre.height, pre.width],
-                    TensorData::Bool(pre.mask),
+                    vec![batch, 1, height, width],
+                    TensorData::Bool(mask),
                 )?,
             );
         }
@@ -300,20 +318,20 @@ impl EngineSession for PipelineSession {
 }
 
 impl PipelineState {
-    fn preprocess(&mut self, image: &[u8]) -> Result<Preprocessed> {
-        if let Some((cached, value)) = &self.cached_image
-            && cached == image
+    fn preprocess(&mut self, images: &[Vec<u8>]) -> Result<Vec<Preprocessed>> {
+        if let Some((cached, value)) = &self.cached_images
+            && cached == images
         {
             return Ok(value.clone());
         }
-        let value = self
-            .preprocessor
-            .as_ref()
-            .ok_or_else(|| {
-                EngineError::ManifestInvalid("pipeline has no image preprocessor".into())
-            })?
-            .preprocess(image)?;
-        self.cached_image = Some((image.to_vec(), value.clone()));
+        let preprocessor = self.preprocessor.as_ref().ok_or_else(|| {
+            EngineError::ManifestInvalid("pipeline has no image preprocessor".into())
+        })?;
+        let value = images
+            .iter()
+            .map(|image| preprocessor.preprocess(image))
+            .collect::<Result<Vec<_>>>()?;
+        self.cached_images = Some((images.to_vec(), value.clone()));
         Ok(value)
     }
 
@@ -358,11 +376,6 @@ fn expand_image_tokens(
     let markers = ids.iter().filter(|id| **id == image_token).count();
     if markers == 0 {
         return Ok(ids);
-    }
-    if markers > 1 {
-        return Err(EngineError::Other(
-            "only one image per prompt is supported".into(),
-        ));
     }
     if image_tokens == 0 {
         return Err(EngineError::ManifestInvalid(
