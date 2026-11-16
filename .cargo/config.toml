@@ -2,3 +2,7 @@
 # whisper-rs-sys otherwise requires libclang for bindgen. Its bundled
 # bindings are sufficient for the versions pinned in Cargo.lock.
 WHISPER_DONT_GENERATE_BINDINGS = "1"
+
+[alias]
+desktop = "run --manifest-path apps/desktop/Cargo.toml"
+desktop-build = "build --manifest-path apps/desktop/Cargo.toml"

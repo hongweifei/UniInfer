@@ -30,28 +30,71 @@ pub(crate) fn manifest_paths() -> Vec<std::path::PathBuf> {
     if let Ok(manifest) = std::env::var("UNIINFER_MANIFEST") {
         return vec![std::path::PathBuf::from(manifest)];
     }
-    let mut paths = std::fs::read_dir("models")
-        .ok()
-        .into_iter()
-        .flatten()
-        .filter_map(Result::ok)
-        .flat_map(|entry| {
-            std::fs::read_dir(entry.path())
-                .ok()
-                .into_iter()
-                .flatten()
-                .filter_map(Result::ok)
-                .map(|file| file.path())
-        })
-        .filter(|path| {
-            path.file_name()
-                .and_then(|name| name.to_str())
-                .is_some_and(|name| name.starts_with("manifest") && name.ends_with(".toml"))
-        })
-        .collect::<Vec<_>>();
-    paths.sort();
+    let paths = discover_manifests();
     if paths.is_empty() {
-        paths.push("models/tiny-onnx/manifest.toml".into());
+        vec!["models/tiny-onnx/manifest.toml".into()]
+    } else {
+        paths
+    }
+}
+
+fn project_root() -> Option<std::path::PathBuf> {
+    roots()
+        .into_iter()
+        .find(|root| root.join("models").is_dir())
+}
+
+fn roots() -> Vec<std::path::PathBuf> {
+    let mut roots = Vec::new();
+    if let Ok(cwd) = std::env::current_dir() {
+        roots.push(cwd);
+    }
+    if let Ok(exe) = std::env::current_exe()
+        && let Some(dir) = exe.parent()
+    {
+        let mut current = Some(dir);
+        for _ in 0..6 {
+            let Some(path) = current else { break };
+            roots.push(path.to_path_buf());
+            current = path.parent();
+        }
+    }
+    roots.push(std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../.."));
+    roots.dedup();
+    roots
+}
+
+fn discover_manifests() -> Vec<std::path::PathBuf> {
+    let mut paths = Vec::new();
+    for root in roots() {
+        let models = root.join("models");
+        if !models.is_dir() {
+            continue;
+        }
+        let mut found = std::fs::read_dir(&models)
+            .ok()
+            .into_iter()
+            .flatten()
+            .filter_map(Result::ok)
+            .flat_map(|entry| {
+                std::fs::read_dir(entry.path())
+                    .ok()
+                    .into_iter()
+                    .flatten()
+                    .filter_map(Result::ok)
+                    .map(|file| file.path())
+            })
+            .filter(|path| {
+                path.file_name()
+                    .and_then(|name| name.to_str())
+                    .is_some_and(|name| name.starts_with("manifest") && name.ends_with(".toml"))
+            })
+            .collect::<Vec<_>>();
+        if !found.is_empty() {
+            found.sort();
+            paths.extend(found);
+            break;
+        }
     }
     paths
 }
@@ -80,18 +123,31 @@ pub(crate) fn start() -> ApiStartup {
 }
 
 fn start_inner() -> Result<(ApiInfo, Arc<tokio::runtime::Runtime>), Box<dyn std::error::Error>> {
-    let config_path = std::env::var_os("UNIINFER_CONFIG").map(std::path::PathBuf::from);
-    let handle = if let Some(path) = config_path {
-        ConfigHandle::load(path)?
-    } else {
-        let config = UniInferConfig {
-            models: manifest_paths()
-                .into_iter()
-                .map(ModelEntry::new)
-                .collect::<Vec<_>>(),
-            ..Default::default()
-        };
-        ConfigHandle::new(config, Some(std::path::PathBuf::from("uniinfer.toml")))
+    let config_path = std::env::var_os("UNIINFER_CONFIG")
+        .map(std::path::PathBuf::from)
+        .or_else(|| project_root().map(|root| root.join("uniinfer.toml")));
+    let handle = match config_path {
+        Some(path) if path.is_file() => ConfigHandle::load(path)?,
+        Some(path) => {
+            let config = UniInferConfig {
+                models: manifest_paths()
+                    .into_iter()
+                    .map(ModelEntry::new)
+                    .collect::<Vec<_>>(),
+                ..Default::default()
+            };
+            ConfigHandle::new(config, Some(path))
+        }
+        None => {
+            let config = UniInferConfig {
+                models: manifest_paths()
+                    .into_iter()
+                    .map(ModelEntry::new)
+                    .collect::<Vec<_>>(),
+                ..Default::default()
+            };
+            ConfigHandle::new(config, Some(std::path::PathBuf::from("uniinfer.toml")))
+        }
     };
     let token = handle.snapshot()?.server.token.unwrap_or_else(random_token);
     let config = uniinfer_api::ApiConfig::from_config(Arc::new(handle))?.with_token(token.clone());

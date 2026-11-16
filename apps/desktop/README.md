@@ -15,8 +15,10 @@
 在仓库根目录运行：
 
 ```bash
-cargo run --manifest-path apps/desktop/Cargo.toml
+cargo desktop
 ```
+
+Windows 也可以双击仓库根目录的 `desktop.cmd`，或直接运行构建后的 exe。模型发现会依次检查当前目录、exe 所在目录及其父目录，因此从资源管理器启动也能找到仓库的 `models/`。
 
 默认扫描 `models/*/manifest*.toml`。也可用环境变量覆盖：
 

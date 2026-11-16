@@ -150,6 +150,14 @@ models/fetch-smolvlm2-256m.sh
 models/fetch-smolvlm2-256m-onnx.sh
 ```
 
+### 启动桌面端
+
+```bash
+cargo desktop
+```
+
+Windows 也可以双击仓库根目录的 `desktop.cmd`。
+
 ### 启动服务
 
 ```bash
