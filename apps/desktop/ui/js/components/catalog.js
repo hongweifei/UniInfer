@@ -1,8 +1,9 @@
 import { h, clear } from '../dom.js';
 import { icon } from '../icons.js';
-import { toast, openModal, chip } from './ui.js';
-import { formatBytes, formatName } from '../format.js';
-import { onlineCategories, onlineTags, MODEL_CATEGORIES } from '../model-meta.js';
+import { toast } from './ui.js';
+import { openVariantDialog } from './variant-dialog.js';
+import { MODEL_CATEGORIES } from '../model-meta.js';
+import { clampPage, filterOnlineItems, onlineFacets } from '../catalog-utils.js';
 
 const invoke = (command, args) => window.__TAURI__?.core?.invoke(command, args);
 
@@ -47,23 +48,8 @@ export function mountCatalog(root, ctx) {
     return source.value === 'modelscope' ? 'ModelScope' : 'Hugging Face';
   }
 
-  function filteredItems(items) {
-    return items.filter((entry) => {
-      if (categoryFilter !== 'all' && !onlineCategories(entry).includes(categoryFilter)) return false;
-      if (tagFilter !== 'all' && !onlineTags(entry).includes(tagFilter)) return false;
-      return true;
-    });
-  }
-
   function renderFilters(items) {
-    const categoryCounts = new Map();
-    const tags = new Set();
-    for (const entry of items) {
-      for (const category of onlineCategories(entry)) {
-        categoryCounts.set(category, (categoryCounts.get(category) ?? 0) + 1);
-      }
-      for (const tag of onlineTags(entry)) tags.add(tag);
-    }
+    const { categories: categoryCounts, tags } = onlineFacets(items);
     if (categoryFilter !== 'all' && !categoryCounts.has(categoryFilter)) categoryFilter = 'all';
     if (tagFilter !== 'all' && !tags.has(tagFilter)) tagFilter = 'all';
 
@@ -94,7 +80,7 @@ export function mountCatalog(root, ctx) {
 
     clear(tagBar);
     tagBar.append(h('span', { class: 'faint', text: '标签' }));
-    const sortedTags = [...tags].sort((a, b) => a.localeCompare(b, 'zh-CN'));
+    const sortedTags = tags;
     tagBar.append(h('button', {
       class: `btn sm ${tagFilter === 'all' ? '' : 'ghost'}`,
       type: 'button', text: '全部',
@@ -112,7 +98,7 @@ export function mountCatalog(root, ctx) {
   function renderPage(page, items) {
     currentItems = items;
     renderFilters(items);
-    const visible = filteredItems(items);
+    const visible = filterOnlineItems(items, { category: categoryFilter, tag: tagFilter });
     clear(results);
     if (!items.length) {
       results.append(h('div', { class: 'notice', text: page === 1 ? '没有找到模型。换一个关键词或切换模型源。' : '这一页没有更多结果。' }));
@@ -170,7 +156,7 @@ export function mountCatalog(root, ctx) {
         pageInput.value = String(page);
         return;
       }
-      if (totalPages) target = Math.min(target, totalPages);
+      target = clampPage(target, totalResults, PAGE_SIZE) ?? page;
       if (target !== page) void search(target);
     };
     pager.replaceChildren(
@@ -256,60 +242,7 @@ export function mountCatalog(root, ctx) {
       void install(entry, button, variants[0].key);
       return;
     }
-    openVariantDialog(entry, plan, button);
-  }
-
-  function openVariantDialog(entry, plan, button) {
-    let selectedKey = plan.default_variant ?? plan.variants[0]?.key;
-    const body = h('div', { class: 'variant-list' },
-      h('p', { class: 'faint', text: '同一仓库包含多个格式或量化文件。选择要下载的变体；推荐项已预选。' }),
-      ...plan.variants.map((variant) => {
-        const input = h('input', {
-          type: 'radio',
-          name: `variant-${entry.id}`,
-          value: variant.key,
-          checked: variant.key === selectedKey,
-          onChange: () => {
-            selectedKey = variant.key;
-            for (const node of body.querySelectorAll('.variant-option')) {
-              node.classList.toggle('selected', node.contains(input));
-            }
-          },
-        });
-        return h('label', {
-          class: `variant-option ${variant.key === selectedKey ? 'selected' : ''}`,
-        },
-        input,
-        h('div', { class: 'variant-option-main' },
-          h('div', { class: 'row', style: 'gap:6px;flex-wrap:wrap' },
-            h('strong', { text: variant.label }),
-            variant.recommended ? chip('推荐', 'success') : null,
-            chip(formatName(variant.format)),
-            variant.quantization && variant.quantization !== 'unknown' ? chip(variant.quantization) : null,
-          ),
-          h('div', { class: 'faint', text: `${variant.files} 个文件 · ${formatBytes(variant.total)}` }),
-          variant.source ? h('div', { class: 'variant-source mono faint', text: variant.source }) : null,
-        ));
-      }),
-    );
-    let dialog;
-    dialog = openModal({
-      title: `选择下载变体 · ${entry.id}`,
-      body,
-      actions: [
-        { label: '取消', kind: 'ghost' },
-        {
-          label: '开始下载', kind: 'primary',
-          onClick: () => {
-            dialog.close();
-            button.disabled = false;
-            button.textContent = '下载';
-            void install(entry, button, selectedKey);
-            return false;
-          },
-        },
-      ],
-    });
+    openVariantDialog({ entry, plan, onInstall: (key) => { button.disabled = false; button.textContent = '下载'; void install(entry, button, key); } });
   }
 
   async function install(entry, button, variant) {
@@ -324,8 +257,9 @@ export function mountCatalog(root, ctx) {
     try {
       const result = await invoke('install_model', { repo: entry.id, source: source.value, variant });
       await ctx.api.request('/v1/models/refresh', { method: 'POST' }).catch(() => {});
-      await ctx.refreshModels();
+      await ctx.refreshModels({ silent: true });
       progress.set(entry.id, { status: 'done', variant });
+      updateProgress(entry.id, progress.get(entry.id), button, bar, text);
       status.textContent = `已安装 ${result.id}`;
       toast(`${entry.id} 下载完成并已加入模型库`, 'success');
     } catch (error) {

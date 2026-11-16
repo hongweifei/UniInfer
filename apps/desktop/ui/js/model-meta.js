@@ -61,3 +61,10 @@ export function onlineCategories(entry) {
 export function onlineTags(entry) {
   return uniqueTags([entry?.task, ...(entry?.tags ?? [])].filter(Boolean));
 }
+
+export function unsupportedUseReason(model) {
+  const outputs = model?.outputs ?? [];
+  if (outputs.includes('video')) return '视频生成后端尚未接入';
+  if (outputs.includes('audio') && !outputs.includes('text')) return '本地语音合成后端尚未接入';
+  return null;
+}

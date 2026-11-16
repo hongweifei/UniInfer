@@ -1,7 +1,8 @@
 import { h, clear } from '../dom.js';
 import { icon } from '../icons.js';
 import { formatBytes, isAudioModel, isImageModel, errorMessage, friendlyRouteError, capabilitySummary } from '../format.js';
-import { modelCategories, modelTags, MODEL_CATEGORIES } from '../model-meta.js';
+import { modelCategories, modelTags, MODEL_CATEGORIES, unsupportedUseReason } from '../model-meta.js';
+import { filterModels, modelTagOptions } from '../model-filters.js';
 import { toast, emptyState, chip, setBusy, openModal, confirmDialog } from '../components/ui.js';
 import { mountCatalog } from '../components/catalog.js';
 
@@ -82,7 +83,7 @@ export function mountModels(root, ctx) {
   }
 
   function renderTagSelect() {
-    const tags = [...new Set(ctx.models().flatMap((model) => modelTags(model)))].sort((a, b) => a.localeCompare(b, 'zh-CN'));
+    const tags = modelTagOptions(ctx.models());
     if (tagFilter !== 'all' && !tags.includes(tagFilter)) tagFilter = 'all';
     clear(tagSelect);
     tagSelect.append(h('option', { value: 'all', text: '全部标签' }));
@@ -94,9 +95,10 @@ export function mountModels(root, ctx) {
     const loaded = Boolean(model.loaded);
     const routeError = model.route_error;
     const imageOnly = (model.outputs ?? []).includes('image') && !(model.outputs ?? []).includes('text');
+    const unsupported = unsupportedUseReason(model);
     const useButton = h('button', {
-      class: 'btn sm primary', type: 'button', disabled: Boolean(routeError),
-      title: routeError ? friendlyRouteError(routeError.message) : '使用此模型',
+      class: 'btn sm primary', type: 'button', disabled: Boolean(routeError) || Boolean(unsupported),
+      title: routeError ? friendlyRouteError(routeError.message) : unsupported ?? '使用此模型',
       onClick: () => {
         ctx.setModel(model.id);
         if (isImageModel(model)) ctx.navigate('images');
@@ -186,16 +188,8 @@ export function mountModels(root, ctx) {
   }
 
   function renderList() {
-    const models = ctx.models().filter((model) => {
-      if (filter !== 'all' && !modelCategories(model).includes(filter)) return false;
-      if (tagFilter !== 'all' && !modelTags(model).includes(tagFilter)) return false;
-      if (formatFilter !== 'all' && model.format !== formatFilter) return false;
-      if (loadFilter === 'loaded' && !model.loaded) return false;
-      if (loadFilter === 'idle' && model.loaded) return false;
-      if (loadFilter === 'error' && !model.route_error) return false;
-      if (!query) return true;
-      const text = [model.id, model.format, model.quantization, model.runtime, model.implementation, ...(model.inputs ?? []), ...(model.outputs ?? []), ...modelTags(model)].join(' ').toLowerCase();
-      return text.includes(query);
+    const models = filterModels(ctx.models(), {
+      category: filter, tag: tagFilter, format: formatFilter, load: loadFilter, query,
     });
     count.textContent = `${models.length} / ${ctx.models().length}`;
     clear(list);
