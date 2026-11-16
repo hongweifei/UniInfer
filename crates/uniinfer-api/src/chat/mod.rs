@@ -50,6 +50,9 @@ pub(crate) struct ChatRequest {
     tools: Option<Vec<serde_json::Value>>,
     #[serde(default)]
     tool_choice: Option<serde_json::Value>,
+    /// Control the reasoning section when the tokenizer chat template supports it.
+    #[serde(default)]
+    enable_thinking: Option<bool>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -100,6 +103,7 @@ pub(super) struct Generation {
     pub(super) sampling: Sampling,
     pub(super) include_usage: bool,
     pub(super) parse_tool_calls: bool,
+    pub(super) implicit_reasoning: bool,
     pub(super) started: std::time::Instant,
     pub(super) deadline: Option<std::time::Instant>,
     pub(super) cancel: CancelToken,
@@ -213,8 +217,15 @@ pub(crate) async fn chat(
             ));
         }
     }
+    let implicit_reasoning =
+        slot.supports_thinking() && request.enable_thinking.unwrap_or(true) && tools.is_empty();
     let prompt = slot
-        .render_chat_with_tools(&messages, &tools, tool_choice.as_ref())
+        .render_chat_with_options(
+            &messages,
+            &tools,
+            tool_choice.as_ref(),
+            request.enable_thinking,
+        )
         .map_err(ApiError::from)?;
     let stop = request.stop.map(StopInput::into_vec).unwrap_or_default();
     let sampling_requested = request.temperature.is_some()
@@ -268,6 +279,7 @@ pub(crate) async fn chat(
             .stream_options
             .is_some_and(|options| options.include_usage),
         parse_tool_calls: !tools.is_empty(),
+        implicit_reasoning,
         started,
         deadline,
         cancel,

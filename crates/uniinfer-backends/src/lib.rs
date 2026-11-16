@@ -3,6 +3,7 @@
 pub mod audio;
 pub mod chat_template;
 pub mod output;
+pub mod reasoning;
 pub mod sampling;
 pub mod stop;
 pub mod text;
@@ -12,6 +13,7 @@ pub mod utf8;
 
 pub use chat_template::{ChatMessage, ChatTemplate, fallback_prompt};
 pub use output::{AudioOutput, ImageOutput, ModelEvent, ModelOutput, VideoOutput};
+pub use reasoning::{ReasoningEvent, ReasoningSplitter};
 pub use sampling::Sampling;
 pub use text::{FinishReason, GenerationOutput, GenerationSpec, TextGenerator};
 pub use tokenizer::{ByteTokenizer, HuggingFaceTokenizer, Tokenizer};

@@ -9,7 +9,9 @@ use std::time::Duration;
 use tokio::sync::mpsc;
 use uniinfer_backends::stop::StopMatcher;
 use uniinfer_backends::utf8::Utf8Decoder;
-use uniinfer_backends::{FinishReason, GenerationSpec, ToolStream, ToolStreamEvent};
+use uniinfer_backends::{
+    FinishReason, GenerationSpec, ReasoningEvent, ReasoningSplitter, ToolStream, ToolStreamEvent,
+};
 use uniinfer_core::EngineError;
 
 use crate::error::ApiError;
@@ -17,10 +19,32 @@ use crate::sse::{self, StreamEvent};
 
 use super::{Generation, unix_seconds};
 
-fn send_text(tx: &mpsc::Sender<StreamEvent>, decoder: &mut Utf8Decoder, bytes: &[u8]) -> bool {
+fn send_split(
+    tx: &mpsc::Sender<StreamEvent>,
+    splitter: &mut ReasoningSplitter,
+    text: &str,
+) -> bool {
+    for event in splitter.push(text) {
+        let event = match event {
+            ReasoningEvent::Reasoning(text) => StreamEvent::Reasoning(text),
+            ReasoningEvent::Content(text) => StreamEvent::Delta(text),
+        };
+        if tx.blocking_send(event).is_err() {
+            return false;
+        }
+    }
+    true
+}
+
+fn send_text(
+    tx: &mpsc::Sender<StreamEvent>,
+    decoder: &mut Utf8Decoder,
+    splitter: &mut ReasoningSplitter,
+    bytes: &[u8],
+) -> bool {
     for &byte in bytes {
         if let Some(text) = decoder.push(byte)
-            && tx.blocking_send(StreamEvent::Delta(text)).is_err()
+            && !send_split(tx, splitter, &text)
         {
             return false;
         }
@@ -31,18 +55,24 @@ fn send_text(tx: &mpsc::Sender<StreamEvent>, decoder: &mut Utf8Decoder, bytes: &
 fn send_tool_text(
     tx: &mpsc::Sender<StreamEvent>,
     decoder: &mut Utf8Decoder,
+    splitter: &mut ReasoningSplitter,
     stream: &mut ToolStream,
     bytes: &[u8],
 ) -> bool {
     for &byte in bytes {
         if let Some(text) = decoder.push(byte) {
             for event in stream.push(&text) {
-                let event = match event {
-                    ToolStreamEvent::Text(text) => StreamEvent::Delta(text),
-                    ToolStreamEvent::Calls(calls) => StreamEvent::ToolCalls(calls),
-                };
-                if tx.blocking_send(event).is_err() {
-                    return false;
+                match event {
+                    ToolStreamEvent::Text(text) => {
+                        if !send_split(tx, splitter, &text) {
+                            return false;
+                        }
+                    }
+                    ToolStreamEvent::Calls(calls) => {
+                        if tx.blocking_send(StreamEvent::ToolCalls(calls)).is_err() {
+                            return false;
+                        }
+                    }
                 }
             }
         }
@@ -64,6 +94,7 @@ pub(super) async fn stream_response(generation: Generation) -> Result<Response, 
         prompt_tokens,
         include_usage,
         parse_tool_calls: tool_calls_enabled,
+        implicit_reasoning,
         started,
         deadline,
         cancel,
@@ -83,6 +114,7 @@ pub(super) async fn stream_response(generation: Generation) -> Result<Response, 
         let _active = task_state.router.active_guard();
         let mut matcher = StopMatcher::new(stop);
         let mut decoder = Utf8Decoder::new();
+        let mut reasoning = ReasoningSplitter::new(implicit_reasoning);
         let mut tool_stream = tool_calls_enabled.then(|| ToolStream::new(task_session.clone()));
         let mut open = true;
         let mut measured_ttft = false;
@@ -105,8 +137,10 @@ pub(super) async fn stream_response(generation: Generation) -> Result<Response, 
                 matcher.push(chunk, &mut |safe| {
                     if open {
                         open = match tool_stream.as_mut() {
-                            Some(stream) => send_tool_text(&tx, &mut decoder, stream, safe),
-                            None => send_text(&tx, &mut decoder, safe),
+                            Some(stream) => {
+                                send_tool_text(&tx, &mut decoder, &mut reasoning, stream, safe)
+                            }
+                            None => send_text(&tx, &mut decoder, &mut reasoning, safe),
                         };
                         if !open {
                             cancel.cancel();
@@ -119,8 +153,8 @@ pub(super) async fn stream_response(generation: Generation) -> Result<Response, 
         matcher.finish(&mut |safe| {
             if open {
                 open = match tool_stream.as_mut() {
-                    Some(stream) => send_tool_text(&tx, &mut decoder, stream, safe),
-                    None => send_text(&tx, &mut decoder, safe),
+                    Some(stream) => send_tool_text(&tx, &mut decoder, &mut reasoning, stream, safe),
+                    None => send_text(&tx, &mut decoder, &mut reasoning, safe),
                 };
                 if !open {
                     cancel.cancel();
@@ -131,17 +165,23 @@ pub(super) async fn stream_response(generation: Generation) -> Result<Response, 
         if open && !tail.is_empty() {
             if let Some(stream) = tool_stream.as_mut() {
                 for event in stream.push(&tail) {
-                    let event = match event {
-                        ToolStreamEvent::Text(text) => StreamEvent::Delta(text),
-                        ToolStreamEvent::Calls(calls) => StreamEvent::ToolCalls(calls),
-                    };
-                    if tx.blocking_send(event).is_err() {
-                        cancel.cancel();
-                        break;
+                    match event {
+                        ToolStreamEvent::Text(text) => {
+                            if !send_split(&tx, &mut reasoning, &text) {
+                                cancel.cancel();
+                                break;
+                            }
+                        }
+                        ToolStreamEvent::Calls(calls) => {
+                            if tx.blocking_send(StreamEvent::ToolCalls(calls)).is_err() {
+                                cancel.cancel();
+                                break;
+                            }
+                        }
                     }
                 }
-            } else {
-                let _ = tx.blocking_send(StreamEvent::Delta(tail));
+            } else if !send_split(&tx, &mut reasoning, &tail) {
+                cancel.cancel();
             }
         }
         let (mut finish, completion_tokens) = match result {
@@ -163,20 +203,35 @@ pub(super) async fn stream_response(generation: Generation) -> Result<Response, 
         if open && let Some(stream) = tool_stream {
             let mut emitted_calls = false;
             for event in stream.finish() {
-                let event = match event {
-                    ToolStreamEvent::Text(text) => StreamEvent::Delta(text),
+                match event {
+                    ToolStreamEvent::Text(text) => {
+                        if !send_split(&tx, &mut reasoning, &text) {
+                            cancel.cancel();
+                            break;
+                        }
+                    }
                     ToolStreamEvent::Calls(calls) => {
                         emitted_calls = true;
-                        StreamEvent::ToolCalls(calls)
+                        if tx.blocking_send(StreamEvent::ToolCalls(calls)).is_err() {
+                            cancel.cancel();
+                            break;
+                        }
                     }
-                };
-                if tx.blocking_send(event).is_err() {
-                    cancel.cancel();
-                    break;
                 }
             }
             if emitted_calls {
                 finish = "tool_calls";
+            }
+        }
+        if open {
+            for event in reasoning.finish() {
+                let event = match event {
+                    ReasoningEvent::Reasoning(text) => StreamEvent::Reasoning(text),
+                    ReasoningEvent::Content(text) => StreamEvent::Delta(text),
+                };
+                if tx.blocking_send(event).is_err() {
+                    break;
+                }
             }
         }
         task_state

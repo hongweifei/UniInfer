@@ -213,6 +213,8 @@ curl http://127.0.0.1:11435/v1/chat/completions \
 
 `model` 可省略或设为 `"auto"`。服务端按 `operation + required/optional inputs + outputs + mode` 选择匹配且可放置的模型。
 
+`enable_thinking`（可选，默认由模型模板决定；桌面端默认开启）控制支持思考的聊天模板。思考内容通过非流式 `message.reasoning_content` 和流式 `delta.reasoning_content` 返回，`content` 只包含最终回答。服务端兼容 `<think>`、` thinking`、`<|channel>thought` 等常见标记，并支持标记跨流式分片。
+
 ### 多图聊天
 
 ```bash

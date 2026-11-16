@@ -355,10 +355,30 @@ impl ModelSlot {
         tools: &[serde_json::Value],
         tool_choice: Option<&serde_json::Value>,
     ) -> Result<String> {
+        self.render_chat_with_options(messages, tools, tool_choice, None)
+    }
+
+    /// Render chat with an optional thinking-template flag.
+    pub fn render_chat_with_options(
+        &self,
+        messages: &[ChatMessage],
+        tools: &[serde_json::Value],
+        tool_choice: Option<&serde_json::Value>,
+        enable_thinking: Option<bool>,
+    ) -> Result<String> {
         match &self.chat_template {
-            Some(template) => template.render_with_tools(messages, tools, tool_choice),
+            Some(template) => {
+                template.render_with_options(messages, tools, tool_choice, enable_thinking)
+            }
             None => fallback_prompt(messages),
         }
+    }
+
+    #[must_use]
+    pub fn supports_thinking(&self) -> bool {
+        self.chat_template
+            .as_ref()
+            .is_some_and(ChatTemplate::supports_thinking)
     }
 
     /// Whether the engine decodes tokens internally.

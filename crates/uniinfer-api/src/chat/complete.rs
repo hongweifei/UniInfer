@@ -3,7 +3,7 @@
 use axum::Json;
 use axum::response::{IntoResponse, Response};
 use uniinfer_backends::stop::StopMatcher;
-use uniinfer_backends::{FinishReason, GenerationSpec, parse_tool_calls};
+use uniinfer_backends::{FinishReason, GenerationSpec, ReasoningSplitter, parse_tool_calls};
 
 use crate::error::ApiError;
 
@@ -23,6 +23,7 @@ pub(super) async fn complete_response(generation: Generation) -> Result<Response
         sampling,
         include_usage: _,
         parse_tool_calls: tool_calls_enabled,
+        implicit_reasoning,
         started,
         deadline,
         cancel,
@@ -87,33 +88,34 @@ pub(super) async fn complete_response(generation: Generation) -> Result<Response
         .router
         .record_completion(&metric_model, completion_tokens);
 
-    let content = String::from_utf8_lossy(&bytes).into_owned();
-    let (content_value, tool_calls, reason) = if tool_calls_enabled {
-        let parsed = parse_tool_calls(&content, &session_id);
+    let generated = String::from_utf8_lossy(&bytes).into_owned();
+    let (raw_content, tool_calls, reason) = if tool_calls_enabled {
+        let parsed = parse_tool_calls(&generated, &session_id);
         let reason = if parsed.calls.is_empty() {
             finish_reason(finish)
         } else {
             "tool_calls"
         };
-        (
-            parsed
-                .content
-                .map(serde_json::Value::String)
-                .unwrap_or(serde_json::Value::Null),
-            parsed.calls,
-            reason,
-        )
+        (parsed.content, parsed.calls, reason)
     } else {
-        (
-            serde_json::Value::String(content),
-            Vec::new(),
-            finish_reason(finish),
-        )
+        (Some(generated), Vec::new(), finish_reason(finish))
+    };
+    let (reasoning, content) = ReasoningSplitter::split(
+        raw_content.as_deref().unwrap_or_default(),
+        implicit_reasoning,
+    );
+    let content_value = if tool_calls_enabled && content.is_empty() {
+        serde_json::Value::Null
+    } else {
+        serde_json::Value::String(content)
     };
     let mut message = serde_json::json!({
         "role": "assistant",
         "content": content_value,
     });
+    if !reasoning.is_empty() {
+        message["reasoning_content"] = serde_json::Value::String(reasoning);
+    }
     if !tool_calls.is_empty() {
         message["tool_calls"] = serde_json::json!(tool_calls);
     }

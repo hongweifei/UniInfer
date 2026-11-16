@@ -23,6 +23,7 @@ pub struct ChatMessage {
 /// Compiled chat template loaded from `tokenizer_config.json`.
 pub struct ChatTemplate {
     environment: Environment<'static>,
+    supports_thinking: bool,
 }
 
 impl ChatTemplate {
@@ -43,6 +44,8 @@ impl ChatTemplate {
         else {
             return Ok(None);
         };
+        let supports_thinking = template.to_ascii_lowercase().contains("thinking")
+            || template.to_ascii_lowercase().contains("think>");
         let mut environment = Environment::new();
         environment
             .set_unknown_method_callback(minijinja_contrib::pycompat::unknown_method_callback);
@@ -54,7 +57,10 @@ impl ChatTemplate {
                     path.display()
                 ))
             })?;
-        Ok(Some(Self { environment }))
+        Ok(Some(Self {
+            environment,
+            supports_thinking,
+        }))
     }
 
     /// Render messages with `add_generation_prompt = true`.
@@ -69,10 +75,22 @@ impl ChatTemplate {
         tools: &[serde_json::Value],
         tool_choice: Option<&serde_json::Value>,
     ) -> Result<String> {
+        self.render_with_options(messages, tools, tool_choice, None)
+    }
+
+    /// Render with an optional `enable_thinking` template flag.
+    pub fn render_with_options(
+        &self,
+        messages: &[ChatMessage],
+        tools: &[serde_json::Value],
+        tool_choice: Option<&serde_json::Value>,
+        enable_thinking: Option<bool>,
+    ) -> Result<String> {
         let template = self
             .environment
             .get_template("chat")
             .map_err(|error| EngineError::Other(format!("chat template: {error}")))?;
+        let thinking = enable_thinking.map(Value::from).unwrap_or(Value::UNDEFINED);
         template
             .render(context! {
                 messages => Value::from(Serde(messages)),
@@ -81,8 +99,15 @@ impl ChatTemplate {
                 tool_choice => tool_choice
                     .map(|value| Value::from(Serde(value)))
                     .unwrap_or(Value::from(())),
+                enable_thinking => thinking.clone(),
+                thinking => thinking,
             })
             .map_err(|error| EngineError::Other(format!("render chat template: {error}")))
+    }
+
+    #[must_use]
+    pub fn supports_thinking(&self) -> bool {
+        self.supports_thinking
     }
 }
 
@@ -156,5 +181,37 @@ mod tests {
         ])
         .expect("prompt");
         assert_eq!(prompt, "second");
+    }
+    #[test]
+    fn passes_enable_thinking_to_template() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("tokenizer_config.json");
+        std::fs::write(
+            &path,
+            r#"{"chat_template":"{% if enable_thinking is defined and enable_thinking %}think{% else %}plain{% endif %}"}"#,
+        )
+        .expect("config");
+        let template = ChatTemplate::from_tokenizer_config(&path)
+            .expect("load")
+            .expect("template");
+        assert!(template.supports_thinking());
+        assert_eq!(
+            template
+                .render_with_options(&[], &[], None, None)
+                .expect("none"),
+            "plain"
+        );
+        assert_eq!(
+            template
+                .render_with_options(&[], &[], None, Some(true))
+                .expect("enabled"),
+            "think"
+        );
+        assert_eq!(
+            template
+                .render_with_options(&[], &[], None, Some(false))
+                .expect("disabled"),
+            "plain"
+        );
     }
 }

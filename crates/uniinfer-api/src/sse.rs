@@ -12,6 +12,7 @@ use crate::error::ApiError;
 
 pub(crate) enum StreamEvent {
     Delta(String),
+    Reasoning(String),
     ToolCalls(Vec<ToolCall>),
     Finish(&'static str),
     Usage {
@@ -33,6 +34,9 @@ pub(crate) fn stream(
         Ok(match event {
             StreamEvent::Delta(text) => {
                 Event::default().data(chunk_json(&id, &model, created, &text))
+            }
+            StreamEvent::Reasoning(text) => {
+                Event::default().data(reasoning_json(&id, &model, created, &text))
             }
             StreamEvent::ToolCalls(calls) => {
                 Event::default().data(tool_calls_json(&id, &model, created, &calls))
@@ -88,6 +92,21 @@ fn tool_calls_json(id: &str, model: &str, created: u64, calls: &[ToolCall]) -> S
     .to_string()
 }
 
+fn reasoning_json(id: &str, model: &str, created: u64, text: &str) -> String {
+    json!({
+        "id": id,
+        "object": "chat.completion.chunk",
+        "created": created,
+        "model": model,
+        "choices": [{
+            "index": 0,
+            "delta": {"reasoning_content": text},
+            "finish_reason": null
+        }]
+    })
+    .to_string()
+}
+
 fn chunk_json(id: &str, model: &str, created: u64, text: &str) -> String {
     json!({
         "id": id,
@@ -123,4 +142,16 @@ fn usage_json(
         }
     })
     .to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn reasoning_chunk_uses_reasoning_content() {
+        let frame = reasoning_json("chatcmpl-1", "model", 1, "step");
+        let value: serde_json::Value = serde_json::from_str(&frame).expect("json");
+        assert_eq!(value["choices"][0]["delta"]["reasoning_content"], "step");
+    }
 }
