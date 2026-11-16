@@ -124,21 +124,40 @@ export function mountModels(root, ctx) {
         }
       },
     }, h('span', { html: icon('download', 13) }), h('span', { text: loaded ? '已加载' : '预加载' }));
-    const unloadButton = h('button', {
-      class: 'btn sm ghost', type: 'button', disabled: !loaded,
+    function closeMenu() {
+      moreMenu?.removeAttribute('open');
+    }
+    const configItem = h('button', {
+      class: 'model-menu-item', type: 'button',
+      onClick: () => { closeMenu(); void openConfig(model); },
+    }, h('span', { html: icon('settings', 14) }), h('span', { text: '运行配置' }));
+    const unloadItem = loaded ? h('button', {
+      class: 'model-menu-item', type: 'button',
       onClick: async () => {
-        setBusy(unloadButton, true, '卸载中…');
+        closeMenu();
         try {
           await ctx.api.unloadModel(model.id);
           toast(`${model.id} 已卸载`, 'success');
           await ctx.refreshModels();
         } catch (error) {
           toast(errorMessage(error), 'error');
-        } finally {
-          setBusy(unloadButton, false);
         }
       },
-    }, h('span', { text: '卸载' }));
+    }, h('span', { html: icon('x', 14) }), h('span', { text: '卸载' })) : null;
+    const deleteItem = h('button', {
+      class: 'model-menu-item danger', type: 'button',
+      onClick: () => { closeMenu(); void removeModel(model); },
+    }, h('span', { html: icon('trash', 14) }), h('span', { text: '删除' }));
+    let moreMenu;
+    moreMenu = h('details', { class: 'model-more' },
+      h('summary', {
+        class: 'btn sm btn-icon ghost', title: '更多操作', attrs: { 'aria-label': '更多操作' },
+      }, h('span', { html: icon('more', 16) })),
+      h('div', { class: 'model-actions-menu' }, configItem, unloadItem, deleteItem),
+    );
+    const actions = [useButton];
+    if (!loaded && !imageOnly && !routeError) actions.push(loadButton);
+    actions.push(h('span', { class: 'spacer' }), moreMenu);
 
     const stateChip = routeError
       ? chip('不可用', 'warn')
@@ -161,11 +180,7 @@ export function mountModels(root, ctx) {
         h('strong', { text: '设备' }), h('span', { text: (model.devices ?? []).join(' / ') || '待放置' }),
       ),
       routeError ? h('div', { class: 'notice warn', text: friendlyRouteError(routeError.message) }) : null,
-      h('div', { class: 'model-card-actions' }, useButton, loadButton, h('button', {
-        class: 'btn sm ghost', type: 'button', onClick: () => void openConfig(model),
-      }, h('span', { html: icon('settings', 13) }), h('span', { text: '配置' })), unloadButton, h('button', {
-        class: 'btn sm danger', type: 'button', onClick: () => void removeModel(model),
-      }, h('span', { html: icon('trash', 13) }), h('span', { text: '删除' }))),
+      h('div', { class: 'model-card-actions' }, ...actions),
     );
   }
 
