@@ -2,8 +2,10 @@
 
 use axum::extract::{Multipart, State};
 use axum::response::{IntoResponse, Response};
+use uniinfer_backends::ModelOutput;
 use uniinfer_backends::audio::decode_wav_mono;
 use uniinfer_core::{CapabilityRequest, EngineError, Modality, Mode, Operation};
+use uniinfer_service::{ModelExecutor, ModelRequest};
 
 use crate::error::ApiError;
 use crate::state::AppState;
@@ -94,7 +96,11 @@ pub(crate) async fn transcribe(
     let deadline = state.request_timeout.map(|timeout| started + timeout);
     let result = tokio::task::spawn_blocking(move || {
         let _permit = permit;
-        slot.transcribe_with_deadline(samples, deadline)
+        slot.execute(
+            ModelRequest::Audio { samples, deadline },
+            &uniinfer_core::CancelToken::new(),
+            &mut |_| {},
+        )
     })
     .await
     .map_err(|_| ApiError::internal("transcription task panicked"))?;
@@ -102,7 +108,13 @@ pub(crate) async fn transcribe(
         .router
         .record_asr(&model, audio_seconds, started.elapsed());
     let text = match result {
-        Ok(text) => text,
+        Ok(ModelOutput::Text(text)) => text,
+        Ok(output) => {
+            return Err(ApiError::internal(format!(
+                "transcription returned {:?}",
+                output.modality()
+            )));
+        }
         Err(error) => {
             if matches!(error, EngineError::Timeout) {
                 state.router.record_timeout(&model);

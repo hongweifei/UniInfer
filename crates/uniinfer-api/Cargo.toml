@@ -53,3 +53,4 @@ http-body-util = "0.1"
 tokio-tungstenite = "0.29"
 tempfile.workspace = true
 image.workspace = true
+hound.workspace = true

@@ -3075,6 +3075,7 @@ dependencies = [
  "axum",
  "base64 0.22.1",
  "futures-util",
+ "hound",
  "http-body-util",
  "image",
  "serde",

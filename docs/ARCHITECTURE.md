@@ -128,6 +128,7 @@ graph(s) + declared inputs/outputs + adapter profile
 - process isolation 改为 transport 能力，不再伪装成 runtime。
 - ASR 的 Whisper/CTC 通过 `onnx.pipeline` 的 `adapter` step 加载，`onnx.asr.*` 实现名删除。
 - 增加 `ModelExecutor` / `ModelOutput`：所有 slot 统一返回 text/audio/image/video，流式用 `ModelEvent`。
+- `/v1/audio/transcriptions` 已走 `ModelExecutor::execute(ModelRequest::Audio)`。
 
 待完成：
 
