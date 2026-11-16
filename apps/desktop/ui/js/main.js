@@ -1,9 +1,9 @@
 import { h } from './dom.js';
 import { icon } from './icons.js';
 import { ApiClient } from './api.js';
-import { loadState, saveState, newConversation, recentConversations } from './state.js';
+import { loadState, saveState, newConversation, deleteConversation, recentConversations } from './state.js';
 import { isAudioModel, isChatModel, isImageModel, modelTitle, errorMessage } from './format.js';
-import { toast, themeIcon } from './components/ui.js';
+import { toast, themeIcon, confirmDialog } from './components/ui.js';
 import { mountChat } from './views/chat.js';
 import { mountTranscribe } from './views/transcribe.js';
 import { mountImages } from './views/images.js';
@@ -97,18 +97,45 @@ function sidebar() {
   const recent = h('div', { class: 'recent-list' });
   const conversations = recentConversations(state, 8);
   for (const conversation of conversations) {
-    recent.append(h('button', {
-      class: `recent-item ${conversation.id === state.activeId ? 'active' : ''}`,
-      type: 'button',
-      title: conversation.title,
-      onClick: () => {
-        state.activeId = conversation.id;
-        state.view = 'chat';
-        persist();
-        renderShell();
-        renderView();
-      },
-    }, h('span', { html: icon('chat', 13) }), h('span', { text: conversation.title })));
+    recent.append(h('div', { class: 'recent-row' },
+      h('button', {
+        class: `recent-item ${conversation.id === state.activeId ? 'active' : ''}`,
+        type: 'button',
+        title: conversation.title,
+        onClick: () => {
+          state.activeId = conversation.id;
+          state.view = 'chat';
+          persist();
+          renderShell();
+          renderView();
+        },
+      }, h('span', { html: icon('chat', 13) }), h('span', { text: conversation.title })),
+      h('button', {
+        class: 'recent-delete', type: 'button', title: '删除会话', html: icon('trash', 12),
+        onClick: async (event) => {
+          event.stopPropagation();
+          const ok = await confirmDialog({
+            title: '删除这个会话？',
+            message: conversation.title,
+            confirmLabel: '删除',
+            danger: true,
+          });
+          if (!ok) return;
+          const wasActive = state.activeId === conversation.id;
+          deleteConversation(state, conversation.id);
+          if (!state.activeId && state.conversations.length) {
+            state.activeId = recentConversations(state, 1)[0]?.id ?? null;
+          }
+          if (wasActive) {
+            renderShell();
+            renderView();
+          } else {
+            renderSidebarOnly();
+          }
+          toast('会话已删除', 'success', 1400);
+        },
+      }),
+    ));
   }
   if (!conversations.length) recent.append(h('div', { class: 'faint', style: 'padding:6px 9px;font-size:11.5px', text: '还没有对话' }));
   const loaded = models.filter((model) => model.loaded).length;
@@ -177,6 +204,7 @@ function themeLabel(theme) {
 }
 
 function renderShell() {
+  chooseModelForView(state.view);
   const main = h('main', { class: 'main', id: 'view' });
   app.replaceChildren(sidebar(), h('div', { class: 'workspace' }, topbar(), main));
 }
@@ -258,7 +286,7 @@ function navigate(view) {
 async function refreshModels() {
   try {
     const [modelBody, deviceBody] = await Promise.all([api.models(), api.devices()]);
-    models = sortModels(modelBody.data ?? []);
+    models = sortModels((modelBody.data ?? []).filter((model) => !model.id.startsWith('tiny-')));
     devices = deviceBody.devices ?? [];
     chooseModelForView(state.view);
     renderShell();
@@ -299,7 +327,7 @@ async function boot() {
   api = new ApiClient(desktop.info);
   try {
     const [modelBody, deviceBody] = await Promise.all([api.models(), api.devices()]);
-    models = sortModels(modelBody.data ?? []);
+    models = sortModels((modelBody.data ?? []).filter((model) => !model.id.startsWith('tiny-')));
     devices = deviceBody.devices ?? [];
     chooseModelForView(state.view);
     renderShell();
@@ -327,5 +355,7 @@ document.addEventListener('keydown', (event) => {
 window.addEventListener('unhandledrejection', (event) => {
   toast(errorMessage(event.reason), 'error');
 });
+document.addEventListener('dragover', (event) => event.preventDefault());
+document.addEventListener('drop', (event) => event.preventDefault());
 
 void boot();

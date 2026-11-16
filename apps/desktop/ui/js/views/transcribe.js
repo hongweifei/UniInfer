@@ -31,8 +31,8 @@ export function mountTranscribe(root, ctx) {
     h('span', { html: icon('play', 15) }), h('span', { text: '开始转写' }));
   const status = h('span', { class: 'faint' });
   const resultText = h('div', { class: 'result-box', text: '转写结果会显示在这里。' });
-  const meta = h('div', { class: 'row faint' });
-  const output = h('div', { class: 'card' },
+  const meta = h('div', { class: 'row faint result-meta' });
+  const output = h('div', { class: 'card result-card' },
     h('div', { class: 'section-title' }, h('h2', { text: '结果' }), h('span', { class: 'spacer' }),
       h('button', { class: 'btn sm ghost', type: 'button', disabled: true, onClick: () => copyText(result?.text ?? ''), html: `${icon('copy', 14)} 复制` }),
       h('button', { class: 'btn sm ghost', type: 'button', disabled: true, onClick: () => downloadText('transcript.txt', result?.text ?? ''), html: `${icon('download', 14)} 下载` }),

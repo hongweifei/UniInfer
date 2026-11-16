@@ -11,7 +11,7 @@ function messageNode(message) {
   const text = h('div', { class: 'message-text' });
   renderText(text, message.content);
   const meta = h('div', { class: 'message-meta' },
-    h('span', { text: isUser ? '你' : 'UniInfer' }),
+    !isUser ? h('span', { text: 'UniInfer' }) : null,
     !message.pending ? h('span', { text: timeAgo(message.createdAt ?? Date.now()) }) : null,
   );
   const actions = h('div', { class: 'message-actions' });
@@ -46,7 +46,7 @@ export function mountChat(root, ctx) {
   let controller = null;
 
   const scroller = h('div', { class: 'chat-scroll' });
-  const thread = h('div', { class: 'chat-thread' });
+  const thread = h('div', { class: 'chat-content' });
   const hero = h('div', { class: 'chat-empty' });
   const messages = h('div', { class: 'chat-thread', attrs: { 'aria-live': 'polite' } });
   thread.append(messages);
@@ -119,8 +119,12 @@ export function mountChat(root, ctx) {
       const { node } = messageNode(message);
       messages.append(node);
     }
-    scroller.scrollTop = scroller.scrollHeight;
+    const hasMessages = conversation.messages.length > 0;
     renderHero();
+    scroller.classList.toggle('is-empty', !hasMessages);
+    requestAnimationFrame(() => {
+      scroller.scrollTop = hasMessages ? scroller.scrollHeight : 0;
+    });
   }
 
   function updateHint() {

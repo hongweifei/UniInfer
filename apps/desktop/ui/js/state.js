@@ -25,7 +25,21 @@ export function loadState() {
       ...base,
       ...saved,
       chatOptions: { ...defaultOptions, ...(saved.chatOptions ?? {}) },
-      conversations: Array.isArray(saved.conversations) ? saved.conversations : [],
+      conversations: Array.isArray(saved.conversations)
+        ? saved.conversations.map((conversation) => ({
+            ...conversation,
+            messages: (conversation.messages ?? []).map((message) =>
+              message.pending
+                ? {
+                    ...message,
+                    pending: false,
+                    error: true,
+                    content: message.content || '（生成被中断）',
+                  }
+                : message
+            ),
+          }))
+        : [],
     };
   } catch {
     return base;
@@ -86,6 +100,12 @@ export function appendMessage(state, conversation, message) {
   }
   saveState(state);
   return item;
+}
+
+export function deleteConversation(state, id) {
+  state.conversations = state.conversations.filter((conversation) => conversation.id !== id);
+  if (state.activeId === id) state.activeId = null;
+  saveState(state);
 }
 
 export function recentConversations(state, limit = 8) {
