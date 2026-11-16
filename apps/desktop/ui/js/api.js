@@ -72,7 +72,7 @@ export class ApiClient {
     return this.request('/v1/images/generations', { method: 'POST', body: payload });
   }
 
-  async streamChat({ model, messages, maxTokens, temperature, signal, onDelta }) {
+  async streamChat({ model, messages, maxTokens, temperature, enableThinking, signal, onDelta, onReasoning }) {
     const response = await fetch(`${this.base}/v1/chat/completions`, {
       method: 'POST',
       headers: this.headers({ 'Content-Type': 'application/json' }),
@@ -82,6 +82,7 @@ export class ApiClient {
         stream: true,
         max_tokens: maxTokens,
         temperature,
+        enable_thinking: enableThinking,
       }),
       signal,
     });
@@ -99,6 +100,7 @@ export class ApiClient {
     const decoder = new TextDecoder();
     let buffer = '';
     let content = '';
+    let reasoning = '';
     while (true) {
       const { value, done } = await reader.read();
       if (done) break;
@@ -116,10 +118,15 @@ export class ApiClient {
           if (event.error) {
             throw new ApiError(event.error.message ?? '生成失败', event.error.code ?? 'stream_error');
           }
-          const delta = event.choices?.[0]?.delta?.content;
-          if (typeof delta === 'string' && delta) {
-            content += delta;
-            onDelta?.(delta, content);
+          const delta = event.choices?.[0]?.delta;
+          const reasoningDelta = delta?.reasoning_content ?? delta?.reasoning;
+          if (typeof reasoningDelta === 'string' && reasoningDelta) {
+            reasoning += reasoningDelta;
+            onReasoning?.(reasoningDelta, reasoning);
+          }
+          if (typeof delta?.content === 'string' && delta.content) {
+            content += delta.content;
+            onDelta?.(delta.content, content);
           }
         }
       }

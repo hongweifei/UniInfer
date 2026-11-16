@@ -2,7 +2,7 @@ import { uid, now } from './format.js';
 import { clampText } from './dom.js';
 
 const STORAGE_KEY = 'uniinfer.workspace.v1';
-const defaultOptions = { maxTokens: 512, temperature: 0.7 };
+const defaultOptions = { maxTokens: 512, temperature: 0.7, thinking: true };
 
 function freshState() {
   return {

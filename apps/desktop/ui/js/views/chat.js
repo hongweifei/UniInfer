@@ -14,6 +14,16 @@ function messageNode(message) {
     !isUser ? h('span', { text: 'UniInfer' }) : null,
     !message.pending ? h('span', { text: timeAgo(message.createdAt ?? Date.now()) }) : null,
   );
+  const reasoningBody = h('div', { class: 'reasoning-body' });
+  const reasoningSummary = h('span', { text: '思考过程' });
+  const reasoning = isUser ? null : h('details', {
+    class: 'message-reasoning',
+    hidden: !message.reasoning,
+  },
+    h('summary', {}, h('span', { html: icon('sparkles', 13) }), reasoningSummary),
+    reasoningBody,
+  );
+  if (reasoning && message.reasoning) renderText(reasoningBody, message.reasoning);
   const actions = h('div', { class: 'message-actions' });
   if (!message.pending) {
     actions.append(h('button', {
@@ -22,7 +32,7 @@ function messageNode(message) {
       html: icon('copy', 13),
     }));
   }
-  const body = h('div', { class: 'message-body' }, meta, text, actions);
+  const body = h('div', { class: 'message-body' }, meta, reasoning, text, actions);
   const node = h('div', { class: `message ${isUser ? 'user' : 'assistant'}${message.error ? ' error' : ''}` },
     h('div', { class: 'avatar', text: isUser ? '你' : 'U' }),
     body,
@@ -36,7 +46,7 @@ function messageNode(message) {
   } else if (message.imageCount) {
     body.insertBefore(h('div', { class: 'row' }, h('span', { class: 'chip', text: `${message.imageCount} 张图片` })), text);
   }
-  return { node, text };
+  return { node, text, reasoning, reasoningBody, reasoningSummary };
 }
 
 export function mountChat(root, ctx) {
@@ -76,6 +86,17 @@ export function mountChat(root, ctx) {
   }
   if (ctx.currentModel()) modelSelect.value = ctx.currentModel().id;
   modelSelect.addEventListener('change', () => ctx.setModel(modelSelect.value));
+  const thinkingToggle = h('button', {
+    class: 'btn sm ghost composer-thinking',
+    type: 'button',
+    title: '切换深度思考',
+    attrs: { 'aria-pressed': String(Boolean(state.chatOptions.thinking)) },
+    onClick: () => {
+      state.chatOptions.thinking = !state.chatOptions.thinking;
+      ctx.persist();
+      updateThinkingToggle();
+    },
+  }, h('span', { html: icon('sparkles', 13) }), h('span', { text: '深度思考' }));
   const form = h('form', { class: 'composer', onSubmit: (event) => { event.preventDefault(); void submit(); } },
     attachmentRow,
     h('div', { class: 'composer-row' },
@@ -85,11 +106,19 @@ export function mountChat(root, ctx) {
       textarea,
       h('div', { class: 'composer-tools' }, stop, send),
     ),
-    h('div', { class: 'composer-meta' }, modelSelect, modelHint, h('span', { class: 'spacer' }), hint),
+    h('div', { class: 'composer-meta' }, modelSelect, thinkingToggle, modelHint, h('span', { class: 'spacer' }), hint),
     fileInput,
   );
   const composerWrap = h('div', { class: 'composer-wrap' }, form);
   root.append(h('div', { class: 'chat-view' }, scroller, composerWrap));
+
+  function updateThinkingToggle() {
+    const enabled = Boolean(state.chatOptions.thinking);
+    thinkingToggle.classList.toggle('ghost', !enabled);
+    thinkingToggle.classList.toggle('active', enabled);
+    thinkingToggle.setAttribute('aria-pressed', String(enabled));
+    thinkingToggle.title = enabled ? '深度思考已开启，点击关闭' : '深度思考已关闭，点击开启';
+  }
 
   function renderHero() {
     clear(hero);
@@ -215,7 +244,7 @@ export function mountChat(root, ctx) {
     const assistant = appendMessage(state, conversation, {
       role: 'assistant', content: '', pending: true,
     });
-    const { node, text: textNode } = messageNode(assistant);
+    const { node, text: textNode, reasoning, reasoningBody, reasoningSummary } = messageNode(assistant);
     messages.append(node);
     scroller.scrollTop = scroller.scrollHeight;
     const abort = new AbortController();
@@ -234,13 +263,36 @@ export function mountChat(root, ctx) {
         }
       }
       let full = '';
+      let reasoningFull = '';
+      let contentStarted = false;
+      let userToggledReasoning = false;
+      reasoning?.querySelector('summary')?.addEventListener('click', () => {
+        userToggledReasoning = true;
+      });
       await api.streamChat({
         model: model.id,
         messages: history,
         maxTokens: state.chatOptions.maxTokens,
         temperature: state.chatOptions.temperature,
+        enableThinking: state.chatOptions.thinking,
         signal: abort.signal,
+        onReasoning: (delta) => {
+          reasoningFull += delta;
+          assistant.reasoning = reasoningFull;
+          if (reasoning) {
+            reasoning.hidden = false;
+            if (!contentStarted) reasoning.open = true;
+            reasoningSummary.textContent = '正在思考…';
+            reasoningBody.textContent = reasoningFull;
+          }
+          scroller.scrollTop = scroller.scrollHeight;
+        },
         onDelta: (delta) => {
+          if (!contentStarted) {
+            contentStarted = true;
+            reasoningSummary.textContent = '思考过程';
+            if (reasoning && reasoning.open && !userToggledReasoning) reasoning.open = false;
+          }
           full += delta;
           assistant.content = full;
           textNode.textContent = full;
@@ -250,6 +302,10 @@ export function mountChat(root, ctx) {
       assistant.pending = false;
       assistant.content = full || '（空响应）';
       renderText(textNode, assistant.content);
+      if (assistant.reasoning) {
+        reasoningSummary.textContent = '思考过程';
+        renderText(reasoningBody, assistant.reasoning);
+      }
       node.querySelector('.message-meta').replaceWith(messageNode(assistant).node.querySelector('.message-meta'));
       conversation.updatedAt = Date.now();
     } catch (error) {
@@ -292,6 +348,7 @@ export function mountChat(root, ctx) {
   send.disabled = true;
   stop.disabled = true;
   renderAttachments();
+  updateThinkingToggle();
   renderHistory();
   updateHint();
   requestAnimationFrame(() => textarea.focus());

@@ -143,6 +143,42 @@
   outline: none;
 }
 .composer-hint { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.composer-thinking { gap: 5px; padding: 0 8px; }
+.composer-thinking.active {
+  border-color: color-mix(in srgb, var(--accent) 32%, var(--border));
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.message-reasoning {
+  border: 1px solid var(--border-soft);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--surface-2) 72%, transparent);
+  color: var(--muted);
+}
+.message-reasoning summary {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 10px;
+  cursor: pointer;
+  list-style: none;
+  color: var(--muted);
+  font-size: 12px;
+  user-select: none;
+}
+.message-reasoning summary::-webkit-details-marker { display: none; }
+.message-reasoning summary::after { content: '▸'; margin-left: auto; transition: transform 0.15s var(--ease); }
+.message-reasoning[open] summary::after { transform: rotate(90deg); }
+.message-reasoning[open] summary { border-bottom: 1px solid var(--border-soft); }
+.reasoning-body {
+  padding: 9px 11px;
+  max-height: 280px;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: 12.5px;
+  line-height: 1.55;
+}
 
 /* Transcribe */
 .transcribe-view, .images-view, .models-view, .settings-view { height: 100%; overflow-y: auto; }
