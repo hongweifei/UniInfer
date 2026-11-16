@@ -25,7 +25,7 @@ UniInfer 当前提供以下能力：
 - `/v1/models`、`/v1/devices`、`/v1/config`、`/metrics`、会话取消与模型生命周期。
 - Tauri 2 桌面工作台：对话、多图、转写、图像生成、在线模型搜索/下载、模型管理与设置，与 HTTP API 共享同一运行时。
 
-内置的 `tiny-*` ONNX 模型用于契约测试；真实模型通过 manifest 接入。
+内置的 `tiny-*` ONNX 模型用于契约测试；真实模型由下载/导入流程自动生成 manifest，运行时递归探测 `models/`，无需在配置中登记。
 
 ## 设计目标
 
@@ -175,11 +175,12 @@ cargo desktop --features llama-mtmd,llama-vulkan
 ### 启动服务
 
 ```bash
-cargo run -p uniinfer-cli -- serve \
-  --manifest models/qwen3-0.6b-onnx/manifest.toml
+cargo run -p uniinfer-cli -- serve
 ```
 
-多个 manifest：
+服务启动时递归扫描 `models/**/manifest*.toml`，运行中新增模型可调用 `POST /v1/models/refresh` 即时发现，无需重启。桌面端下载或导入模型后会自动刷新。
+
+需要只服务指定模型时：
 
 ```bash
 cargo run -p uniinfer-cli --features llama-mtmd -- serve \
@@ -200,7 +201,7 @@ cargo run -p uniinfer-cli -- run \
 ### 聊天
 
 ```bash
-curl http://127.0.0.1:8080/v1/chat/completions \
+curl http://127.0.0.1:11435/v1/chat/completions \
   -H 'Content-Type: application/json' \
   -d '{
     "model": "auto",
@@ -215,7 +216,7 @@ curl http://127.0.0.1:8080/v1/chat/completions \
 ### 多图聊天
 
 ```bash
-curl http://127.0.0.1:8080/v1/chat/completions \
+curl http://127.0.0.1:11435/v1/chat/completions \
   -H 'Content-Type: application/json' \
   -d '{
     "model": "auto",
@@ -233,7 +234,7 @@ curl http://127.0.0.1:8080/v1/chat/completions \
 ### 语音转写
 
 ```bash
-curl http://127.0.0.1:8080/v1/audio/transcriptions \
+curl http://127.0.0.1:11435/v1/audio/transcriptions \
   -F model=auto \
   -F file=@sample.wav
 ```
@@ -243,7 +244,7 @@ curl http://127.0.0.1:8080/v1/audio/transcriptions \
 ### 图像生成
 
 ```bash
-curl http://127.0.0.1:8080/v1/images/generations \
+curl http://127.0.0.1:11435/v1/images/generations \
   -H 'Content-Type: application/json' \
   -d '{
     "model": "auto",

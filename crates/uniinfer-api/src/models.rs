@@ -4,7 +4,6 @@ use axum::Json;
 use axum::extract::State;
 use serde::Deserialize;
 use serde_json::{Value, json};
-use uniinfer_config::ModelEntry;
 use uniinfer_model_inspect::{InspectOptions, inspect};
 
 use crate::error::ApiError;
@@ -56,10 +55,6 @@ pub(crate) async fn import_model(
     State(state): State<AppState>,
     ApiJson(request): ApiJson<InspectRequest>,
 ) -> Result<Json<Value>, ApiError> {
-    let handle = state
-        .config
-        .as_ref()
-        .ok_or_else(|| ApiError::not_found("config_not_available", "server has no config file"))?;
     let path = sandboxed_path(&state, &request.path)?;
     let inspection = inspect(
         &path,
@@ -70,20 +65,13 @@ pub(crate) async fn import_model(
     )
     .map_err(ApiError::from)?;
     let manifest_path = inspection.write_manifest().map_err(ApiError::from)?;
-    let base = handle.base_dir();
-    let relative = manifest_path
-        .strip_prefix(&base)
-        .map_or(manifest_path.clone(), std::path::Path::to_path_buf);
-    let mut config = handle.snapshot().map_err(ApiError::from)?;
-    if !config.models.iter().any(|model| model.manifest == relative) {
-        config.models.push(ModelEntry::new(relative.clone()));
-    }
-    config.validate().map_err(ApiError::from)?;
-    handle.replace(config).map_err(ApiError::from)?;
+    state
+        .add_manifest(manifest_path.clone(), inspection.manifest)
+        .map_err(ApiError::from)?;
+    state.refresh_catalog().map_err(ApiError::from)?;
     Ok(Json(json!({
         "manifest": manifest_path,
-        "config": handle.path(),
-        "restart_required": true,
+        "restart_required": false,
     })))
 }
 

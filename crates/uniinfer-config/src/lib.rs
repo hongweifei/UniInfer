@@ -11,7 +11,7 @@ mod schema;
 
 pub use error::{ConfigError, Result};
 pub use handle::ConfigHandle;
-pub use schema::{ModelEntry, SCHEMA_VERSION, ServerConfig, UniInferConfig};
+pub use schema::{ServerConfig, UniInferConfig};
 
 impl UniInferConfig {
     /// Apply `UNIINFER_*` server overrides after file/CLI values are loaded.

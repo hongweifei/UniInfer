@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use uniinfer_api::ApiConfig;
-use uniinfer_config::{ConfigHandle, ModelEntry, UniInferConfig};
+use uniinfer_config::{ConfigHandle, UniInferConfig};
 
 pub(crate) async fn serve(
     config_path: Option<PathBuf>,
@@ -18,9 +18,11 @@ pub(crate) async fn serve(
     };
     let mut config = source.snapshot()?;
     config.apply_env()?;
-    if !manifests.is_empty() {
-        config.models = manifests.into_iter().map(ModelEntry::new).collect();
-    }
+    let manifests = if manifests.is_empty() {
+        discover_manifests(&std::path::PathBuf::from("models"))
+    } else {
+        manifests
+    };
     if let Some(addr) = addr {
         config.server.addr = addr;
     }
@@ -33,8 +35,35 @@ pub(crate) async fn serve(
     config.validate_for_serve()?;
     let addr = config.server.addr;
     let handle = Arc::new(ConfigHandle::new(config, config_path));
-    let api = ApiConfig::from_config(handle)?;
+    let api = ApiConfig::from_config(handle)?.with_manifests(manifests);
     uniinfer_api::serve(api, addr)
         .await
         .context("serve HTTP API")
+}
+
+fn discover_manifests(root: &std::path::Path) -> Vec<PathBuf> {
+    fn walk(dir: &std::path::Path, depth: usize, out: &mut Vec<PathBuf>) {
+        if depth > 3 {
+            return;
+        }
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                walk(&path, depth + 1, out);
+            } else if path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name.starts_with("manifest") && name.ends_with(".toml"))
+            {
+                out.push(path);
+            }
+        }
+    }
+    let mut paths = Vec::new();
+    walk(root, 0, &mut paths);
+    paths.sort();
+    paths
 }

@@ -28,6 +28,7 @@ pub fn router(state: AppState) -> Router {
         )
         .route("/v1/models/inspect", post(crate::models::inspect_model))
         .route("/v1/models/import", post(crate::models::import_model))
+        .route("/v1/models/refresh", post(refresh_models))
         .route("/v1/devices", get(devices))
         .route("/v1/chat/completions", post(chat))
         .route(
@@ -193,6 +194,11 @@ fn catalog_placement_json(state: &AppState, id: &str, entry: &crate::state::Cata
             "route_error": {"code": error.code(), "message": error.to_string()},
         }),
     }
+}
+
+async fn refresh_models(State(state): State<AppState>) -> Result<Json<Value>, ApiError> {
+    state.refresh_catalog()?;
+    Ok(Json(json!({"refreshed": true})))
 }
 
 async fn models(State(state): State<AppState>) -> Json<Value> {

@@ -8,6 +8,7 @@ use uniinfer_config::{ConfigError, ConfigHandle};
 #[derive(Debug, Clone)]
 pub struct ApiConfig {
     pub manifests: Vec<PathBuf>,
+    pub model_roots: Vec<PathBuf>,
     pub queue_timeout: Duration,
     pub token: Option<String>,
     pub max_body_bytes: usize,
@@ -22,6 +23,11 @@ impl ApiConfig {
     #[must_use]
     pub fn new(manifest: PathBuf) -> Self {
         Self {
+            model_roots: manifest
+                .parent()
+                .and_then(std::path::Path::parent)
+                .map(|root| vec![root.to_path_buf()])
+                .unwrap_or_default(),
             manifests: vec![manifest],
             queue_timeout: Duration::from_secs(30),
             token: None,
@@ -38,13 +44,9 @@ impl ApiConfig {
     pub fn from_config(handle: Arc<ConfigHandle>) -> std::result::Result<Self, ConfigError> {
         let config = handle.snapshot()?;
         config.validate_for_serve()?;
-        let base = handle.base_dir();
-        let manifests = config
-            .enabled_models()
-            .map(|model| model.resolved_manifest(&base))
-            .collect::<Vec<_>>();
         Ok(Self {
-            manifests,
+            manifests: Vec::new(),
+            model_roots: Vec::new(),
             queue_timeout: Duration::from_millis(config.server.queue_timeout_ms),
             token: config.server.token.clone(),
             max_body_bytes: config.server.max_body_bytes,
@@ -66,7 +68,22 @@ impl ApiConfig {
 
     #[must_use]
     pub fn with_manifests(mut self, manifests: Vec<PathBuf>) -> Self {
+        if self.model_roots.is_empty() {
+            self.model_roots = manifests
+                .iter()
+                .filter_map(|manifest| manifest.parent().and_then(std::path::Path::parent))
+                .map(std::path::Path::to_path_buf)
+                .collect();
+            self.model_roots.sort();
+            self.model_roots.dedup();
+        }
         self.manifests = manifests;
+        self
+    }
+
+    #[must_use]
+    pub fn with_model_roots(mut self, model_roots: Vec<PathBuf>) -> Self {
+        self.model_roots = model_roots;
         self
     }
 

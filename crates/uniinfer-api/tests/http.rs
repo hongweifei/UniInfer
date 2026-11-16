@@ -371,15 +371,14 @@ async fn audio_endpoint_reports_missing_model() {
 #[tokio::test]
 async fn config_endpoint_round_trips_and_saves() {
     use std::sync::Arc;
-    use uniinfer_config::{ConfigHandle, ModelEntry, ServerConfig, UniInferConfig};
+    use uniinfer_config::{ConfigHandle, ServerConfig, UniInferConfig};
 
     let dir = tempfile::tempdir().expect("tempdir");
     let path = dir.path().join("uniinfer.toml");
-    let mut config = UniInferConfig {
+    let config = UniInferConfig {
         server: ServerConfig::default(),
         ..UniInferConfig::default()
     };
-    config.models = vec![ModelEntry::new("manifest.toml".into())];
     let handle = Arc::new(ConfigHandle::new(config, Some(path.clone())));
 
     let fixture = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../models/tiny-onnx");
@@ -399,12 +398,10 @@ async fn config_endpoint_round_trips_and_saves() {
         .expect("response");
     assert_eq!(response.status(), StatusCode::OK);
     let body = body_json(response).await;
-    assert_eq!(body["config"]["models"][0]["manifest"], "manifest.toml");
+    assert!(body["config"].get("models").is_none());
 
     let next = json!({
-        "schema_version": 1,
-        "server": {"addr": "127.0.0.1:9091"},
-        "models": [{"manifest": "manifest.toml", "enabled": true}]
+        "server": {"addr": "127.0.0.1:9091"}
     });
     let request = Request::builder()
         .method("PUT")
@@ -442,9 +439,11 @@ async fn model_inspect_and_import_endpoints_work() {
         UniInferConfig::default(),
         Some(config_path.clone()),
     ));
-    std::fs::write(&config_path, "schema_version = 1\n").expect("config file");
+    std::fs::write(&config_path, "[server]\n").expect("config file");
     let fixture = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../models/tiny-onnx");
-    let api = ApiConfig::new(fixture.join("manifest.toml")).with_config(handle);
+    let api = ApiConfig::new(fixture.join("manifest.toml"))
+        .with_config(handle)
+        .with_model_roots(vec![dir.path().to_path_buf()]);
     let app = routes::router(AppState::new(&api).expect("state"));
 
     let body = json!({"path": model_dir.clone(), "id": "imported"}).to_string();
@@ -460,6 +459,7 @@ async fn model_inspect_and_import_endpoints_work() {
     assert_eq!(body["route"]["supported"], true);
 
     let response = app
+        .clone()
         .oneshot(post(
             "/v1/models/import",
             &json!({"path": model_dir, "id": "imported"}).to_string(),
@@ -468,8 +468,24 @@ async fn model_inspect_and_import_endpoints_work() {
         .expect("response");
     assert_eq!(response.status(), StatusCode::OK);
     assert!(model_dir.join("manifest.toml").is_file());
-    let saved = UniInferConfig::load(&config_path).expect("saved config");
-    assert_eq!(saved.models.len(), 1);
+    let _ = UniInferConfig::load(&config_path).expect("saved config");
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/v1/models")
+                .body(Body::empty())
+                .expect("request"),
+        )
+        .await
+        .expect("response");
+    let body = body_json(response).await;
+    assert!(
+        body["data"]
+            .as_array()
+            .expect("models")
+            .iter()
+            .any(|model| model["id"] == "imported")
+    );
 }
 
 #[tokio::test]
@@ -529,22 +545,23 @@ async fn cors_only_allows_local_and_tauri_origins() {
 #[tokio::test]
 async fn config_get_redacts_token_and_put_preserves_it() {
     use std::sync::Arc;
-    use uniinfer_config::{ConfigHandle, ModelEntry, ServerConfig, UniInferConfig};
+    use uniinfer_config::{ConfigHandle, ServerConfig, UniInferConfig};
 
     let dir = tempfile::tempdir().expect("tempdir");
     let path = dir.path().join("uniinfer.toml");
-    let mut durable = UniInferConfig {
+    let durable = UniInferConfig {
         server: ServerConfig {
             token: Some("secret".into()),
             ..ServerConfig::default()
         },
         ..UniInferConfig::default()
     };
-    durable.models = vec![ModelEntry::new("manifest.toml".into())];
     durable.save(&path).expect("save");
     let handle = Arc::new(ConfigHandle::load(path.clone()).expect("load"));
     let fixture = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../models/tiny-onnx");
-    let api = ApiConfig::new(fixture.join("manifest.toml")).with_config(handle);
+    let api = ApiConfig::new(fixture.join("manifest.toml"))
+        .with_config(handle)
+        .with_model_roots(vec![dir.path().to_path_buf()]);
     let app = routes::router(AppState::new(&api).expect("state"));
 
     let response = app
@@ -585,7 +602,7 @@ async fn model_inspect_rejects_paths_outside_config_root() {
     let outside = tempfile::tempdir().expect("outside");
     std::fs::write(outside.path().join("model.onnx"), b"onnx").expect("model");
     let config_path = root.path().join("uniinfer.toml");
-    std::fs::write(&config_path, "schema_version = 1\n").expect("config");
+    std::fs::write(&config_path, "[server]\n").expect("config");
     let handle = Arc::new(ConfigHandle::load(config_path).expect("load"));
     let fixture = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../models/tiny-onnx");
     let api = ApiConfig::new(fixture.join("manifest.toml")).with_config(handle);
@@ -875,7 +892,7 @@ async fn request_timeout_returns_gateway_timeout() {
     let manifest =
         Path::new(env!("CARGO_MANIFEST_DIR")).join("../../models/tiny-onnx/manifest.toml");
     let mut config = ApiConfig::new(manifest);
-    config.request_timeout = std::time::Duration::from_nanos(1);
+    config.request_timeout = std::time::Duration::from_millis(1);
     let app = routes::router(AppState::new(&config).expect("state"));
     let body = json!({
         "model": "tiny-byte-onnx",
@@ -897,7 +914,7 @@ async fn model_load_timeout_returns_gateway_timeout() {
     let manifest =
         Path::new(env!("CARGO_MANIFEST_DIR")).join("../../models/tiny-onnx/manifest.toml");
     let mut config = ApiConfig::new(manifest);
-    config.model_load_timeout = std::time::Duration::from_nanos(1);
+    config.model_load_timeout = std::time::Duration::from_millis(1);
     let app = routes::router(AppState::new(&config).expect("state"));
     let body = json!({
         "model": "tiny-byte-onnx",

@@ -51,7 +51,7 @@ enum Command {
     },
     /// Serve the OpenAI-compatible HTTP API.
     Serve {
-        /// Model manifest paths; when set, they replace config.models.
+        /// Model manifest paths; when omitted, scan ./models.
         #[arg(long = "manifest")]
         manifests: Vec<PathBuf>,
         /// Override server.addr from the config file.
@@ -100,9 +100,7 @@ async fn main() -> Result<()> {
                 check,
                 load,
             } => models::inspect_model(path, id, check, load),
-            ModelsCommand::Import { path, id } => {
-                models::import_model(path, config_path.clone(), id)
-            }
+            ModelsCommand::Import { path, id } => models::import_model(path, id),
         },
         Command::Serve {
             manifests,

@@ -1,5 +1,5 @@
 use std::collections::{HashMap, VecDeque};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, RwLock};
 
 use tokio::sync::Mutex as AsyncMutex;
@@ -28,7 +28,8 @@ pub struct AppState {
     pub(crate) token: Option<String>,
     pub(crate) max_body_bytes: usize,
     pub(crate) config: Option<Arc<ConfigHandle>>,
-    pub(crate) manifest_paths: Arc<HashMap<String, PathBuf>>,
+    pub(crate) manifest_paths: Arc<RwLock<HashMap<String, PathBuf>>>,
+    pub(crate) model_roots: Vec<PathBuf>,
     pub(crate) request_timeout: Option<std::time::Duration>,
     model_load_timeout: Option<std::time::Duration>,
     pub(crate) catalog: Arc<RwLock<HashMap<String, CatalogEntry>>>,
@@ -39,11 +40,6 @@ pub struct AppState {
 
 impl AppState {
     pub fn new(config: &ApiConfig) -> Result<Self> {
-        if config.manifests.is_empty() {
-            return Err(EngineError::ManifestInvalid(
-                "no manifests configured".into(),
-            ));
-        }
         let runtime = Arc::new(Runtime::new_with_process(config.isolate_models)?);
         let mut manifest_paths = HashMap::new();
         let mut catalog = HashMap::new();
@@ -81,7 +77,8 @@ impl AppState {
             token: config.token.clone(),
             max_body_bytes: config.max_body_bytes,
             config: config.config.clone(),
-            manifest_paths: Arc::new(manifest_paths),
+            manifest_paths: Arc::new(RwLock::new(manifest_paths)),
+            model_roots: config.model_roots.clone(),
             request_timeout: (config.request_timeout > std::time::Duration::ZERO)
                 .then_some(config.request_timeout),
             model_load_timeout: (config.model_load_timeout > std::time::Duration::ZERO)
@@ -138,6 +135,75 @@ impl AppState {
 
     pub(crate) fn catalog_entry(&self, id: &str) -> Option<CatalogEntry> {
         self.catalog.read().ok()?.get(id).cloned()
+    }
+
+    pub(crate) fn add_manifest(&self, path: PathBuf, manifest: ModelManifest) -> Result<()> {
+        let id = manifest.id.clone();
+        let audio_only = manifest.audio.is_some() && manifest.text.is_none();
+        let image_only = manifest.image.is_some();
+        self.manifest_paths
+            .write()
+            .map_err(|_| EngineError::Other("manifest paths lock poisoned".into()))?
+            .insert(id.clone(), path.clone());
+        self.catalog
+            .write()
+            .map_err(|_| EngineError::Other("catalog lock poisoned".into()))?
+            .insert(
+                id,
+                CatalogEntry {
+                    path,
+                    manifest,
+                    audio_only,
+                    image_only,
+                },
+            );
+        Ok(())
+    }
+
+    /// Rescan configured model roots and update the live catalog. This is the
+    /// source of truth for downloaded/imported models; config stores no model
+    /// list.
+    pub(crate) fn refresh_catalog(&self) -> Result<()> {
+        let mut found = Vec::new();
+        for root in &self.model_roots {
+            collect_manifests(root, 0, &mut found);
+        }
+        let mut catalog = self
+            .catalog
+            .write()
+            .map_err(|_| EngineError::Other("catalog lock poisoned".into()))?;
+        let mut paths = self
+            .manifest_paths
+            .write()
+            .map_err(|_| EngineError::Other("manifest paths lock poisoned".into()))?;
+        for path in found {
+            let Ok(manifest) = ModelManifest::load(&path) else {
+                continue;
+            };
+            let id = manifest.id.clone();
+            let audio_only = manifest.audio.is_some() && manifest.text.is_none();
+            let image_only = manifest.image.is_some();
+            paths.insert(id.clone(), path.clone());
+            catalog.insert(
+                id,
+                CatalogEntry {
+                    path,
+                    manifest,
+                    audio_only,
+                    image_only,
+                },
+            );
+        }
+        let roots = self.model_roots.clone();
+        catalog.retain(|id, entry| {
+            if roots.iter().any(|root| entry.path.starts_with(root)) && !entry.path.is_file() {
+                paths.remove(id);
+                false
+            } else {
+                true
+            }
+        });
+        Ok(())
     }
 
     pub(crate) fn has_model(&self, id: &str) -> bool {
@@ -369,6 +435,27 @@ impl AppState {
     }
 }
 
+fn collect_manifests(dir: &Path, depth: usize, out: &mut Vec<PathBuf>) {
+    if depth > 3 {
+        return;
+    }
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            collect_manifests(&path, depth + 1, out);
+        } else if path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .is_some_and(|name| name.starts_with("manifest") && name.ends_with(".toml"))
+        {
+            out.push(path);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -386,6 +473,32 @@ mod tests {
             std::thread::sleep(std::time::Duration::from_millis(200));
             Ok(())
         })
+    }
+
+    #[test]
+    fn refresh_catalog_discovers_and_removes_model_directories() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let models_root = temp.path().join("models");
+        std::fs::create_dir_all(&models_root).expect("models root");
+        let fixture =
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../models/tiny-onnx/manifest.toml");
+        let config = ApiConfig::new(fixture.clone()).with_model_roots(vec![models_root.clone()]);
+        let state = AppState::new(&config).expect("state");
+        assert!(state.catalog_entry("discovered").is_none());
+
+        let model_dir = models_root.join("discovered");
+        std::fs::create_dir_all(&model_dir).expect("model dir");
+        let mut manifest = ModelManifest::load(&fixture).expect("manifest");
+        manifest.id = "discovered".into();
+        manifest
+            .save(&model_dir.join("manifest.toml"))
+            .expect("save");
+        state.refresh_catalog().expect("refresh");
+        assert!(state.catalog_entry("discovered").is_some());
+
+        std::fs::remove_dir_all(&model_dir).expect("remove");
+        state.refresh_catalog().expect("refresh");
+        assert!(state.catalog_entry("discovered").is_none());
     }
 
     #[test]
@@ -416,9 +529,9 @@ mod tests {
 
     #[tokio::test]
     async fn load_finishing_after_budget_still_times_out() {
-        let state = state(std::time::Duration::from_nanos(1));
+        let state = state(std::time::Duration::from_millis(1));
         let cancel = CancelToken::new();
-        let task = tokio::task::spawn_blocking(|| -> Result<()> { Ok(()) });
+        let task = slow_load();
         let error = state
             .await_load(task, cancel.clone())
             .await
