@@ -1,6 +1,6 @@
 import { h, clear } from '../dom.js';
 import { icon } from '../icons.js';
-import { toast, setBusy, confirmDialog } from '../components/ui.js';
+import { toast, setBusy, confirmDialog, copyText } from '../components/ui.js';
 import { errorMessage } from '../format.js';
 
 export function mountSettings(root, ctx) {
@@ -41,13 +41,22 @@ export function mountSettings(root, ctx) {
   const requestTimeout = h('input', { class: 'input', type: 'number', min: '0', step: '1', value: '0' });
   const loadTimeout = h('input', { class: 'input', type: 'number', min: '0', step: '1', value: '0' });
   const queueTimeout = h('input', { class: 'input', type: 'number', min: '0', step: '1', value: '30' });
-  const isolate = h('input', { type: 'checkbox' });
   const configPath = h('span', { class: 'mono muted', text: '读取中…' });
   const runtimeStatus = h('span', { class: 'faint' });
   const saveRuntimeButton = h('button', {
     class: 'btn sm primary', type: 'button', disabled: true,
     onClick: () => void saveRuntime(),
   }, h('span', { html: icon('check', 14) }), h('span', { text: '保存运行时设置' }));
+  const apiCopy = h('button', {
+    class: 'btn btn-icon ghost sm', type: 'button', title: '复制 API 地址',
+    onClick: () => void copyText(ctx.api.base),
+    html: icon('copy', 13),
+  });
+  const tokenCopy = h('button', {
+    class: 'btn btn-icon ghost sm', type: 'button', title: '复制 API Token',
+    onClick: () => void copyText(ctx.api.token),
+    html: icon('copy', 13),
+  });
   const restartButton = h('button', {
     class: 'btn', type: 'button',
     onClick: () => void confirmDialog({
@@ -65,7 +74,6 @@ export function mountSettings(root, ctx) {
       requestTimeout.value = String(Math.round((server.request_timeout_ms ?? 0) / 1000));
       loadTimeout.value = String(Math.round((server.model_load_timeout_ms ?? 0) / 1000));
       queueTimeout.value = String(Math.round((server.queue_timeout_ms ?? 30000) / 1000));
-      isolate.checked = Boolean(server.isolate_models);
       configPath.textContent = config.path ?? '未绑定配置文件';
       runtimeStatus.textContent = config.token_configured ? 'API token 已配置' : '';
       saveRuntimeButton.disabled = false;
@@ -87,7 +95,6 @@ export function mountSettings(root, ctx) {
           request_timeout_ms: Math.max(0, Number(requestTimeout.value) || 0) * 1000,
           model_load_timeout_ms: Math.max(0, Number(loadTimeout.value) || 0) * 1000,
           queue_timeout_ms: Math.max(0, Number(queueTimeout.value) || 0) * 1000,
-          isolate_models: isolate.checked,
         },
       };
       const result = await ctx.api.saveConfig(body);
@@ -133,7 +140,8 @@ export function mountSettings(root, ctx) {
         h('div', { class: 'card', attrs: { id: 'settings-connection' } },
           h('div', { class: 'section-title' }, h('h2', { text: '本地连接' }), h('span', { class: 'spacer' }), h('span', { class: 'chip success', text: '运行中' })),
           h('div', { class: 'model-kv' },
-            h('strong', { text: 'API' }), h('span', { class: 'mono', text: ctx.api.base }),
+            h('strong', { text: 'API' }), h('span', { class: 'row', style: 'gap:4px' }, h('span', { class: 'mono', text: ctx.api.base }), apiCopy),
+            h('strong', { text: 'Token' }), h('span', { class: 'row', style: 'gap:4px' }, h('span', { class: 'mono muted', text: '已配置' }), tokenCopy),
             h('strong', { text: '模型' }), h('span', { text: `${ctx.models().length} 个已配置` }),
             h('strong', { text: '配置文件' }), configPath,
           ),
@@ -156,10 +164,6 @@ export function mountSettings(root, ctx) {
           h('div', { class: 'setting-row' },
             h('div', { class: 'setting-label' }, h('strong', { text: '排队超时' }), h('span', { text: '单位：秒；忙碌时最多等待多久。' })),
             h('div', { style: 'width:140px' }, queueTimeout),
-          ),
-          h('div', { class: 'setting-row' },
-            h('div', { class: 'setting-label' }, h('strong', { text: '隔离模型运行' }), h('span', { text: '文本模型放到独立进程，异常退出不影响界面。' })),
-            h('label', { class: 'row', style: 'gap:6px;font-size:12px;color:var(--muted)' }, isolate, h('span', { text: '启用' })),
           ),
           h('div', { class: 'row', style: 'margin-top:12px' }, saveRuntimeButton),
         ),

@@ -11,7 +11,9 @@
 - 模型：在线搜索 ModelScope / Hugging Face、服务端分页、下载、格式/状态筛选、预加载/卸载、删除、设备、导入、重启。
 - 下载完成后自动 inspect 并生成默认 manifest；模型卡可调整放置策略、优先设备、CPU 回退与上下文长度。
 - 设置：主题、对话默认值、连接信息、运行时参数与本地数据，全部使用 GUI 表单。
+- 本地 API 默认固定为 `127.0.0.1:11435`；token 首次生成后写入 `uniinfer.toml`，后续启动复用，可在设置页复制。
 - 模型运行配置保存后即时卸载旧会话，下一次请求按新放置/上下文加载，不需要重启。
+- 最大驻留模型数、请求/加载/排队超时保存后即时更新；只有监听地址、token、请求体上限这类进程启动参数需要重启，且不在 GUI 暴露。
 
 ## 启动
 
@@ -23,11 +25,9 @@ cargo desktop
 
 Windows 也可以双击仓库根目录的 `desktop.cmd`，或直接运行构建后的 exe。模型发现会依次检查当前目录、exe 所在目录及其父目录，因此从资源管理器启动也能找到仓库的 `models/`。
 
-在线模型由用户搜索仓库后下载，不再内置固定模型清单；搜索按页请求，每页 10 条。默认扫描 `models/*/manifest*.toml`，下载目录在项目 `models/`。也可用环境变量覆盖：
+在线模型由用户搜索仓库后下载，不再内置固定模型清单；搜索按页请求，每页 10 条。运行时递归扫描 `models/` 下的 `manifest*.toml`，下载或导入后刷新目录即可生效，无需重启，也无需在配置里登记模型。配置文件只保存服务端口、鉴权与超时等选项：
 
 ```text
-UNIINFER_MANIFESTS=path/a/manifest.toml;path/b/manifest.toml
-UNIINFER_MANIFEST=path/manifest.toml
 UNIINFER_CONFIG=path/uniinfer.toml
 ```
 

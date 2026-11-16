@@ -7,7 +7,6 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use tauri::{AppHandle, Emitter};
 use tokio::io::AsyncWriteExt;
-use uniinfer_config::{ModelEntry, UniInferConfig};
 use uniinfer_core::ModelManifest;
 use uniinfer_model_inspect::{InspectOptions, inspect};
 
@@ -149,47 +148,21 @@ pub(crate) async fn delete_model(id: String) -> Result<DeleteResult, String> {
 }
 
 fn delete_model_inner(id: &str) -> Result<DeleteResult, String> {
-    let base = crate::api_server::project_root()
-        .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
-    let config_path = base.join("uniinfer.toml");
-    let mut config = if config_path.is_file() {
-        Some(UniInferConfig::load(&config_path).map_err(|error| format!("config: {error}"))?)
-    } else {
-        None
-    };
-
-    let mut targets = Vec::new();
-    if let Some(config) = &config {
-        for entry in &config.models {
-            let path = if entry.manifest.is_absolute() {
-                entry.manifest.clone()
-            } else {
-                base.join(&entry.manifest)
-            };
-            if path.is_file()
-                && ModelManifest::load(&path)
-                    .map(|manifest| manifest.id == id)
-                    .unwrap_or(false)
-            {
-                targets.push(path);
-            }
-        }
-    }
-    if targets.is_empty() {
-        targets.extend(
-            crate::api_server::manifest_paths()
-                .into_iter()
-                .filter(|path| {
-                    ModelManifest::load(path)
-                        .map(|manifest| manifest.id == id)
-                        .unwrap_or(false)
-                }),
-        );
-    }
+    let base = models_root()
+        .parent()
+        .map(std::path::Path::to_path_buf)
+        .unwrap_or_else(|| std::path::PathBuf::from("."));
+    let targets = crate::api_server::manifest_paths()
+        .into_iter()
+        .filter(|path| {
+            ModelManifest::load(path)
+                .map(|manifest| manifest.id == id)
+                .unwrap_or(false)
+        })
+        .collect::<Vec<_>>();
     if targets.is_empty() {
         return Err(format!("找不到模型 {id} 的 manifest"));
     }
-
     let models_root = base.join("models");
     let mut removed = false;
     for manifest in targets {
@@ -205,23 +178,11 @@ fn delete_model_inner(id: &str) -> Result<DeleteResult, String> {
             removed = true;
         }
     }
-    if let Some(config) = &mut config {
-        config.models.retain(|entry| {
-            let path = if entry.manifest.is_absolute() {
-                entry.manifest.clone()
-            } else {
-                base.join(&entry.manifest)
-            };
-            path.exists()
-        });
-        config
-            .save(&config_path)
-            .map_err(|error| format!("save config: {error}"))?;
-    }
+
     Ok(DeleteResult {
         id: id.to_string(),
         removed,
-        restart_required: true,
+        restart_required: false,
     })
 }
 
@@ -321,7 +282,7 @@ pub(crate) async fn install_model(
     }
     let directory = dir.clone();
     let model_id = id.clone();
-    let manifest = tokio::task::spawn_blocking(move || -> Result<PathBuf, String> {
+    let _manifest = tokio::task::spawn_blocking(move || -> Result<PathBuf, String> {
         let inspection = inspect(
             &directory,
             &InspectOptions {
@@ -336,7 +297,6 @@ pub(crate) async fn install_model(
     })
     .await
     .map_err(|error| format!("inspect task: {error}"))??;
-    register(&manifest)?;
     let _ = app.emit(
         "model-download",
         DownloadEvent {
@@ -351,7 +311,7 @@ pub(crate) async fn install_model(
     Ok(InstallResult {
         id,
         path: dir.display().to_string(),
-        restart_required: true,
+        restart_required: false,
     })
 }
 
@@ -512,9 +472,7 @@ fn slug(repo: &str) -> String {
 }
 
 fn models_root() -> PathBuf {
-    crate::api_server::project_root()
-        .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")))
-        .join("models")
+    crate::api_server::models_root()
 }
 
 #[derive(Clone)]
@@ -606,32 +564,6 @@ fn locate_cache_file(repo: &models_cat::Repo, path: &str) -> Result<PathBuf, Str
         }
     }
     Err(format!("downloaded file not found in cache: {path}"))
-}
-
-fn register(manifest: &Path) -> Result<(), String> {
-    let base = crate::api_server::project_root()
-        .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
-    let config_path = base.join("uniinfer.toml");
-    let mut config = if config_path.is_file() {
-        UniInferConfig::load(&config_path).map_err(|error| format!("config: {error}"))?
-    } else {
-        UniInferConfig {
-            models: crate::api_server::manifest_paths()
-                .into_iter()
-                .map(ModelEntry::new)
-                .collect(),
-            ..Default::default()
-        }
-    };
-    let relative = manifest
-        .strip_prefix(&base)
-        .map_or_else(|_| manifest.to_path_buf(), Path::to_path_buf);
-    if !config.models.iter().any(|model| model.manifest == relative) {
-        config.models.push(ModelEntry::new(relative));
-    }
-    config
-        .save(&config_path)
-        .map_err(|error| format!("save config: {error}"))
 }
 
 async fn search_huggingface(query: &str, page: u32, page_size: u32) -> Result<SearchPage, String> {

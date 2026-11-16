@@ -125,10 +125,11 @@ export function mountCatalog(root, ctx) {
     status.textContent = `正在下载 ${entry.id}，首次下载可能需要一些时间…`;
     try {
       const result = await invoke('install_model', { repo: entry.id, source: source.value });
+      await ctx.api.request('/v1/models/refresh', { method: 'POST' }).catch(() => {});
+      await ctx.refreshModels();
       progress.set(entry.id, { status: 'done' });
-      updateProgress(entry.id, progress.get(entry.id), button, bar, text);
       status.textContent = `已安装 ${result.id}`;
-      toast(`${entry.id} 下载完成`, 'success');
+      toast(`${entry.id} 下载完成并已加入模型库`, 'success');
     } catch (error) {
       const message = error?.message ?? String(error);
       progress.set(entry.id, { status: 'error', message });

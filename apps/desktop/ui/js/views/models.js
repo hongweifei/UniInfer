@@ -232,12 +232,13 @@ export function mountModels(root, ctx) {
     importing = true;
     setBusy(importButton, true, '导入中…');
     try {
-      const result = await ctx.api.importModel(importPath.value.trim());
+      await ctx.api.importModel(importPath.value.trim());
       importResult.className = 'notice';
-      importResult.textContent = '模型已写入配置。重启应用后即可在列表中看到。';
-      promoteButton.hidden = false;
+      importResult.textContent = '模型已导入并加入模型库。';
+      promoteButton.hidden = true;
+      await ctx.api.request('/v1/models/refresh', { method: 'POST' }).catch(() => {});
+      await ctx.refreshModels();
       toast('模型已导入', 'success');
-      if (result.restart_required) promoteButton.hidden = false;
     } catch (error) {
       importResult.className = 'notice error';
       importResult.textContent = errorMessage(error);
@@ -273,7 +274,7 @@ export function mountModels(root, ctx) {
     const fallback = h('input', { type: 'checkbox', checked: placement.allow_cpu_fallback !== false });
     const context = h('input', { class: 'input', type: 'number', min: '1', value: String(manifest.context_len ?? 2048) });
     const body = h('div', { style: 'display:grid;gap:12px' },
-      h('div', { class: 'notice', text: '这里是模型的默认运行配置。保存后重启应用生效；下载模型会自动生成一份默认配置。' }),
+      h('div', { class: 'notice', text: '这里是模型的默认运行配置，保存后即时应用；下载模型会自动生成一份默认配置。' }),
       h('div', { class: 'field' }, h('label', { text: '设备放置策略' }), policy),
       h('div', { class: 'field' }, h('label', { text: '优先设备' }), prefRow),
       h('label', { class: 'row', style: 'gap:7px;font-size:13px' }, fallback, h('span', { text: '允许回退到 CPU' })),
@@ -313,16 +314,17 @@ export function mountModels(root, ctx) {
   async function removeModel(model) {
     const ok = await confirmDialog({
       title: '删除模型？',
-      message: `${model.id} 的文件和配置会从本地删除，删除后需要重启应用。`,
-      confirmLabel: '删除并重启',
+      message: `${model.id} 的文件和配置会从本地删除，删除后立即从模型库移除。`,
+      confirmLabel: '删除',
       danger: true,
     });
     if (!ok) return;
     try {
       await ctx.api.unloadModel(model.id).catch(() => {});
       const result = await window.__TAURI__?.core?.invoke('delete_model', { id: model.id });
-      toast(result?.removed ? '模型已删除，正在重启' : '模型配置已移除，正在重启', 'success');
-      setTimeout(() => ctx.restart?.(), 800);
+      await ctx.api.request('/v1/models/refresh', { method: 'POST' }).catch(() => {});
+      await ctx.refreshModels();
+      toast(result?.removed ? '模型已删除' : '模型已从目录移除', 'success');
     } catch (error) {
       toast(errorMessage(error), 'error');
     }
@@ -336,11 +338,11 @@ export function mountModels(root, ctx) {
     online: ['在线模型', '搜索 ModelScope 或 Hugging Face，下载后自动生成默认运行配置。'],
     installed: ['已安装模型', '管理本地模型、加载状态与运行配置。'],
     devices: ['设备', '查看运行时探测到的 CPU、GPU、NPU 与放置结果。'],
-    import: ['导入模型', '从已有目录导入 manifest；适合离线模型。'],
+    import: ['导入模型', '从已有目录动态探测并生成运行配置；适合离线模型。'],
   };
   const [heading, description] = headings[subview] ?? headings.online;
   const onlineHost = h('div', { attrs: { id: 'online-models' }, hidden: subview !== 'online' });
-  ctx.onModelDownloaded = () => toast('模型下载完成，配置已写入；点击“重启并启用”后可用', 'success');
+  ctx.onModelDownloaded = () => toast('模型下载完成并已加入模型库', 'success');
   const onlineCleanup = mountCatalog(onlineHost, ctx);
 
   root.append(h('div', { class: 'models-view' }, h('div', { class: 'page' },
