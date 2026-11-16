@@ -298,7 +298,8 @@ export function mountModels(root, ctx) {
               const result = await ctx.api.request(`/v1/models/${encodeURIComponent(model.id)}/manifest`, {
                 method: 'PUT', body: manifest,
               });
-              toast(result.restart_required ? '配置已保存，重启后生效' : '配置已保存', 'success');
+              toast(result.restart_required ? '配置已保存，重启后生效' : '配置已保存并即时应用', 'success');
+              await ctx.refreshModels();
             } catch (error) {
               toast(errorMessage(error), 'error');
               return false;
