@@ -14,6 +14,15 @@ pub enum ModelOutput {
 }
 
 impl ModelOutput {
+    /// Flatten a single output or a multi-part output.
+    #[must_use]
+    pub fn into_outputs(self) -> Vec<Self> {
+        match self {
+            Self::Parts(parts) => parts,
+            output => vec![output],
+        }
+    }
+
     /// Distinct modalities carried by this output, in first-seen order.
     #[must_use]
     pub fn modalities(&self) -> Vec<Modality> {

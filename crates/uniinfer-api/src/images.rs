@@ -122,15 +122,14 @@ pub(crate) async fn generate(
     .await
     .map_err(|_| ApiError::internal("image generation task panicked"))?
     .map_err(ApiError::from)?;
-    let image = match output {
-        ModelOutput::Image(image) => image,
-        other => {
-            return Err(ApiError::internal(format!(
-                "image generation returned {:?}",
-                other.modalities()
-            )));
-        }
-    };
+    let image = output
+        .into_outputs()
+        .into_iter()
+        .find_map(|output| match output {
+            ModelOutput::Image(image) => Some(image),
+            _ => None,
+        })
+        .ok_or_else(|| ApiError::internal("image generation returned no image"))?;
     Ok(Json(image_json(image)).into_response())
 }
 

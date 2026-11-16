@@ -20,7 +20,7 @@ pub use error::{EngineError, Result};
 pub use image_batch::{ImageBatch, MAX_IMAGES};
 pub use manifest::{
     AudioConfig, Capability, CapabilityRequest, ImageConfig, Modality, Mode, ModelFile,
-    ModelFormat, ModelManifest, Operation, OutputMode, PipelineConfig, PipelineStep,
-    PlacementConfig, Quantization, Runtime, TextConfig,
+    ModelFormat, ModelManifest, Operation, PipelineConfig, PipelineStep, PlacementConfig,
+    Quantization, Runtime, TextConfig,
 };
 pub use tensor::{Tensor, TensorData, TensorDtype, TensorSpec};

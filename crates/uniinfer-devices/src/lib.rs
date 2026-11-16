@@ -14,7 +14,7 @@ mod tests {
     use super::*;
     use uniinfer_core::{
         Capability, Device, DeviceClass, Modality, Mode, ModelFile, ModelFormat, ModelManifest,
-        Operation, OutputMode, PlacementConfig, PlacementPolicy, Quantization, Runtime,
+        Operation, PlacementConfig, PlacementPolicy, Quantization, Runtime,
     };
 
     fn manifest(placement: PlacementConfig) -> ModelManifest {
@@ -27,9 +27,7 @@ mod tests {
                 operation: Operation::Generate,
                 required_inputs: vec![Modality::Text],
                 optional_inputs: Vec::new(),
-                min_inputs: 1,
                 outputs: vec![Modality::Text],
-                output_mode: OutputMode::One,
                 mode: Mode::Stream,
             }],
             format: ModelFormat::Onnx,

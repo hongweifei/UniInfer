@@ -110,13 +110,14 @@ pub(crate) async fn transcribe(
         .router
         .record_asr(&model, audio_seconds, started.elapsed());
     let text = match result {
-        Ok(ModelOutput::Text(text)) => text,
-        Ok(output) => {
-            return Err(ApiError::internal(format!(
-                "transcription returned {:?}",
-                output.modalities()
-            )));
-        }
+        Ok(output) => output
+            .into_outputs()
+            .into_iter()
+            .find_map(|output| match output {
+                ModelOutput::Text(text) => Some(text),
+                _ => None,
+            })
+            .ok_or_else(|| ApiError::internal("transcription returned no text"))?,
         Err(error) => {
             if matches!(error, EngineError::Timeout) {
                 state.router.record_timeout(&model);

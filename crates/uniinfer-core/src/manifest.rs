@@ -42,17 +42,6 @@ pub enum Mode {
     Duplex,
 }
 
-/// How many outputs one response can carry.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum OutputMode {
-    /// Exactly one output modality per response.
-    #[default]
-    One,
-    /// Any non-empty subset of the declared outputs.
-    Many,
-}
-
 /// One model capability: operation, input contract, output contract and mode.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -65,18 +54,8 @@ pub struct Capability {
     /// Inputs that may accompany the required ones.
     #[serde(default)]
     pub optional_inputs: Vec<Modality>,
-    /// Minimum number of distinct present inputs.
-    #[serde(default = "default_min_inputs")]
-    pub min_inputs: usize,
     pub outputs: Vec<Modality>,
-    /// Whether a response carries one output or a requested subset.
-    #[serde(default)]
-    pub output_mode: OutputMode,
     pub mode: Mode,
-}
-
-fn default_min_inputs() -> usize {
-    1
 }
 
 impl Capability {
@@ -98,14 +77,11 @@ impl Capability {
         }) {
             return false;
         }
-        if unique_len(&request.present_inputs) < self.min_inputs {
+        if unique_len(&request.present_inputs) == 0 {
             return false;
         }
         let requested_outputs = unique_len(&request.requested_outputs);
         if requested_outputs == 0 {
-            return false;
-        }
-        if self.output_mode == OutputMode::One && requested_outputs != 1 {
             return false;
         }
         request
@@ -658,14 +634,6 @@ impl ModelManifest {
                     capability.name
                 )));
             }
-            if capability.min_inputs == 0 || capability.min_inputs > inputs.len() {
-                return Err(EngineError::ManifestInvalid(format!(
-                    "capability {} min_inputs {} is outside 1..={}",
-                    capability.name,
-                    capability.min_inputs,
-                    inputs.len()
-                )));
-            }
             if capability.outputs.is_empty() {
                 return Err(EngineError::ManifestInvalid(format!(
                     "capability {} has no outputs",
@@ -680,13 +648,6 @@ impl ModelManifest {
                         capability.name
                     )));
                 }
-            }
-            if capability.output_mode == OutputMode::One && capability.outputs.len() != 1 {
-                return Err(EngineError::ManifestInvalid(format!(
-                    "capability {} uses output_mode=one with {} outputs",
-                    capability.name,
-                    capability.outputs.len()
-                )));
             }
         }
         if self.implementation == "onnx.pipeline" {
@@ -989,9 +950,7 @@ mode = "stream"
             operation: Operation::Generate,
             required_inputs: vec![Modality::Audio],
             optional_inputs: vec![Modality::Text],
-            min_inputs: 1,
             outputs: vec![Modality::Audio],
-            output_mode: OutputMode::One,
             mode: Mode::Batch,
         };
         let audio_only = CapabilityRequest {
@@ -1020,9 +979,7 @@ mode = "stream"
             operation: Operation::Generate,
             required_inputs: vec![Modality::Image],
             optional_inputs: vec![Modality::Text],
-            min_inputs: 1,
             outputs: vec![Modality::Video],
-            output_mode: OutputMode::One,
             mode: Mode::Batch,
         };
         let request = CapabilityRequest {
@@ -1039,11 +996,11 @@ mode = "stream"
         let raw = base()
             .replace(
                 "required_inputs = [\"text\"]",
-                "required_inputs = []\noptional_inputs = [\"text\", \"audio\", \"image\"]\nmin_inputs = 1",
+                "required_inputs = []\noptional_inputs = [\"text\", \"audio\", \"image\"]",
             )
             .replace(
                 "outputs = [\"text\"]",
-                "outputs = [\"text\", \"audio\", \"image\"]\noutput_mode = \"many\"",
+                "outputs = [\"text\", \"audio\", \"image\"]\n",
             );
         let manifest = parse(&raw);
         manifest.validate().expect("optional-only capability");
@@ -1051,6 +1008,12 @@ mode = "stream"
             operation: Operation::Generate,
             present_inputs: vec![Modality::Audio],
             requested_outputs: vec![Modality::Image, Modality::Text],
+            mode: Mode::Batch,
+        }));
+        assert!(manifest.supports(&CapabilityRequest {
+            operation: Operation::Generate,
+            present_inputs: vec![Modality::Audio],
+            requested_outputs: vec![Modality::Text],
             mode: Mode::Batch,
         }));
         assert!(!manifest.supports(&CapabilityRequest {
@@ -1089,26 +1052,5 @@ mode = "stream"
         let raw = base().replace("outputs = [\"text\"]", "outputs = [\"text\", \"text\"]");
         let error = parse(&raw).validate().expect_err("must reject");
         assert!(error.to_string().contains("twice"));
-    }
-
-    #[test]
-    fn rejects_min_inputs_above_allowed_inputs() {
-        let raw = base().replace("mode = \"stream\"", "min_inputs = 2\nmode = \"stream\"");
-        let error = parse(&raw).validate().expect_err("must reject");
-        assert!(error.to_string().contains("min_inputs"));
-    }
-
-    #[test]
-    fn rejects_zero_min_inputs() {
-        let raw = base().replace("mode = \"stream\"", "min_inputs = 0\nmode = \"stream\"");
-        let error = parse(&raw).validate().expect_err("must reject");
-        assert!(error.to_string().contains("min_inputs"));
-    }
-
-    #[test]
-    fn rejects_one_output_mode_with_multiple_outputs() {
-        let raw = base().replace("outputs = [\"text\"]", "outputs = [\"text\", \"audio\"]");
-        let error = parse(&raw).validate().expect_err("must reject");
-        assert!(error.to_string().contains("output_mode"));
     }
 }

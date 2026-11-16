@@ -2,7 +2,7 @@ use std::path::Path;
 
 use uniinfer_core::{
     AudioConfig, Capability, Modality, Mode, ModelFile, ModelFormat, ModelManifest, Operation,
-    OutputMode, PipelineConfig, PipelineStep, PlacementConfig, Quantization, Runtime,
+    PipelineConfig, PipelineStep, PlacementConfig, Quantization, Runtime,
 };
 
 use crate::error::{InspectError, Result};
@@ -216,9 +216,7 @@ pub fn inspect(root: &Path, options: &InspectOptions) -> Result<Inspection> {
             operation: Operation::Transcribe,
             required_inputs: vec![Modality::Audio],
             optional_inputs: Vec::new(),
-            min_inputs: 1,
             outputs: vec![Modality::Text],
-            output_mode: OutputMode::One,
             mode: Mode::Batch,
         });
     }
@@ -232,9 +230,7 @@ pub fn inspect(root: &Path, options: &InspectOptions) -> Result<Inspection> {
                 .copied()
                 .filter(|modality| *modality != Modality::Text)
                 .collect(),
-            min_inputs: 1,
             outputs: vec![Modality::Text],
-            output_mode: OutputMode::One,
             mode: Mode::Stream,
         });
     }
@@ -244,9 +240,7 @@ pub fn inspect(root: &Path, options: &InspectOptions) -> Result<Inspection> {
             operation: Operation::Understand,
             required_inputs: vec![Modality::Image],
             optional_inputs: vec![Modality::Text],
-            min_inputs: 1,
             outputs: vec![Modality::Text],
-            output_mode: OutputMode::One,
             mode: Mode::Batch,
         });
     }
