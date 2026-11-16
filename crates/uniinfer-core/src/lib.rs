@@ -17,7 +17,7 @@ pub use engine::{
     NativeTextDecoder, NativeTextOutput, NativeTextRequest,
 };
 pub use error::{EngineError, Result};
-pub use image_batch::{decode_images, encode_images};
+pub use image_batch::{ImageBatch, MAX_IMAGES};
 pub use manifest::{
     AudioConfig, Capability, CapabilityRequest, ImageConfig, Modality, Mode, ModelFile,
     ModelFormat, ModelManifest, Operation, PipelineConfig, PipelineStep, PlacementConfig,

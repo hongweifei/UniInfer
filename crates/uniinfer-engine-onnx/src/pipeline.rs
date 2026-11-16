@@ -11,8 +11,8 @@ use image::GenericImageView;
 use image::imageops::FilterType;
 use ort::environment::Environment;
 use uniinfer_core::{
-    DeviceClass, EngineError, EngineLoadSpec, EngineSession, PipelineStep, Result, Tensor,
-    TensorData, TensorDtype, TensorSpec, decode_images,
+    DeviceClass, EngineError, EngineLoadSpec, EngineSession, ImageBatch, PipelineStep, Result,
+    Tensor, TensorData, TensorDtype, TensorSpec,
 };
 
 use crate::graph::Graph;
@@ -184,8 +184,8 @@ impl EngineSession for PipelineSession {
             .lock()
             .map_err(|_| EngineError::Other("onnx pipeline state poisoned".into()))?;
         if let Some(image) = image {
-            let images = decode_images(&image)?;
-            let pre = state.preprocess(&images)?;
+            let images = ImageBatch::decode(&image)?;
+            let pre = state.preprocess(images.as_slice())?;
             let batch = pre.len();
             let height = pre[0].height;
             let width = pre[0].width;

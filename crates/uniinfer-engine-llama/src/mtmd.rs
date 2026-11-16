@@ -240,11 +240,14 @@ impl EngineSession for LlamaMtmdSession {
                 TensorData::U8(bytes) => Some(bytes.clone()),
                 _ => None,
             });
-        let images = image.into_iter().collect::<Vec<_>>();
+        let images = image
+            .map(|bytes| uniinfer_core::ImageBatch::decode(&bytes))
+            .transpose()?;
+        let images = images.as_ref().map_or(&[][..], |images| images.as_slice());
         let output = self.generate_text(
             NativeTextRequest {
                 prompt: &text,
-                images: &images,
+                images,
                 max_tokens: 64,
                 temperature: 0.0,
                 top_p: 1.0,

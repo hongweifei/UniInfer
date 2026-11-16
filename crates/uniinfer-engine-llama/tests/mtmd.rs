@@ -45,7 +45,8 @@ fn qwen2_5_vl_gguf_describes_image() {
         TensorData::U8(prompt.as_bytes().to_vec()),
     )
     .expect("text");
-    let image = Tensor::new("image", vec![png.len()], TensorData::U8(png)).expect("image");
+    let encoded = uniinfer_core::ImageBatch::encode(&[png]).expect("encode");
+    let image = Tensor::new("image", vec![encoded.len()], TensorData::U8(encoded)).expect("image");
     let outputs = session.run(vec![text, image]).expect("run");
     let TensorData::U8(text) = &outputs[0].data else {
         panic!("expected text");

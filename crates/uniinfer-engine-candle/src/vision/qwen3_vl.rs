@@ -121,7 +121,9 @@ impl Qwen3VlSession {
                     _ => None,
                 })
         {
-            let processed = uniinfer_core::decode_images(&bytes)?
+            let images = uniinfer_core::ImageBatch::decode(&bytes)?;
+            let processed = images
+                .as_slice()
                 .iter()
                 .map(|image| self.preprocessor.preprocess(image))
                 .collect::<Result<Vec<_>>>()?;
@@ -378,8 +380,9 @@ mod tests {
         );
         let input_ids =
             CoreTensor::new("input_ids", vec![1, ids.len()], TensorData::I64(ids)).expect("ids");
+        let encoded = uniinfer_core::ImageBatch::encode(&[png]).expect("encode");
         let image_tensor =
-            CoreTensor::new("image", vec![png.len()], TensorData::U8(png)).expect("image");
+            CoreTensor::new("image", vec![encoded.len()], TensorData::U8(encoded)).expect("image");
         let outputs = session.run(vec![input_ids, image_tensor]).expect("run");
         assert_eq!(outputs[0].name, "logits");
         let TensorData::F32(logits) = &outputs[0].data else {
@@ -435,7 +438,7 @@ mod tests {
                 .expect("png");
             images.push(png);
         }
-        let encoded = uniinfer_core::encode_images(&images);
+        let encoded = uniinfer_core::ImageBatch::encode(&images).expect("encode");
         let input_ids =
             CoreTensor::new("input_ids", vec![1, ids.len()], TensorData::I64(ids)).expect("ids");
         let image_tensor =

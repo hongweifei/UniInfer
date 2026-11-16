@@ -196,7 +196,7 @@ curl http://127.0.0.1:8080/v1/chat/completions \
   }'
 ```
 
-图像输入支持 base64 `data:` URL、单请求多图、每图 20 MiB 上限。音频与视频 content part 返回稳定的 `400 unsupported_content`。
+图像输入支持 base64 `data:` URL、单请求多图、每图 20 MiB、最多 256 图。音频与视频 content part 返回稳定的 `400 unsupported_content`。
 
 ### 语音转写
 

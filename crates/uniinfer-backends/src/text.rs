@@ -126,7 +126,7 @@ impl TextGenerator {
         let extra = if images.is_empty() {
             Vec::new()
         } else {
-            let encoded = uniinfer_core::encode_images(images);
+            let encoded = uniinfer_core::ImageBatch::encode(images)?;
             vec![Tensor::new(
                 "image",
                 vec![encoded.len()],
@@ -375,7 +375,8 @@ mod tests {
             if let Some(image) = inputs.iter().find(|tensor| tensor.name == "image")
                 && let TensorData::U8(bytes) = &image.data
             {
-                let images = uniinfer_core::decode_images(bytes)?;
+                let images = uniinfer_core::ImageBatch::decode(bytes)?;
+                let images = images.as_slice().to_vec();
                 self.images.lock().expect("lock").push(images);
             }
             let mut logits = vec![0.0f32; seq * 256];

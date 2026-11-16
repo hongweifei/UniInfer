@@ -53,7 +53,10 @@ fn smolvlm_onnx_returns_logits_for_image() {
     let outputs = session
         .run(vec![
             Tensor::new("input_ids", vec![1, ids.len()], TensorData::I64(ids)).expect("ids"),
-            Tensor::new("image", vec![png.len()], TensorData::U8(png)).expect("image"),
+            {
+                let encoded = uniinfer_core::ImageBatch::encode(&[png]).expect("encode");
+                Tensor::new("image", vec![encoded.len()], TensorData::U8(encoded)).expect("image")
+            },
         ])
         .expect("run");
     let logits = &outputs[0];
@@ -122,7 +125,7 @@ fn smolvlm_onnx_returns_logits_for_two_images() {
         .run(vec![
             Tensor::new("input_ids", vec![1, ids.len()], TensorData::I64(ids)).expect("ids"),
             {
-                let encoded = uniinfer_core::encode_images(&images);
+                let encoded = uniinfer_core::ImageBatch::encode(&images).expect("encode");
                 Tensor::new("image", vec![encoded.len()], TensorData::U8(encoded)).expect("images")
             },
         ])

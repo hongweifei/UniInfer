@@ -97,7 +97,7 @@ mode = "batch"
 UIIM | count: u64 | [length: u64 | bytes]*
 ```
 
-ONNX pipeline 解码后批量预处理，shape 为 `[N, 1, 3, H, W]`；`merge` 把 vision 特征按标记顺序展开到对应位置。Qwen3-VL 使用 `[N, 3]` 的 `image_grid_thw` 与逐图 span；llama.cpp mtmd 为每张图创建一个 bitmap。原始未编码 payload 按单图处理，兼容直接调用 engine session 的测试。
+ONNX pipeline 解码后批量预处理，shape 为 `[N, 1, 3, H, W]`；`merge` 把 vision 特征按标记顺序展开到对应位置。Qwen3-VL 使用 `[N, 3]` 的 `image_grid_thw` 与逐图 span；llama.cpp mtmd 为每张图创建一个 bitmap。所有 `EngineSession` 的 `image` tensor 都使用 `ImageBatch` 编码，单图也走同一封包；单请求上限 256 图。
 
 ## 5. ONNX
 
