@@ -114,7 +114,7 @@ pub(crate) async fn transcribe(
         Ok(output) => {
             return Err(ApiError::internal(format!(
                 "transcription returned {:?}",
-                output.modality()
+                output.modalities()
             )));
         }
         Err(error) => {

@@ -75,7 +75,19 @@ required_inputs = ["image"]
 optional_inputs = ["text"]
 outputs = ["video"]
 mode = "batch"
+
+[[capabilities]]
+name = "omni_chat"
+operation = "generate"
+required_inputs = []
+optional_inputs = ["text", "audio", "image"]
+min_inputs = 1
+outputs = ["text", "audio", "image"]
+output_mode = "many"
+mode = "duplex"
 ```
+
+`required_inputs` 与 `optional_inputs` 构成允许输入集合；`min_inputs` 约束不同输入模态的最小数量。输入为空时，任一非空子集都可匹配。`output_mode = "one"` 表示一次响应一种输出；`"many"` 表示可返回请求的输出子集，由 `ModelOutput::Parts` 承载。
 
 配置按能力分组：
 

@@ -127,7 +127,7 @@ pub(crate) async fn generate(
         other => {
             return Err(ApiError::internal(format!(
                 "image generation returned {:?}",
-                other.modality()
+                other.modalities()
             )));
         }
     };

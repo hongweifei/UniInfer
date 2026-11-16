@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 use std::fmt;
 use std::fs::File;
 use std::io::Read;
@@ -42,18 +42,41 @@ pub enum Mode {
     Duplex,
 }
 
+/// How many outputs one response can carry.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum OutputMode {
+    /// Exactly one output modality per response.
+    #[default]
+    One,
+    /// Any non-empty subset of the declared outputs.
+    Many,
+}
+
 /// One model capability: operation, input contract, output contract and mode.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Capability {
     pub name: String,
     pub operation: Operation,
+    /// Inputs that must always be present.
     #[serde(default)]
     pub required_inputs: Vec<Modality>,
+    /// Inputs that may accompany the required ones.
     #[serde(default)]
     pub optional_inputs: Vec<Modality>,
+    /// Minimum number of distinct present inputs.
+    #[serde(default = "default_min_inputs")]
+    pub min_inputs: usize,
     pub outputs: Vec<Modality>,
+    /// Whether a response carries one output or a requested subset.
+    #[serde(default)]
+    pub output_mode: OutputMode,
     pub mode: Mode,
+}
+
+fn default_min_inputs() -> usize {
+    1
 }
 
 impl Capability {
@@ -75,11 +98,25 @@ impl Capability {
         }) {
             return false;
         }
+        if unique_len(&request.present_inputs) < self.min_inputs {
+            return false;
+        }
+        let requested_outputs = unique_len(&request.requested_outputs);
+        if requested_outputs == 0 {
+            return false;
+        }
+        if self.output_mode == OutputMode::One && requested_outputs != 1 {
+            return false;
+        }
         request
             .requested_outputs
             .iter()
             .all(|modality| self.outputs.contains(modality))
     }
+}
+
+fn unique_len(modalities: &[Modality]) -> usize {
+    modalities.iter().copied().collect::<HashSet<_>>().len()
 }
 
 impl Mode {
@@ -281,6 +318,24 @@ pub enum Modality {
     Audio,
     Image,
     Video,
+}
+
+impl Modality {
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Text => "text",
+            Self::Audio => "audio",
+            Self::Image => "image",
+            Self::Video => "video",
+        }
+    }
+}
+
+impl fmt::Display for Modality {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
 }
 
 /// One weight file with an integrity digest.
@@ -584,10 +639,31 @@ impl ModelManifest {
                     capability.name
                 )));
             }
-            if capability.required_inputs.is_empty() {
+            let mut inputs = HashSet::new();
+            for modality in capability
+                .required_inputs
+                .iter()
+                .chain(capability.optional_inputs.iter())
+            {
+                if !inputs.insert(*modality) {
+                    return Err(EngineError::ManifestInvalid(format!(
+                        "capability {} declares input {modality} twice",
+                        capability.name
+                    )));
+                }
+            }
+            if inputs.is_empty() {
                 return Err(EngineError::ManifestInvalid(format!(
-                    "capability {} has no required inputs",
+                    "capability {} has no inputs",
                     capability.name
+                )));
+            }
+            if capability.min_inputs == 0 || capability.min_inputs > inputs.len() {
+                return Err(EngineError::ManifestInvalid(format!(
+                    "capability {} min_inputs {} is outside 1..={}",
+                    capability.name,
+                    capability.min_inputs,
+                    inputs.len()
                 )));
             }
             if capability.outputs.is_empty() {
@@ -596,14 +672,20 @@ impl ModelManifest {
                     capability.name
                 )));
             }
-            if capability
-                .required_inputs
-                .iter()
-                .any(|modality| capability.optional_inputs.contains(modality))
-            {
+            let mut outputs = HashSet::new();
+            for modality in &capability.outputs {
+                if !outputs.insert(*modality) {
+                    return Err(EngineError::ManifestInvalid(format!(
+                        "capability {} declares output {modality} twice",
+                        capability.name
+                    )));
+                }
+            }
+            if capability.output_mode == OutputMode::One && capability.outputs.len() != 1 {
                 return Err(EngineError::ManifestInvalid(format!(
-                    "capability {} marks an input both required and optional",
-                    capability.name
+                    "capability {} uses output_mode=one with {} outputs",
+                    capability.name,
+                    capability.outputs.len()
                 )));
             }
         }
@@ -907,7 +989,9 @@ mode = "stream"
             operation: Operation::Generate,
             required_inputs: vec![Modality::Audio],
             optional_inputs: vec![Modality::Text],
+            min_inputs: 1,
             outputs: vec![Modality::Audio],
+            output_mode: OutputMode::One,
             mode: Mode::Batch,
         };
         let audio_only = CapabilityRequest {
@@ -936,7 +1020,9 @@ mode = "stream"
             operation: Operation::Generate,
             required_inputs: vec![Modality::Image],
             optional_inputs: vec![Modality::Text],
+            min_inputs: 1,
             outputs: vec![Modality::Video],
+            output_mode: OutputMode::One,
             mode: Mode::Batch,
         };
         let request = CapabilityRequest {
@@ -949,9 +1035,80 @@ mode = "stream"
     }
 
     #[test]
-    fn rejects_empty_required_inputs() {
+    fn accepts_optional_only_inputs_with_output_subsets() {
+        let raw = base()
+            .replace(
+                "required_inputs = [\"text\"]",
+                "required_inputs = []\noptional_inputs = [\"text\", \"audio\", \"image\"]\nmin_inputs = 1",
+            )
+            .replace(
+                "outputs = [\"text\"]",
+                "outputs = [\"text\", \"audio\", \"image\"]\noutput_mode = \"many\"",
+            );
+        let manifest = parse(&raw);
+        manifest.validate().expect("optional-only capability");
+        assert!(manifest.supports(&CapabilityRequest {
+            operation: Operation::Generate,
+            present_inputs: vec![Modality::Audio],
+            requested_outputs: vec![Modality::Image, Modality::Text],
+            mode: Mode::Batch,
+        }));
+        assert!(!manifest.supports(&CapabilityRequest {
+            operation: Operation::Generate,
+            present_inputs: vec![Modality::Video],
+            requested_outputs: vec![Modality::Text],
+            mode: Mode::Batch,
+        }));
+        assert!(!manifest.supports(&CapabilityRequest {
+            operation: Operation::Generate,
+            present_inputs: vec![],
+            requested_outputs: vec![Modality::Text],
+            mode: Mode::Batch,
+        }));
+    }
+
+    #[test]
+    fn rejects_empty_inputs() {
         let raw = base().replace("required_inputs = [\"text\"]", "required_inputs = []");
         let error = parse(&raw).validate().expect_err("must reject");
-        assert!(error.to_string().contains("required inputs"));
+        assert!(error.to_string().contains("no inputs"));
+    }
+
+    #[test]
+    fn rejects_duplicate_inputs() {
+        let raw = base().replace(
+            "required_inputs = [\"text\"]",
+            "required_inputs = [\"text\", \"text\"]",
+        );
+        let error = parse(&raw).validate().expect_err("must reject");
+        assert!(error.to_string().contains("twice"));
+    }
+
+    #[test]
+    fn rejects_duplicate_outputs() {
+        let raw = base().replace("outputs = [\"text\"]", "outputs = [\"text\", \"text\"]");
+        let error = parse(&raw).validate().expect_err("must reject");
+        assert!(error.to_string().contains("twice"));
+    }
+
+    #[test]
+    fn rejects_min_inputs_above_allowed_inputs() {
+        let raw = base().replace("mode = \"stream\"", "min_inputs = 2\nmode = \"stream\"");
+        let error = parse(&raw).validate().expect_err("must reject");
+        assert!(error.to_string().contains("min_inputs"));
+    }
+
+    #[test]
+    fn rejects_zero_min_inputs() {
+        let raw = base().replace("mode = \"stream\"", "min_inputs = 0\nmode = \"stream\"");
+        let error = parse(&raw).validate().expect_err("must reject");
+        assert!(error.to_string().contains("min_inputs"));
+    }
+
+    #[test]
+    fn rejects_one_output_mode_with_multiple_outputs() {
+        let raw = base().replace("outputs = [\"text\"]", "outputs = [\"text\", \"audio\"]");
+        let error = parse(&raw).validate().expect_err("must reject");
+        assert!(error.to_string().contains("output_mode"));
     }
 }

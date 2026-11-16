@@ -9,18 +9,37 @@ pub enum ModelOutput {
     Audio(AudioOutput),
     Image(ImageOutput),
     Video(VideoOutput),
+    /// Multiple outputs produced by one execution.
+    Parts(Vec<ModelOutput>),
 }
 
 impl ModelOutput {
-    /// Modality carried by this output.
+    /// Distinct modalities carried by this output, in first-seen order.
     #[must_use]
-    pub fn modality(&self) -> Modality {
+    pub fn modalities(&self) -> Vec<Modality> {
+        let mut modalities = Vec::new();
+        self.collect_modalities(&mut modalities);
+        modalities
+    }
+
+    fn collect_modalities(&self, modalities: &mut Vec<Modality>) {
         match self {
-            Self::Text(_) => Modality::Text,
-            Self::Audio(_) => Modality::Audio,
-            Self::Image(_) => Modality::Image,
-            Self::Video(_) => Modality::Video,
+            Self::Text(_) => push_once(modalities, Modality::Text),
+            Self::Audio(_) => push_once(modalities, Modality::Audio),
+            Self::Image(_) => push_once(modalities, Modality::Image),
+            Self::Video(_) => push_once(modalities, Modality::Video),
+            Self::Parts(parts) => {
+                for part in parts {
+                    part.collect_modalities(modalities);
+                }
+            }
         }
+    }
+}
+
+fn push_once(modalities: &mut Vec<Modality>, modality: Modality) {
+    if !modalities.contains(&modality) {
+        modalities.push(modality);
     }
 }
 
@@ -56,5 +75,30 @@ pub struct VideoOutput {
 #[derive(Debug, Clone, PartialEq)]
 pub enum ModelEvent {
     TextDelta(String),
-    Progress { step: usize, total: usize },
+    /// A complete non-text output or multi-part event.
+    Output(ModelOutput),
+    Progress {
+        step: usize,
+        total: usize,
+    },
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn multipart_output_reports_distinct_modalities() {
+        let output = ModelOutput::Parts(vec![
+            ModelOutput::Text("hello".into()),
+            ModelOutput::Image(ImageOutput {
+                mime: "image/png".into(),
+                bytes: vec![1],
+                width: 1,
+                height: 1,
+            }),
+            ModelOutput::Text("again".into()),
+        ]);
+        assert_eq!(output.modalities(), vec![Modality::Text, Modality::Image]);
+    }
 }

@@ -2,8 +2,8 @@ use std::path::{Path, PathBuf};
 
 use uniinfer_core::{
     Capability, DeviceClass, EngineError, EngineLoadSpec, EngineSession, InferenceEngine, Modality,
-    Mode, ModelFormat, ModelManifest, Operation, PlacementConfig, PlacementPolicy, Quantization,
-    Result, Runtime, Tensor, TensorData, TensorSpec,
+    Mode, ModelFormat, ModelManifest, Operation, OutputMode, PlacementConfig, PlacementPolicy,
+    Quantization, Result, Runtime, Tensor, TensorData, TensorSpec,
 };
 use uniinfer_devices::DeviceInventory;
 use uniinfer_registry::EngineRegistry;
@@ -82,7 +82,9 @@ fn manifest() -> ModelManifest {
             operation: Operation::Generate,
             required_inputs: vec![Modality::Text],
             optional_inputs: Vec::new(),
+            min_inputs: 1,
             outputs: vec![Modality::Text],
+            output_mode: OutputMode::One,
             mode: Mode::Stream,
         }],
         format: ModelFormat::Onnx,
