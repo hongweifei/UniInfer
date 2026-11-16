@@ -10,10 +10,6 @@ use uniinfer_core::{EngineError, EngineLoadSpec, EngineSession, ModelFormat, Res
 
 pub(crate) use preprocess::ImageProcessor;
 
-pub(crate) fn supports(family: &str) -> bool {
-    family == "qwen3_vl"
-}
-
 pub(crate) fn load(
     spec: &EngineLoadSpec,
     family: &str,

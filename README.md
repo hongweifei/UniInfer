@@ -490,8 +490,10 @@ cargo run -p uniinfer-desktop
 清单描述模型的格式、量化、能力与资源需求，加载前完成路由与预检：
 
 ```toml
-schema_version = 1
 id = "qwen2.5-1.5b-instruct-q4_k_m"
+runtime = "candle"
+implementation = "candle.text"
+capabilities = ["text_generation"]
 format = "gguf"
 quantization = "q4_k_m"
 modalities = ["text"]

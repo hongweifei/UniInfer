@@ -3,7 +3,7 @@
 use candle_core::DType;
 use uniinfer_core::{
     Device as CoreDevice, DeviceClass, EngineError, EngineLoadSpec, EngineSession, InferenceEngine,
-    Modality, ModelFormat, Quantization, Result,
+    Modality, ModelFormat, Quantization, Result, Runtime,
 };
 
 use crate::device::{device_for, probe_device_ids, probe_devices};
@@ -38,6 +38,14 @@ impl InferenceEngine for CandleEngine {
         "candle"
     }
 
+    fn runtime(&self) -> Runtime {
+        Runtime::Candle
+    }
+
+    fn implementations(&self) -> &[&'static str] {
+        &["candle.text", "candle.vision"]
+    }
+
     fn supported_formats(&self) -> &[ModelFormat] {
         FORMATS
     }
@@ -55,23 +63,6 @@ impl InferenceEngine for CandleEngine {
             ModelFormat::Gguf => text::GGUF_QUANTIZATIONS,
             ModelFormat::Safetensors => text::SAFETENSORS_QUANTIZATIONS,
             _ => &[],
-        }
-    }
-
-    fn supports_architecture(&self, manifest: &uniinfer_core::ModelManifest) -> bool {
-        let Some(family) = manifest
-            .text
-            .as_ref()
-            .and_then(|text| text.family.as_deref())
-        else {
-            return false;
-        };
-        if vision::supports(family) {
-            true
-        } else if manifest.modalities.contains(&Modality::Image) {
-            false
-        } else {
-            self.text.supported(family)
         }
     }
 
@@ -154,7 +145,7 @@ impl InferenceEngine for CandleEngine {
                 .as_deref()
                 .unwrap_or_else(|| std::path::Path::new("")),
         );
-        if vision::supports(family_name) {
+        if spec.manifest.implementation == "candle.vision" {
             vision::verify_safetensors(spec.manifest.format)?;
             return vision::load(
                 &spec,

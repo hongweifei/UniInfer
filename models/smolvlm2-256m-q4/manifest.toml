@@ -1,8 +1,10 @@
-schema_version = 1
 id = "smolvlm2-256m-q4"
+runtime = "llama"
+implementation = "llama.mtmd"
 format = "gguf"
 quantization = "q4_k_m"
 modalities = ["text", "image"]
+capabilities = ["text_generation", "vision_chat"]
 streaming_capable = false
 context_len = 4096
 tokenizer = "hf"

@@ -180,8 +180,7 @@ def main() -> None:
     model_path.write_bytes(build_model())
 
     digest = hashlib.sha256(model_path.read_bytes()).hexdigest()
-    manifest = f"""schema_version = 1
-id = "tiny-byte-onnx"
+    manifest = f"""id = "tiny-byte-onnx"
 format = "onnx"
 quantization = "fp32"
 modalities = ["text"]
@@ -214,8 +213,7 @@ sha256 = "{digest}"
     vision_path = OUT_DIR / "vision.onnx"
     vision_path.write_bytes(build_vision_model())
     vision_digest = hashlib.sha256(vision_path.read_bytes()).hexdigest()
-    vision_manifest = f"""schema_version = 1
-id = "tiny-vision-onnx"
+    vision_manifest = f"""id = "tiny-vision-onnx"
 format = "onnx"
 quantization = "fp32"
 modalities = ["text", "image"]

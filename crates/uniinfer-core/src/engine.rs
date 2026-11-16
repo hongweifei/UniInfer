@@ -4,7 +4,7 @@ use std::time::Instant;
 use crate::cancel::CancelToken;
 use crate::device::{DeviceBudget, DeviceClass, PlacementPlan};
 use crate::error::Result;
-use crate::manifest::{Modality, ModelFormat, ModelManifest, Quantization};
+use crate::manifest::{Modality, ModelFormat, ModelManifest, Quantization, Runtime};
 use crate::tensor::{Tensor, TensorSpec};
 
 /// Static capability matrix reported by an engine.
@@ -118,6 +118,12 @@ pub trait EngineSession: Send + Sync {
 pub trait InferenceEngine: Send + Sync {
     fn engine_name(&self) -> &'static str;
 
+    /// Runtime family this engine implements.
+    fn runtime(&self) -> Runtime;
+
+    /// Declarative implementation names accepted by this engine.
+    fn implementations(&self) -> &[&'static str];
+
     fn supported_formats(&self) -> &[ModelFormat];
 
     fn supported_modalities(&self, format: ModelFormat) -> &[Modality];
@@ -125,14 +131,6 @@ pub trait InferenceEngine: Send + Sync {
     fn supported_quantizations(&self, format: ModelFormat) -> &[Quantization];
 
     fn supported_devices(&self) -> &[DeviceClass];
-
-    /// Whether this engine implements the manifest's model family/architecture.
-    ///
-    /// Engines with a generic graph contract return true; model-family engines
-    /// override this so routing fails before loading weights.
-    fn supports_architecture(&self, _manifest: &ModelManifest) -> bool {
-        true
-    }
 
     fn capabilities(&self) -> EngineCapabilities {
         let formats = self.supported_formats().to_vec();

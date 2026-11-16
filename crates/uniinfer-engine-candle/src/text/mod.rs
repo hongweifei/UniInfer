@@ -75,6 +75,7 @@ impl TextRegistry {
         self.families.get(name).cloned()
     }
 
+    #[cfg(test)]
     pub(crate) fn supported(&self, name: &str) -> bool {
         self.families.contains_key(name)
     }

@@ -1,9 +1,9 @@
 use std::path::{Path, PathBuf};
 
 use uniinfer_core::{
-    DeviceClass, EngineError, EngineLoadSpec, EngineSession, InferenceEngine, Modality,
-    ModelFormat, ModelManifest, PlacementConfig, PlacementPolicy, Quantization, Result, Tensor,
-    TensorData, TensorSpec, TextConfig,
+    Capability, DeviceClass, EngineError, EngineLoadSpec, EngineSession, InferenceEngine, Modality,
+    ModelFormat, ModelManifest, PlacementConfig, PlacementPolicy, Quantization, Result, Runtime,
+    Tensor, TensorData, TensorSpec,
 };
 use uniinfer_devices::DeviceInventory;
 use uniinfer_registry::EngineRegistry;
@@ -13,6 +13,14 @@ struct FakeEngine;
 impl InferenceEngine for FakeEngine {
     fn engine_name(&self) -> &'static str {
         "fake"
+    }
+
+    fn runtime(&self) -> Runtime {
+        Runtime::Onnx
+    }
+
+    fn implementations(&self) -> &[&'static str] {
+        &["onnx.fake"]
     }
 
     fn supported_formats(&self) -> &[ModelFormat] {
@@ -35,14 +43,6 @@ impl InferenceEngine for FakeEngine {
 
     fn supported_devices(&self) -> &[DeviceClass] {
         &[DeviceClass::Cpu]
-    }
-
-    fn supports_architecture(&self, manifest: &ModelManifest) -> bool {
-        manifest
-            .text
-            .as_ref()
-            .and_then(|text| text.family.as_deref())
-            != Some("unsupported")
     }
 
     fn load_session(&self, _spec: EngineLoadSpec) -> Result<Box<dyn EngineSession>> {
@@ -74,8 +74,10 @@ impl EngineSession for Noop {
 
 fn manifest() -> ModelManifest {
     ModelManifest {
-        schema_version: 1,
         id: "routing".into(),
+        runtime: Runtime::Onnx,
+        implementation: "onnx.fake".into(),
+        capabilities: vec![Capability::TextGeneration],
         format: ModelFormat::Onnx,
         quantization: Quantization::Fp32,
         modalities: vec![Modality::Text],
@@ -143,19 +145,13 @@ fn rejects_unsupported_quantization() {
 }
 
 #[test]
-fn rejects_unsupported_architecture() {
+fn rejects_unsupported_implementation() {
     let temp = tempfile::tempdir().expect("tempdir");
     let mut manifest = manifest();
-    manifest.text = Some(TextConfig {
-        vocab_size: 1,
-        eos_token: None,
-        family: Some("unsupported".into()),
-        config_file: None,
-        tokenizer_file: None,
-    });
+    manifest.implementation = "onnx.unsupported".into();
     let path = write_manifest(temp.path(), &manifest);
     let error = registry().load(&path).err().expect("must reject");
-    assert!(matches!(error, EngineError::UnsupportedArchitecture { .. }));
+    assert!(matches!(error, EngineError::UnsupportedEngine(_)));
 }
 
 #[test]

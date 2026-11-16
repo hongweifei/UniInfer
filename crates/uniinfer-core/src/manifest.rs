@@ -10,6 +10,31 @@ use sha2::{Digest, Sha256};
 use crate::device::{DeviceClass, KvCachePlacement, PlacementPolicy};
 use crate::error::{EngineError, Result};
 
+/// Execution runtime selected declaratively by the manifest.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Runtime {
+    Onnx,
+    Candle,
+    Llama,
+    Whisper,
+    Process,
+}
+
+/// High-level capability declared by a model manifest.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Capability {
+    TextGeneration,
+    VisionChat,
+    AudioTranscription,
+    SpeechSynthesis,
+    ImageGeneration,
+    VideoGeneration,
+    Embeddings,
+    Realtime,
+}
+
 /// Model container formats understood by the runtime.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -362,8 +387,10 @@ impl Default for PlacementConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ModelManifest {
-    pub schema_version: u32,
     pub id: String,
+    pub runtime: Runtime,
+    pub implementation: String,
+    pub capabilities: Vec<Capability>,
     pub format: ModelFormat,
     pub quantization: Quantization,
     pub modalities: Vec<Modality>,
@@ -415,12 +442,6 @@ impl ModelManifest {
 
     /// Validate schema invariants independent of the filesystem.
     pub fn validate(&self) -> Result<()> {
-        if self.schema_version != 1 {
-            return Err(EngineError::ManifestInvalid(format!(
-                "unsupported schema_version {}, expected 1",
-                self.schema_version
-            )));
-        }
         if self.id.is_empty()
             || !self
                 .id
@@ -431,8 +452,21 @@ impl ModelManifest {
                 "id must be a non-empty [A-Za-z0-9._-] string".into(),
             ));
         }
+        if self.implementation.is_empty()
+            || !self
+                .implementation
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
+        {
+            return Err(EngineError::ManifestInvalid(
+                "implementation must be a non-empty [A-Za-z0-9._-] string".into(),
+            ));
+        }
         if self.modalities.is_empty() {
             return Err(EngineError::ManifestInvalid("modalities is empty".into()));
+        }
+        if self.capabilities.is_empty() {
+            return Err(EngineError::ManifestInvalid("capabilities is empty".into()));
         }
         if self.context_len == 0 || self.context_len > 1_048_576 {
             return Err(EngineError::ManifestInvalid(
@@ -495,15 +529,6 @@ impl ModelManifest {
         Ok(())
     }
 
-    /// Model-family hint used by engine architecture capability checks.
-    #[must_use]
-    pub fn architecture(&self) -> Option<&str> {
-        self.audio
-            .as_ref()
-            .and_then(|audio| audio.architecture.as_deref())
-            .or_else(|| self.text.as_ref().and_then(|text| text.family.as_deref()))
-    }
-
     /// Verify every listed weight file against its digest.
     pub fn verify_files(&self, base_dir: &Path) -> Result<()> {
         for file in &self.files {
@@ -527,8 +552,10 @@ mod tests {
 
     fn base() -> String {
         r#"
-schema_version = 1
 id = "tiny-fixture"
+runtime = "onnx"
+implementation = "onnx.graph"
+capabilities = ["text_generation"]
 format = "onnx"
 quantization = "fp32"
 modalities = ["text"]

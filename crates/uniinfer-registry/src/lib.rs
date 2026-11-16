@@ -131,25 +131,33 @@ impl EngineRegistry {
         manifest: &ModelManifest,
     ) -> Result<(Arc<dyn InferenceEngine>, PlacementPlan)> {
         let mut saw_format = false;
-        let mut saw_architecture = false;
+        let mut saw_runtime = false;
+        let mut saw_implementation = false;
         let mut saw_quantization = false;
         let mut saw_device = false;
         let mut saw_modality = false;
 
         for engine in &self.engines {
+            if engine.runtime() != manifest.runtime {
+                continue;
+            }
+            saw_runtime = true;
+            if !engine
+                .implementations()
+                .iter()
+                .any(|name| *name == manifest.implementation)
+            {
+                saw_implementation = true;
+                tracing::debug!(
+                    implementation = %manifest.implementation,
+                    "engine does not implement manifest"
+                );
+                continue;
+            }
             if !engine.supported_formats().contains(&manifest.format) {
                 continue;
             }
             saw_format = true;
-
-            if !engine.supports_architecture(manifest) {
-                saw_architecture = true;
-                tracing::debug!(
-                    architecture = manifest.architecture().unwrap_or("<none>"),
-                    "engine does not support architecture"
-                );
-                continue;
-            }
 
             let modalities = engine.supported_modalities(manifest.format);
             if let Some(missing) = manifest
@@ -180,14 +188,20 @@ impl EngineRegistry {
             }
         }
 
+        if !saw_runtime {
+            return Err(EngineError::UnsupportedEngine(format!(
+                "no engine for runtime {:?}",
+                manifest.runtime
+            )));
+        }
+        if saw_implementation {
+            return Err(EngineError::UnsupportedEngine(format!(
+                "no engine implements {}",
+                manifest.implementation
+            )));
+        }
         if !saw_format {
             return Err(EngineError::UnsupportedFormat(manifest.format));
-        }
-        if saw_architecture {
-            return Err(EngineError::UnsupportedArchitecture {
-                format: manifest.format,
-                architecture: manifest.architecture().unwrap_or("<unknown>").to_owned(),
-            });
         }
         if saw_modality {
             return Err(EngineError::UnsupportedModality {

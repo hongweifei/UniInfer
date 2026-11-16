@@ -1,8 +1,10 @@
-schema_version = 1
 id = "qwen3-0.6b-bf16"
+runtime = "candle"
+implementation = "candle.text"
 format = "safetensors"
 quantization = "bf16"
 modalities = ["text"]
+capabilities = ["text_generation"]
 streaming_capable = false
 context_len = 2048
 tokenizer = "hf"

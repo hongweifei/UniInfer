@@ -1,8 +1,10 @@
-schema_version = 1
 id = "smolvlm2-256m-onnx-q4"
+runtime = "onnx"
+implementation = "onnx.vlm"
 format = "onnx"
 quantization = "int4"
 modalities = ["text", "image"]
+capabilities = ["text_generation", "vision_chat"]
 streaming_capable = false
 context_len = 4096
 tokenizer = "hf"

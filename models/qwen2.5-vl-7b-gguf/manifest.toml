@@ -1,8 +1,10 @@
-schema_version = 1
 id = "qwen2.5-vl-7b-gguf"
+runtime = "llama"
+implementation = "llama.mtmd"
 format = "gguf"
 quantization = "q4_k_m"
 modalities = ["text", "image"]
+capabilities = ["text_generation", "vision_chat"]
 streaming_capable = false
 context_len = 32768
 min_vram = "6GiB"

@@ -13,14 +13,16 @@ mod tests {
 
     use super::*;
     use uniinfer_core::{
-        Device, DeviceClass, Modality, ModelFile, ModelFormat, ModelManifest, PlacementConfig,
-        PlacementPolicy, Quantization,
+        Capability, Device, DeviceClass, Modality, ModelFile, ModelFormat, ModelManifest,
+        PlacementConfig, PlacementPolicy, Quantization, Runtime,
     };
 
     fn manifest(placement: PlacementConfig) -> ModelManifest {
         ModelManifest {
-            schema_version: 1,
             id: "test".into(),
+            runtime: Runtime::Onnx,
+            implementation: "onnx.graph".into(),
+            capabilities: vec![Capability::TextGeneration],
             format: ModelFormat::Onnx,
             quantization: Quantization::Fp32,
             modalities: vec![Modality::Text],

@@ -1,7 +1,8 @@
 use std::path::Path;
 
 use uniinfer_core::{
-    AudioConfig, Modality, ModelFile, ModelFormat, ModelManifest, PlacementConfig, Quantization,
+    AudioConfig, Capability, Modality, ModelFile, ModelFormat, ModelManifest, PlacementConfig,
+    Quantization, Runtime,
 };
 
 use crate::error::{InspectError, Result};
@@ -202,9 +203,32 @@ pub fn inspect(root: &Path, options: &InspectOptions) -> Result<Inspection> {
             })
         })
         .collect::<Result<Vec<_>>>()?;
+    let (runtime, implementation) = match format {
+        ModelFormat::Onnx if audio.is_some() => ("onnx", "onnx.asr.whisper"),
+        ModelFormat::Onnx => ("onnx", "onnx.graph"),
+        ModelFormat::Gguf | ModelFormat::Safetensors => ("candle", "candle.text"),
+        ModelFormat::Ggml => ("whisper", "whisper.ggml"),
+    };
+    let capabilities = modalities
+        .iter()
+        .map(|modality| match modality {
+            Modality::Text => Capability::TextGeneration,
+            Modality::Audio => Capability::AudioTranscription,
+            Modality::Image => Capability::VisionChat,
+            Modality::Video => Capability::VideoGeneration,
+        })
+        .collect::<Vec<_>>();
+    let runtime = match runtime {
+        "onnx" => Runtime::Onnx,
+        "candle" => Runtime::Candle,
+        "whisper" => Runtime::Whisper,
+        _ => Runtime::Onnx,
+    };
     let manifest = ModelManifest {
-        schema_version: 1,
         id,
+        runtime,
+        implementation: implementation.into(),
+        capabilities,
         format,
         quantization,
         modalities,

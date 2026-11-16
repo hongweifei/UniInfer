@@ -126,6 +126,14 @@ impl InferenceEngine for LlamaEngine {
         "llama.cpp"
     }
 
+    fn runtime(&self) -> Runtime {
+        Runtime::Llama
+    }
+
+    fn implementations(&self) -> &[&'static str] {
+        &["llama.text"]
+    }
+
     fn supported_formats(&self) -> &[ModelFormat] {
         FORMATS
     }

@@ -15,7 +15,7 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use uniinfer_core::{
     DeviceClass, EngineError, EngineLoadSpec, EngineSession, InferenceEngine, Modality,
-    ModelFormat, Quantization, Result, Tensor, TensorData, TensorDtype, TensorSpec,
+    ModelFormat, Quantization, Result, Runtime, Tensor, TensorData, TensorDtype, TensorSpec,
 };
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -230,6 +230,14 @@ fn worker_name() -> &'static str {
 impl InferenceEngine for ProcessEngine {
     fn engine_name(&self) -> &'static str {
         "process"
+    }
+
+    fn runtime(&self) -> Runtime {
+        Runtime::Process
+    }
+
+    fn implementations(&self) -> &[&'static str] {
+        &["process.*"]
     }
 
     fn supported_formats(&self) -> &[ModelFormat] {

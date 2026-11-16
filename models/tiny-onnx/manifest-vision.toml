@@ -1,8 +1,10 @@
-schema_version = 1
 id = "tiny-vision-onnx"
+runtime = "onnx"
+implementation = "onnx.graph"
 format = "onnx"
 quantization = "fp32"
 modalities = ["text", "image"]
+capabilities = ["text_generation", "vision_chat"]
 streaming_capable = false
 context_len = 64
 tokenizer = "bytes"

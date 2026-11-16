@@ -30,12 +30,6 @@ pub(crate) fn load(
         .vision
         .as_ref()
         .ok_or_else(|| EngineError::ManifestInvalid("vision config required".into()))?;
-    if vision.architecture != "onnx_smolvlm" {
-        return Err(EngineError::UnsupportedEngine(format!(
-            "onnx vision family {:?}",
-            vision.architecture
-        )));
-    }
     let vision_graph = required(&vision.vision_graph, "vision.vision_graph")?;
     let embed_graph = required(&vision.embed_graph, "vision.embed_graph")?;
     let text_graph = required(&vision.text_graph, "vision.text_graph")?;

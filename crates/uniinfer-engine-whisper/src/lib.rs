@@ -64,6 +64,14 @@ impl InferenceEngine for WhisperEngine {
         "whisper"
     }
 
+    fn runtime(&self) -> Runtime {
+        Runtime::Whisper
+    }
+
+    fn implementations(&self) -> &[&'static str] {
+        &["whisper.ggml"]
+    }
+
     fn supported_formats(&self) -> &[ModelFormat] {
         FORMATS
     }
@@ -84,17 +92,6 @@ impl InferenceEngine for WhisperEngine {
 
     fn supported_devices(&self) -> &[DeviceClass] {
         DEVICES
-    }
-
-    fn supports_architecture(&self, manifest: &ModelManifest) -> bool {
-        manifest.modalities.contains(&Modality::Audio)
-            && matches!(
-                manifest
-                    .audio
-                    .as_ref()
-                    .and_then(|audio| audio.architecture.as_deref()),
-                None | Some("whisper")
-            )
     }
 
     fn load_session(&self, spec: EngineLoadSpec) -> Result<Box<dyn EngineSession>> {

@@ -89,6 +89,14 @@ impl InferenceEngine for LlamaMtmdEngine {
         "llama-mtmd"
     }
 
+    fn runtime(&self) -> Runtime {
+        Runtime::Llama
+    }
+
+    fn implementations(&self) -> &[&'static str] {
+        &["llama.mtmd"]
+    }
+
     fn supported_formats(&self) -> &[ModelFormat] {
         FORMATS
     }
@@ -109,13 +117,6 @@ impl InferenceEngine for LlamaMtmdEngine {
 
     fn supported_devices(&self) -> &[DeviceClass] {
         DEVICES
-    }
-
-    fn supports_architecture(&self, manifest: &uniinfer_core::ModelManifest) -> bool {
-        manifest
-            .vision
-            .as_ref()
-            .is_some_and(|vision| vision.architecture == "llama_mtmd")
     }
 
     fn load_session(&self, spec: EngineLoadSpec) -> Result<Box<dyn EngineSession>> {

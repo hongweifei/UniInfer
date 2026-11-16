@@ -1,8 +1,10 @@
-schema_version = 1
 id = "qwen3-0.6b-onnx-int4"
+runtime = "onnx"
+implementation = "onnx.graph"
 format = "onnx"
 quantization = "int4"
 modalities = ["text"]
+capabilities = ["text_generation"]
 streaming_capable = false
 context_len = 40960
 tokenizer = "hf"

@@ -7,7 +7,7 @@ use ort::environment::Environment;
 use ort::session::Session;
 use uniinfer_core::{
     Device, DeviceClass, EngineError, EngineLoadSpec, EngineSession, InferenceEngine, Modality,
-    ModelFormat, ModelManifest, Quantization, Result,
+    ModelFormat, Quantization, Result, Runtime,
 };
 
 mod asr;
@@ -139,6 +139,14 @@ impl InferenceEngine for OnnxEngine {
         "onnx"
     }
 
+    fn runtime(&self) -> Runtime {
+        Runtime::Onnx
+    }
+
+    fn implementations(&self) -> &[&'static str] {
+        &["onnx.graph", "onnx.vlm", "onnx.asr.whisper", "onnx.asr.ctc"]
+    }
+
     fn supported_formats(&self) -> &[ModelFormat] {
         FORMATS
     }
@@ -159,19 +167,6 @@ impl InferenceEngine for OnnxEngine {
 
     fn supported_devices(&self) -> &[DeviceClass] {
         &DEVICES
-    }
-
-    fn supports_architecture(&self, manifest: &ModelManifest) -> bool {
-        if !manifest.modalities.contains(&Modality::Audio) {
-            return true;
-        }
-        matches!(
-            manifest
-                .audio
-                .as_ref()
-                .and_then(|audio| audio.architecture.as_deref()),
-            None | Some("whisper" | "ctc")
-        )
     }
 
     fn load_session(&self, spec: EngineLoadSpec) -> Result<Box<dyn EngineSession>> {
@@ -205,12 +200,7 @@ impl InferenceEngine for OnnxEngine {
             .ok_or_else(|| EngineError::PlacementUnsatisfiable("empty placement".into()))?;
         spec.manifest.verify_files(&spec.base_dir)?;
 
-        if spec
-            .manifest
-            .vision
-            .as_ref()
-            .is_some_and(|vision| vision.architecture == "onnx_smolvlm")
-        {
+        if spec.manifest.implementation == "onnx.vlm" {
             return vlm::load(&self.environment, &spec, class);
         }
 
@@ -223,9 +213,7 @@ impl InferenceEngine for OnnxEngine {
 
         // Encoder-decoder ASR manifests carry their own graph files. Keep the
         // dispatch here so ONNX stays the first choice for every ONNX model.
-        if let Some(audio) = &spec.manifest.audio
-            && audio.architecture.is_some()
-        {
+        if spec.manifest.implementation.starts_with("onnx.asr.") {
             return asr::load(&self.environment, &spec, class);
         }
 
