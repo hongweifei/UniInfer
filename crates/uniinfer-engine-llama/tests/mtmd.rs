@@ -55,6 +55,7 @@ fn qwen2_5_vl_gguf_describes_image() {
 }
 
 #[test]
+#[ignore = "loads the 256 MiB SmolVLM GGUF fixture"]
 fn smolvlm_gguf_describes_image() {
     let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../models/smolvlm2-256m-q4");
     if !dir.join("manifest.toml").is_file() {

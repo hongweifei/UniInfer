@@ -13,6 +13,7 @@ use uniinfer_api::{ApiConfig, AppState, routes};
 mod common;
 
 #[tokio::test]
+#[ignore = "loads the 256 MiB SmolVLM GGUF fixture"]
 async fn gguf_vision_chat_returns_text() {
     let manifest =
         Path::new(env!("CARGO_MANIFEST_DIR")).join("../../models/smolvlm2-256m-q4/manifest.toml");

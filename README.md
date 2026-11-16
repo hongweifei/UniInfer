@@ -395,7 +395,7 @@ cargo test --workspace
 cargo deny check
 ```
 
-真实模型测试位于各 crate 的 `tests/`，fixture 缺失时自动跳过。
+默认测试只使用 `tiny-*` fixture；真实模型测试标记为 `#[ignore]`，需要显式 `--ignored` 且本地已有权重。
 
 ## 安全
 

@@ -208,7 +208,7 @@ Tauri 2 桌面端在进程内启动 loopback API，复用同一配置、模型�
 ## 10. 测试与基线
 
 - `cargo test --workspace` 覆盖核心契约、路由、API 与 fixture 模型。
-- 真实模型测试位于各 crate 的 `tests/`，fixture 缺失时自动跳过。
+- 默认测试只使用 `tiny-*` fixture；真实模型测试标记为 `#[ignore]`，需要显式 `--ignored` 且本地已有权重。
 - `cargo clippy --workspace --all-targets -- -D warnings` 与 `cargo fmt --check` 作为提交门禁。
 - `uniinfer-bench` 记录 TTFT、tok/s、峰值 RSS、ASR 时长与按模型指标。
 - 图像按固定 seed 回归；视频记录时长、分辨率与峰值显存。

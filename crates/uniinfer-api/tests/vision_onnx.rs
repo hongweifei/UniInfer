@@ -11,6 +11,7 @@ use uniinfer_api::{ApiConfig, AppState, routes};
 mod common;
 
 #[tokio::test]
+#[ignore = "loads the 256 MiB SmolVLM ONNX fixture"]
 async fn onnx_vision_chat_returns_text() {
     let manifest = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../models/smolvlm2-256m-onnx-q4/manifest.toml");
@@ -83,6 +84,7 @@ async fn onnx_vision_chat_returns_text() {
 }
 
 #[tokio::test]
+#[ignore = "loads the 256 MiB SmolVLM ONNX fixture"]
 async fn onnx_vision_chat_accepts_two_images() {
     let manifest = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../models/smolvlm2-256m-onnx-q4/manifest.toml");
