@@ -9,7 +9,7 @@ pub trait Tokenizer: Send + Sync {
     fn vocab_size(&self) -> usize;
 }
 
-/// Byte tokenizer used by the M0/M1 fixture.
+/// Byte tokenizer used by the tiny fixture.
 #[derive(Debug, Clone)]
 pub struct ByteTokenizer {
     vocab: usize,

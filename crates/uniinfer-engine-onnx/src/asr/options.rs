@@ -7,7 +7,7 @@ use uniinfer_core::{AudioConfig, EngineError, Result};
 
 pub(crate) fn parse<T: DeserializeOwned>(audio: &AudioConfig) -> Result<T> {
     let options = audio.options.clone().ok_or_else(|| {
-        EngineError::ManifestInvalid("audio.options is required for this architecture".into())
+        EngineError::ManifestInvalid("audio.options is required for this adapter".into())
     })?;
     options
         .try_into()

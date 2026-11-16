@@ -481,7 +481,7 @@ impl Default for PlacementConfig {
     }
 }
 
-/// Model manifest, schema version 1.
+/// Model manifest: capability, runtime, implementation and resource contract.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ModelManifest {
@@ -541,7 +541,7 @@ impl ModelManifest {
         })
     }
 
-    /// Validate schema invariants independent of the filesystem.
+    /// Validate manifest invariants independent of the filesystem.
     pub fn validate(&self) -> Result<()> {
         if self.id.is_empty()
             || !self

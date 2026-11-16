@@ -14,7 +14,7 @@ pub enum VadEvent {
     SpeechStopped,
 }
 
-/// Minimal energy VAD with hangover, matching the M3 orchestrated baseline.
+/// Minimal energy VAD with hangover for orchestrated realtime sessions.
 #[derive(Debug)]
 pub struct EnergyVad {
     threshold: f64,

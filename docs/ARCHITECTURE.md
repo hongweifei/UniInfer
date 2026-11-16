@@ -1,58 +1,55 @@
-# UniInfer architecture
+# UniInfer 架构
 
 ## 1. 原则
 
-1. **ONNX 是通用执行层，不是某个模型的适配层。**
-2. **引擎只做能力匹配和资源执行，不认识模型名。**
-3. **模型差异放在 adapter / profile，不放在 `EngineRegistry`、API 或引擎入口。**
-4. **manifest 是唯一契约。** 行为由声明驱动，不靠隐式约定。
-5. **不做兼容层，不保留 schema 版本号。** 旧格式直接删除。
+1. **ONNX 是通用执行层。**
+2. **引擎负责能力匹配和资源执行。**
+3. **模型差异放在 adapter 与 profile。**
+4. **manifest 是唯一契约。**
+5. **请求按 capability 选择模型。**
 
 ## 2. 路由
 
 ```text
 manifest.runtime          onnx | candle | llama | whisper | process
-manifest.implementation   adapter contract, e.g. onnx.pipeline / candle.text
-manifest.capabilities     user-visible capability set
+manifest.implementation   onnx.graph | onnx.pipeline | candle.text | ...
+manifest.capabilities     operation + inputs + outputs + mode
 ```
 
-`EngineRegistry` 只匹配：
+`EngineRegistry` 匹配：
 
 ```text
 runtime + implementation + format + quantization + input modalities + placement
 ```
 
-它不调用 `supports_architecture`，不比较 Qwen/SmolVLM/Whisper 之类的名字。
-
-`implementation` 是 adapter 契约，不是模型名。多个模型共享同一实现时，只新增 manifest 和 profile。
-
-请求先形成 capability 签名，再筛选 manifest：
+请求先形成 `CapabilityRequest`：
 
 ```text
 request -> CapabilityRequest
         -> manifests where capability.matches(request)
-        -> EngineRegistry route (runtime + implementation + placement)
+        -> EngineRegistry route
         -> load
 ```
 
-显式 `model` 也会先做 capability 校验；`model = "auto"` 或省略时按 capability 自动选择。
+`model = "auto"` 或省略时按 capability 自动选择；显式模型同样校验 capability。
 
 ## 3. 分层
 
 ```mermaid
 flowchart TB
-  API["API / Service"] --> Slot["ModelSlot / capabilities"]
-  Slot --> Registry["EngineRegistry<br/>runtime + implementation"]
-  Registry --> Engine["InferenceEngine<br/>format / quant / placement"]
-  Engine --> Session["EngineSession<br/>named tensors / native decoder"]
-  Engine --> Adapters["Adapter registry<br/>text family / vision family / ASR"]
+  API["API / Service"] --> Exec["ModelExecutor"]
+  Exec --> Slot["ModelSlot / AudioSlot / ImageSlot"]
+  Slot --> Registry["EngineRegistry"]
+  Registry --> Engine["InferenceEngine"]
+  Engine --> Session["EngineSession"]
+  Engine --> Adapters["Adapter registry"]
   Adapters --> Model["Model weights"]
 ```
 
-- **API/Service** 只依赖 capability 和 session 契约。
-- **Engine** 负责资源、格式、量化和设备。
-- **Adapter** 负责模型结构、预处理、token layout。
-- **Manifest** 负责把三者连起来。
+- **API/Service** 依赖 capability、`ModelRequest` 与 `ModelOutput`。
+- **Engine** 负责格式、量化、设备与会话生命周期。
+- **Adapter** 负责模型结构、预处理、token layout、解码。
+- **Manifest** 负责声明。
 
 ## 4. Manifest
 
@@ -80,59 +77,104 @@ outputs = ["video"]
 mode = "batch"
 ```
 
-capability 是唯一的路由签名：`operation + required_inputs + optional_inputs + outputs + mode`。模型相关配置按能力分组：
+配置按能力分组：
 
 ```toml
 [text]      # tokenizer / vocab / chat template
-[vision]    # family / graphs / image token contract / preprocessor profile
+[vision]    # family / image token contract
 [audio]     # family / sample rate / options
+[image]     # output dimensions
+[pipeline]  # ONNX graph steps / bindings / merge / output
 ```
 
-`family` 是 adapter 内的注册名；`implementation` 是引擎可执行契约。两者都不参与全局路由。
+`family` 是 adapter 注册名；`implementation` 是引擎执行契约。
 
 ## 5. ONNX
 
-ONNX 的通用路径是：
-
-```text
-graph(s) + declared inputs/outputs + adapter profile
-```
-
-当前实现：
+ONNX 提供两种实现：
 
 - `onnx.graph`：单个 ONNX 图，named tensors 直通。
-- `onnx.pipeline`：manifest 声明 graph steps、tensor bindings、merge 点和 output；`image_preprocessor` / `token_layout` 只选择 adapter profile。
-- `onnx.pipeline` 的 `adapter` step：Whisper/CTC 等语音 adapter 通过同一个 pipeline 入口加载。
+- `onnx.pipeline`：manifest 声明 graph steps、tensor bindings、merge 点、auto 输入与 output。
 
-新增 ONNX 模型时，优先只新增 manifest；只有新的图契约或新的预处理语义才新增 adapter。
+```toml
+[pipeline]
+image_preprocessor = "smolvlm"
+preprocessor_file = "preprocessor_config_512.json"
+token_layout = "smolvlm"
+output = "decoder.logits"
 
-## 6. 约束
+[[pipeline.steps]]
+kind = "graph"
+name = "vision"
+file = "vision_encoder_q4.onnx"
+inputs = { pixel_values = "preprocess.pixel_values", pixel_attention_mask = "preprocess.pixel_attention_mask" }
 
-- 引擎入口禁止出现模型名分支。
-- 路由禁止读取 `text.family` / `vision.family` / `audio.family`。
-- API 禁止按 engine name 判断能力。
-- 所有模型清单必须具备 `runtime`、`implementation`、`capabilities`。
-- 新功能先定义 capability 和 session 契约，再接模型。
+[[pipeline.steps]]
+kind = "merge"
+source = "vision.image_features"
+target = "embed.inputs_embeds"
+token = "image"
 
-## 7. 迁移状态
+[[pipeline.steps]]
+kind = "graph"
+name = "decoder"
+file = "decoder_model_merged_q4.onnx"
+inputs = { inputs_embeds = "embed.inputs_embeds" }
+auto = ["attention_mask", "position_ids", "past_key_values"]
+```
 
-已完成：
+语音模型使用 pipeline adapter step：
 
-- 删除 `schema_version`。
-- 删除 `InferenceEngine::supports_architecture`。
-- 路由改为 `runtime + implementation`。
-- ONNX 视觉实现改为 `onnx.pipeline`：graph steps / bindings / merge / output 全部由 manifest 声明。
-- 统一 `[text].family`、`[vision].family`、`[audio].family`。
-- `native` 文本解码移出 `EngineSession`，改为独立的 `NativeTextDecoder` capability。
-- `TextGenerator` 的 image 特例改为通用 auxiliary tensor 输入。
-- process isolation 改为 transport 能力，不再伪装成 runtime。
-- ASR 的 Whisper/CTC 通过 `onnx.pipeline` 的 `adapter` step 加载，`onnx.asr.*` 实现名删除。
-- 增加 `ModelExecutor` / `ModelOutput`：所有 slot 统一返回 text/audio/image/video，流式用 `ModelEvent`。
-- `/v1/audio/transcriptions` 已走 `ModelExecutor::execute(ModelRequest::Audio)`。
-- `/v1/images/generations` 走 `ModelExecutor::execute(ModelRequest::Image)`，返回 `ModelOutput::Image`。
+```toml
+[pipeline]
+output = "text"
 
-待完成：
+[[pipeline.steps]]
+kind = "adapter"
+adapter = "whisper"
+```
 
-- capability 契约测试与 `/v1/models` 能力快照。
-- 通用 pipeline DAG（目前 ONNX 仍是声明式参数，不是完整图 DAG）。
-- 多图/视频/音频 auxiliary 输入的 API 契约。
+新增 ONNX 模型时，manifest 覆盖 graph 顺序、绑定、merge、预处理 profile 与输出。只有新的图契约或新的预处理语义才新增 adapter。
+
+## 6. 输出契约
+
+```text
+ModelOutput
+  Text
+  Audio
+  Image
+  Video
+
+ModelEvent
+  TextDelta
+  Progress
+```
+
+`ModelExecutor` 是所有 slot 的公共执行入口：
+
+```rust
+fn execute(
+    &self,
+    request: ModelRequest,
+    cancel: &CancelToken,
+    on_event: &mut dyn FnMut(ModelEvent),
+) -> Result<ModelOutput>;
+```
+
+`/v1/chat/completions`、`/v1/audio/transcriptions`、`/v1/images/generations` 共享这套输出语义。聊天保留专用流式路径，用于 stop、tool_calls 与 usage。
+
+## 7. 约束
+
+- 引擎入口不包含模型名分支。
+- 路由读取 `runtime`、`implementation`、`capability` 与放置信息。
+- API 通过 capability 判断能力。
+- 模型清单必须具备 `runtime`、`implementation`、`capabilities`。
+- 新能力先定义 capability 与 `ModelExecutor` 契约，再接模型。
+
+## 8. 当前实现
+
+- ONNX 文本、视觉 pipeline、Whisper/CTC 转写与图像生成 fixture。
+- Candle GGUF/Safetensors 文本与 Safetensors 视觉。
+- llama.cpp GGUF 文本与 mtmd 视觉。
+- whisper.cpp GGML 转写。
+- Tauri 2 桌面端。

@@ -48,7 +48,7 @@ pub struct GenerationOutput {
     pub finish: FinishReason,
 }
 
-/// Greedy text generator bound to one tokenizer and context size.
+/// Autoregressive text generator bound to one tokenizer and context size.
 pub struct TextGenerator {
     tokenizer: Arc<dyn Tokenizer>,
     vocab_size: usize,

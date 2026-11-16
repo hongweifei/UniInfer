@@ -9,7 +9,7 @@ pub struct DeviceInventory {
 }
 
 impl DeviceInventory {
-    /// Probe the host. M0 reports the CPU; GPU and NPU devices are registered
+    /// Probe the host. The CPU is always available; GPU and NPU devices are registered
     /// by engines as execution providers become available.
     #[must_use]
     pub fn probe() -> Self {

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate the tiny ONNX byte model used by M0 smoke tests.
+"""Generate the tiny ONNX byte, vision and image models used by smoke tests.
 
 The graph maps each input id to the one-hot of `(id + 1) mod 256`, so greedy
 decoding advances one byte per step. It exercises the ONNX engine, tensor

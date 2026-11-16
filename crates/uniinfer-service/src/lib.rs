@@ -223,8 +223,8 @@ impl Runtime {
         base_dir: &Path,
         cancel: CancelToken,
     ) -> Result<Arc<ModelSlot>> {
-        // Backend dispatch is still text-only. Check before loading a session
-        // so non-text manifests fail without allocating model weights.
+        // Check the manifest before loading a session so non-text manifests fail
+        // without allocating model weights.
         if manifest.text.is_none() {
             return Err(EngineError::ManifestInvalid(
                 "runtime currently supports text models; manifest has no [text] section".into(),

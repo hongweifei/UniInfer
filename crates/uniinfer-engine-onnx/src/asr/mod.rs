@@ -1,8 +1,8 @@
 //! Model adapters for ONNX speech models.
 //!
 //! The ONNX engine only owns graph execution. An ASR adapter is selected from
-//! the manifest `[audio].architecture` field, so adding another model family
-//! does not change `OnnxEngine` or the API layer.
+//! the pipeline adapter step, so adding another speech family stays in the
+//! adapter layer.
 
 use uniinfer_core::{DeviceClass, EngineError, EngineLoadSpec, EngineSession, Result};
 
