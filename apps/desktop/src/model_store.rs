@@ -405,136 +405,134 @@ fn build_variants(
     base_files: Option<&RepoFiles>,
 ) -> Result<Vec<VariantSpec>, String> {
     let files = &repo_files.files;
-    let has = |ext: &str| files.iter().any(|file| file.path.ends_with(ext));
-    let format = if has(".gguf") {
-        "gguf"
-    } else if has(".safetensors") {
-        "safetensors"
-    } else if has(".onnx") {
-        "onnx"
-    } else {
-        return Err("仓库里没有 GGUF、Safetensors 或 ONNX 模型文件".into());
-    };
-
     let mut variants = Vec::new();
-    match format {
-        "gguf" => {
-            let mut candidates = files
+
+    let mut gguf = files
+        .iter()
+        .filter(|file| {
+            file.path.to_ascii_lowercase().ends_with(".gguf")
+                && !file.path.to_lowercase().contains("mmproj")
+        })
+        .collect::<Vec<_>>();
+    if !gguf.is_empty() {
+        gguf.sort_by(|a, b| {
+            quant_rank(&a.path)
+                .cmp(&quant_rank(&b.path))
+                .then_with(|| a.path.cmp(&b.path))
+        });
+        for candidate in gguf {
+            let mut selected = vec![remote_file(repo_files, candidate)];
+            selected.extend(sidecars(repo_files));
+            if !selected
                 .iter()
-                .filter(|file| {
-                    file.path.ends_with(".gguf") && !file.path.to_lowercase().contains("mmproj")
-                })
-                .collect::<Vec<_>>();
-            if candidates.is_empty() {
-                return Err("没有可用的 GGUF 量化文件".into());
+                .any(|file| file.path.ends_with("tokenizer.json"))
+            {
+                let base = base_files.ok_or_else(|| {
+                    "GGUF 仓库没有 tokenizer.json，也没有可用的 base model".to_string()
+                })?;
+                selected.extend(sidecars(base));
             }
-            candidates.sort_by(|a, b| {
-                quant_rank(&a.path)
-                    .cmp(&quant_rank(&b.path))
-                    .then_with(|| a.path.cmp(&b.path))
+            dedup_files(&mut selected);
+            let quantization = quant_label(&candidate.path);
+            variants.push(VariantSpec {
+                key: format!("gguf:{}", candidate.path),
+                label: quantization.clone(),
+                source: candidate.path.clone(),
+                format: "gguf".into(),
+                quantization,
+                files: selected,
+                recommended: false,
             });
-            for candidate in candidates {
-                let mut selected = vec![remote_file(repo_files, candidate)];
-                selected.extend(sidecars(repo_files));
-                if !selected
-                    .iter()
-                    .any(|file| file.path.ends_with("tokenizer.json"))
-                {
-                    let base = base_files.ok_or_else(|| {
-                        "GGUF 仓库没有 tokenizer.json，也没有可用的 base model".to_string()
-                    })?;
-                    selected.extend(sidecars(base));
-                }
-                dedup_files(&mut selected);
-                let quantization = quant_label(&candidate.path);
-                variants.push(VariantSpec {
-                    key: format!("gguf:{}", candidate.path),
-                    label: quantization.clone(),
-                    source: candidate.path.clone(),
-                    format: "gguf".into(),
-                    quantization,
-                    files: selected,
-                    recommended: variants.is_empty(),
-                });
-            }
         }
-        "safetensors" => {
-            let mut selected = files
-                .iter()
-                .filter(|file| {
-                    file.path.ends_with(".safetensors")
-                        || file.path.ends_with(".safetensors.index.json")
-                })
+    }
+
+    if files
+        .iter()
+        .any(|file| file.path.to_ascii_lowercase().ends_with(".safetensors"))
+    {
+        let mut selected = files
+            .iter()
+            .filter(|file| {
+                let path = file.path.to_ascii_lowercase();
+                path.ends_with(".safetensors") || path.ends_with(".safetensors.index.json")
+            })
+            .map(|file| remote_file(repo_files, file))
+            .collect::<Vec<_>>();
+        selected.extend(sidecars(repo_files));
+        dedup_files(&mut selected);
+        let source = selected
+            .iter()
+            .find(|file| file.path.ends_with(".safetensors"))
+            .map(|file| file.path.clone())
+            .unwrap_or_default();
+        let quantization = quant_label(&source);
+        variants.push(VariantSpec {
+            key: "safetensors".into(),
+            label: "Safetensors".into(),
+            source,
+            format: "safetensors".into(),
+            quantization,
+            files: selected,
+            recommended: false,
+        });
+    }
+
+    let mut groups: std::collections::BTreeMap<String, Vec<&RemoteInfo>> =
+        std::collections::BTreeMap::new();
+    for file in files
+        .iter()
+        .filter(|file| file.path.to_ascii_lowercase().ends_with(".onnx"))
+    {
+        let dir = file
+            .path
+            .rsplit_once('/')
+            .map_or(String::new(), |(dir, _)| dir.to_string());
+        groups.entry(dir).or_default().push(file);
+    }
+    if !groups.is_empty() {
+        let mut groups = groups.into_iter().collect::<Vec<_>>();
+        groups.sort_by(|a, b| {
+            let a_size = a.1.iter().map(|file| file.size).sum::<u64>();
+            let b_size = b.1.iter().map(|file| file.size).sum::<u64>();
+            a_size.cmp(&b_size).then_with(|| a.0.cmp(&b.0))
+        });
+        for (dir, items) in groups {
+            let mut selected = items
+                .into_iter()
                 .map(|file| remote_file(repo_files, file))
                 .collect::<Vec<_>>();
             selected.extend(sidecars(repo_files));
             dedup_files(&mut selected);
-            if selected.is_empty() {
-                return Err("没有可用的 Safetensors 模型文件".into());
-            }
-            let source = selected
-                .iter()
-                .find(|file| file.path.ends_with(".safetensors"))
-                .map(|file| file.path.clone())
-                .unwrap_or_default();
-            let quantization = quant_label(&source);
+            let label = if dir.is_empty() {
+                "ONNX 默认".to_string()
+            } else {
+                dir.clone()
+            };
+            let quantization = quant_label(&label);
             variants.push(VariantSpec {
-                key: "safetensors".into(),
-                label: "Safetensors".into(),
-                source,
-                format: "safetensors".into(),
+                key: format!("onnx:{dir}"),
+                label,
+                source: dir,
+                format: "onnx".into(),
                 quantization,
                 files: selected,
-                recommended: true,
+                recommended: false,
             });
         }
-        "onnx" => {
-            let mut groups: std::collections::BTreeMap<String, Vec<&RemoteInfo>> =
-                std::collections::BTreeMap::new();
-            for file in files.iter().filter(|file| file.path.ends_with(".onnx")) {
-                let dir = file
-                    .path
-                    .rsplit_once('/')
-                    .map_or(String::new(), |(dir, _)| dir.to_string());
-                groups.entry(dir).or_default().push(file);
-            }
-            let mut groups = groups.into_iter().collect::<Vec<_>>();
-            groups.sort_by(|a, b| {
-                let a_size = a.1.iter().map(|file| file.size).sum::<u64>();
-                let b_size = b.1.iter().map(|file| file.size).sum::<u64>();
-                a_size.cmp(&b_size).then_with(|| a.0.cmp(&b.0))
-            });
-            if groups.is_empty() {
-                return Err("没有可用的 ONNX 模型文件".into());
-            }
-            for (dir, items) in groups {
-                let mut selected = items
-                    .into_iter()
-                    .map(|file| remote_file(repo_files, file))
-                    .collect::<Vec<_>>();
-                selected.extend(sidecars(repo_files));
-                dedup_files(&mut selected);
-                let label = if dir.is_empty() {
-                    "ONNX 默认".to_string()
-                } else {
-                    dir.clone()
-                };
-                let quantization = quant_label(&label);
-                variants.push(VariantSpec {
-                    key: format!("onnx:{dir}"),
-                    label,
-                    source: dir,
-                    format: "onnx".into(),
-                    quantization,
-                    files: selected,
-                    recommended: variants.is_empty(),
-                });
-            }
-        }
-        _ => unreachable!(),
     }
+
     if variants.is_empty() {
-        return Err("没有可下载的模型文件".into());
+        return Err("仓库里没有 GGUF、Safetensors 或 ONNX 模型文件".into());
+    }
+    let preferred = ["gguf", "safetensors", "onnx"]
+        .into_iter()
+        .find(|format| variants.iter().any(|variant| variant.format == *format));
+    if let Some(preferred) = preferred
+        && let Some(variant) = variants
+            .iter_mut()
+            .find(|variant| variant.format == preferred)
+    {
+        variant.recommended = true;
     }
     Ok(variants)
 }
@@ -944,7 +942,7 @@ async fn fetch_hf_repo(repo: &str) -> Result<RepoFiles, String> {
 
 async fn fetch_modelscope_repo(repo: &str) -> Result<RepoFiles, String> {
     let value = reqwest::get(format!(
-        "https://modelscope.cn/api/v1/models/{repo}/repo/files?Revision=master&Root="
+        "https://modelscope.cn/api/v1/models/{repo}/repo/files?Revision=master&Root=&Recursive=true"
     ))
     .await
     .map_err(|error| format!("repo files: {error}"))?
@@ -1133,6 +1131,23 @@ mod tests {
                 .iter()
                 .all(|file| file.url.starts_with("https://modelscope.cn/"))
         );
+    }
+
+    #[test]
+    #[ignore = "network: probes live ModelScope recursive file listing"]
+    fn live_modelscope_lists_nested_model_files() {
+        tauri::async_runtime::block_on(async {
+            let repo = fetch_modelscope_repo("HuggingFaceTB/SmolVLM-256M-Instruct")
+                .await
+                .expect("repo files");
+            assert!(
+                repo.files
+                    .iter()
+                    .any(|file| file.path.ends_with(".onnx") && file.path.contains('/'))
+            );
+            let variants = build_variants(&repo, None).expect("variants");
+            assert!(variants.iter().any(|variant| variant.format == "onnx"));
+        });
     }
 
     #[test]
