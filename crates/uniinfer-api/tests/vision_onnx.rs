@@ -62,7 +62,12 @@ async fn onnx_vision_chat_returns_text() {
         .await
         .expect("body")
         .to_bytes();
-    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "{}",
+        String::from_utf8_lossy(&bytes)
+    );
     let body: serde_json::Value = serde_json::from_slice(&bytes).expect("json");
     let content = body["choices"][0]["message"]["content"]
         .as_str()
