@@ -476,7 +476,6 @@ async fn model_inspect_and_import_endpoints_work() {
 async fn planned_generation_endpoints_return_not_implemented() {
     for (method, uri) in [
         ("POST", "/v1/audio/speech"),
-        ("POST", "/v1/images/generations"),
         ("POST", "/v1/images/edits"),
         ("POST", "/v1/videos/generations"),
         ("GET", "/v1/videos/generations/job"),

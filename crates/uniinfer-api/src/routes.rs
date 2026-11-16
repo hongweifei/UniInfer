@@ -39,7 +39,7 @@ pub fn router(state: AppState) -> Router {
     let router = router
         .route("/v1/audio/transcriptions", post(crate::audio::transcribe))
         .route("/v1/audio/speech", post(planned))
-        .route("/v1/images/generations", post(planned))
+        .route("/v1/images/generations", post(crate::images::generate))
         .route("/v1/images/edits", post(planned))
         .route("/v1/videos/generations", post(planned))
         .route("/v1/videos/generations/{id}", get(planned));
@@ -71,6 +71,7 @@ async fn metrics(State(state): State<AppState>) -> Json<Value> {
         "loaded_models": {
             "text": state.router.slots().len(),
             "audio": state.audio_slots.lock().map(|slots| slots.len()).unwrap_or(0),
+            "image": state.image_slots.lock().map(|slots| slots.len()).unwrap_or(0),
         },
         "requests": state.router.metrics(),
     }))
@@ -113,6 +114,14 @@ fn catalog_model_json(state: &AppState, id: &str, entry: &crate::state::CatalogE
     }
     if let Some(slot) = state
         .audio_slots
+        .lock()
+        .ok()
+        .and_then(|slots| slots.get(id).cloned())
+    {
+        return model_json(slot.as_ref());
+    }
+    if let Some(slot) = state
+        .image_slots
         .lock()
         .ok()
         .and_then(|slots| slots.get(id).cloned())

@@ -174,6 +174,43 @@ def build_vision_model() -> bytes:
     return model
 
 
+def build_image_model() -> bytes:
+    """Tiny prompt-length-driven image graph used for endpoint plumbing."""
+    width = height = 64
+    image = []
+    for channel in range(3):
+        for y in range(height):
+            for x in range(width):
+                image.append((channel * 80 + x + y) % 256 / 255.0)
+    nodes = [
+        node("Size", ["input_ids"], ["prompt_size"]),
+        node("Cast", ["prompt_size"], ["prompt_size_f"], to=FLOAT),
+        node("Mul", ["prompt_size_f", "zero"], ["zero_offset"]),
+        node("Add", ["image_constant", "zero_offset"], ["image"]),
+    ]
+    initializers = [
+        tensor("zero", FLOAT, [], float_values=[0.0]),
+        tensor("image_constant", FLOAT, [1, 3, height, width], float_values=image),
+    ]
+    graph = b"".join(message(1, value) for value in nodes)
+    graph += string(2, "tiny-image")
+    graph += b"".join(message(5, value) for value in initializers)
+    graph += message(
+        11,
+        value_info("input_ids", INT64, [("value", 1), ("param", "seq")]),
+    )
+    graph += message(
+        12,
+        value_info("image", FLOAT, [("value", 1), ("value", 3), ("value", height), ("value", width)]),
+    )
+    opset = vint(2, 13)
+    model = vint(1, 8)
+    model += string(2, "uniinfer")
+    model += message(7, graph)
+    model += message(8, opset)
+    return model
+
+
 def main() -> None:
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     model_path = OUT_DIR / "model.onnx"
@@ -181,6 +218,8 @@ def main() -> None:
 
     digest = hashlib.sha256(model_path.read_bytes()).hexdigest()
     manifest = f"""id = "tiny-byte-onnx"
+runtime = "onnx"
+implementation = "onnx.graph"
 format = "onnx"
 quantization = "fp32"
 streaming_capable = false
@@ -220,6 +259,8 @@ mode = "stream"
     vision_path.write_bytes(build_vision_model())
     vision_digest = hashlib.sha256(vision_path.read_bytes()).hexdigest()
     vision_manifest = f"""id = "tiny-vision-onnx"
+runtime = "onnx"
+implementation = "onnx.graph"
 format = "onnx"
 quantization = "fp32"
 streaming_capable = false
@@ -236,7 +277,7 @@ allow_cpu_fallback = true
 vocab_size = {VOCAB}
 
 [vision]
-architecture = "onnx_vlm"
+family = "onnx_vlm"
 image_token = "<image>"
 
 [[files]]
@@ -265,6 +306,50 @@ mode = "batch"
     print(
         f"wrote {vision_path.name} "
         f"({vision_path.stat().st_size} bytes, sha256 {vision_digest[:12]}...)"
+    )
+
+    image_path = OUT_DIR / "image.onnx"
+    image_path.write_bytes(build_image_model())
+    image_digest = hashlib.sha256(image_path.read_bytes()).hexdigest()
+    image_manifest = f"""id = "tiny-image-onnx"
+runtime = "onnx"
+implementation = "onnx.graph"
+format = "onnx"
+quantization = "fp32"
+streaming_capable = false
+context_len = 64
+tokenizer = "bytes"
+min_vram = "0GiB"
+
+[placement]
+policy = "auto"
+prefer = ["npu", "gpu", "cpu"]
+allow_cpu_fallback = true
+
+[text]
+vocab_size = {VOCAB}
+
+[image]
+width = 64
+height = 64
+
+[[files]]
+path = "image.onnx"
+sha256 = "{image_digest}"
+
+[[capabilities]]
+name = "text_to_image"
+operation = "generate"
+required_inputs = ["text"]
+outputs = ["image"]
+mode = "batch"
+"""
+    (OUT_DIR / "manifest-image.toml").write_text(
+        image_manifest, encoding="utf-8", newline="\n"
+    )
+    print(
+        f"wrote {image_path.name} "
+        f"({image_path.stat().st_size} bytes, sha256 {image_digest[:12]}...)"
     )
 
 

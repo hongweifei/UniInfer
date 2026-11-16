@@ -62,12 +62,14 @@ pub(crate) async fn transcribe(
     };
     let model = match model.filter(|model| !model.is_empty() && model != "auto") {
         Some(model) => model,
-        None => state.select_capability(&capability, true).ok_or_else(|| {
-            ApiError::not_found(
-                "no_capability_match",
-                "no configured model matches audio transcription",
-            )
-        })?,
+        None => state
+            .select_capability(&capability, true, false)
+            .ok_or_else(|| {
+                ApiError::not_found(
+                    "no_capability_match",
+                    "no configured model matches audio transcription",
+                )
+            })?,
     };
     let entry = state.catalog_entry(&model).ok_or_else(|| {
         ApiError::not_found(

@@ -129,6 +129,7 @@ graph(s) + declared inputs/outputs + adapter profile
 - ASR 的 Whisper/CTC 通过 `onnx.pipeline` 的 `adapter` step 加载，`onnx.asr.*` 实现名删除。
 - 增加 `ModelExecutor` / `ModelOutput`：所有 slot 统一返回 text/audio/image/video，流式用 `ModelEvent`。
 - `/v1/audio/transcriptions` 已走 `ModelExecutor::execute(ModelRequest::Audio)`。
+- `/v1/images/generations` 走 `ModelExecutor::execute(ModelRequest::Image)`，返回 `ModelOutput::Image`。
 
 待完成：
 

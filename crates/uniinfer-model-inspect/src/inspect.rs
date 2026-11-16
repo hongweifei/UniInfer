@@ -276,6 +276,7 @@ pub fn inspect(root: &Path, options: &InspectOptions) -> Result<Inspection> {
         audio,
         vision: None,
         pipeline,
+        image: None,
     };
     manifest
         .validate()

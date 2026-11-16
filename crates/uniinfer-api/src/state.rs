@@ -5,7 +5,7 @@ use std::sync::{Arc, Mutex};
 use tokio::sync::Mutex as AsyncMutex;
 use uniinfer_config::ConfigHandle;
 use uniinfer_core::{CancelToken, CapabilityRequest, EngineError, ModelManifest, Result};
-use uniinfer_service::{AudioSlot, ModelSlot, Runtime};
+use uniinfer_service::{AudioSlot, ImageSlot, ModelSlot, Runtime};
 
 use crate::api_config::ApiConfig;
 
@@ -15,6 +15,7 @@ pub(crate) struct CatalogEntry {
     pub(crate) path: PathBuf,
     pub(crate) manifest: ModelManifest,
     pub(crate) audio_only: bool,
+    pub(crate) image_only: bool,
 }
 
 /// Shared server state.
@@ -22,6 +23,7 @@ pub(crate) struct CatalogEntry {
 pub struct AppState {
     pub(crate) router: Arc<uniinfer_router::ModelRouter>,
     pub(crate) audio_slots: Arc<Mutex<HashMap<String, Arc<AudioSlot>>>>,
+    pub(crate) image_slots: Arc<Mutex<HashMap<String, Arc<ImageSlot>>>>,
     pub(crate) runtime: Arc<Runtime>,
     pub(crate) token: Option<String>,
     pub(crate) max_body_bytes: usize,
@@ -54,6 +56,7 @@ impl AppState {
                 )));
             }
             let audio_only = manifest.audio.is_some() && manifest.text.is_none();
+            let image_only = manifest.image.is_some();
             manifest_paths.insert(id.clone(), path.clone());
             catalog.insert(
                 id,
@@ -61,6 +64,7 @@ impl AppState {
                     path: path.clone(),
                     manifest,
                     audio_only,
+                    image_only,
                 },
             );
         }
@@ -72,6 +76,7 @@ impl AppState {
                 config.max_loaded_models,
             )),
             audio_slots: Arc::new(Mutex::new(HashMap::new())),
+            image_slots: Arc::new(Mutex::new(HashMap::new())),
             runtime,
             token: config.token.clone(),
             max_body_bytes: config.max_body_bytes,
@@ -94,11 +99,12 @@ impl AppState {
         &self,
         request: &CapabilityRequest,
         audio_only: bool,
+        image_only: bool,
     ) -> Option<String> {
         let mut ids = self
             .catalog
             .iter()
-            .filter(|(_, entry)| entry.audio_only == audio_only)
+            .filter(|(_, entry)| entry.audio_only == audio_only && entry.image_only == image_only)
             .filter(|(_, entry)| entry.manifest.supports(request))
             .map(|(id, _)| id.clone())
             .collect::<Vec<_>>();
@@ -106,6 +112,11 @@ impl AppState {
         let loaded = ids.iter().find(|id| {
             if audio_only {
                 self.audio_slots
+                    .lock()
+                    .ok()
+                    .is_some_and(|slots| slots.contains_key(*id))
+            } else if image_only {
+                self.image_slots
                     .lock()
                     .ok()
                     .is_some_and(|slots| slots.contains_key(*id))
@@ -125,6 +136,49 @@ impl AppState {
 
     pub(crate) fn catalog_entry(&self, id: &str) -> Option<CatalogEntry> {
         self.catalog.get(id).cloned()
+    }
+
+    pub(crate) async fn image_slot(&self, id: &str) -> Result<Arc<ImageSlot>> {
+        if let Some(slot) = self
+            .image_slots
+            .lock()
+            .ok()
+            .and_then(|slots| slots.get(id).cloned())
+        {
+            return Ok(slot);
+        }
+        let entry = self
+            .catalog_entry(id)
+            .ok_or_else(|| EngineError::ManifestInvalid(format!("model {id} is not configured")))?;
+        if !entry.image_only {
+            return Err(EngineError::ManifestInvalid(format!(
+                "model {id} has no [image] config"
+            )));
+        }
+        let _guard = self.load_lock.lock().await;
+        if let Some(slot) = self
+            .image_slots
+            .lock()
+            .ok()
+            .and_then(|slots| slots.get(id).cloned())
+        {
+            return Ok(slot);
+        }
+        let runtime = Arc::clone(&self.runtime);
+        let manifest = entry.manifest;
+        let base = entry.path.parent().map_or_else(
+            || std::path::PathBuf::from("."),
+            std::path::Path::to_path_buf,
+        );
+        let slot =
+            tokio::task::spawn_blocking(move || runtime.load_image_manifest(manifest, &base))
+                .await
+                .map_err(|_| EngineError::Other("image load task panicked".into()))??;
+        self.image_slots
+            .lock()
+            .map_err(|_| EngineError::Other("image slots lock poisoned".into()))?
+            .insert(id.to_owned(), Arc::clone(&slot));
+        Ok(slot)
     }
 
     pub(crate) async fn text_slot(&self, id: &str) -> Result<Arc<ModelSlot>> {

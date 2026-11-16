@@ -7,6 +7,7 @@ mod chat;
 mod config;
 mod error;
 mod extract;
+mod images;
 mod manifest_api;
 mod model_lifecycle;
 mod models;

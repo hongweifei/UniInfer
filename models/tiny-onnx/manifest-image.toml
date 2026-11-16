@@ -1,0 +1,32 @@
+id = "tiny-image-onnx"
+runtime = "onnx"
+implementation = "onnx.graph"
+format = "onnx"
+quantization = "fp32"
+streaming_capable = false
+context_len = 64
+tokenizer = "bytes"
+min_vram = "0GiB"
+
+[placement]
+policy = "auto"
+prefer = ["npu", "gpu", "cpu"]
+allow_cpu_fallback = true
+
+[text]
+vocab_size = 256
+
+[image]
+width = 64
+height = 64
+
+[[files]]
+path = "image.onnx"
+sha256 = "5a8662dfb3103690843bfb1a94c481410c58aa6cb065e2da60cb01e31c3b54c1"
+
+[[capabilities]]
+name = "text_to_image"
+operation = "generate"
+required_inputs = ["text"]
+outputs = ["image"]
+mode = "batch"

@@ -389,6 +389,14 @@ pub struct PipelineConfig {
     pub steps: Vec<PipelineStep>,
 }
 
+/// Image generation output contract.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ImageConfig {
+    pub width: u32,
+    pub height: u32,
+}
+
 /// Audio preprocessing contract shared by every speech adapter.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -501,6 +509,8 @@ pub struct ModelManifest {
     pub vision: Option<VisionConfig>,
     #[serde(default)]
     pub pipeline: Option<PipelineConfig>,
+    #[serde(default)]
+    pub image: Option<ImageConfig>,
 }
 
 impl ModelManifest {
@@ -673,6 +683,13 @@ impl ModelManifest {
                     "text.vocab_size must be within 1..=1048576".into(),
                 ));
             }
+        }
+        if let Some(image) = &self.image
+            && (image.width == 0 || image.height == 0)
+        {
+            return Err(EngineError::ManifestInvalid(
+                "image dimensions must be positive".into(),
+            ));
         }
         if let Some(audio) = &self.audio {
             if !(8_000..=192_000).contains(&audio.sample_rate) {

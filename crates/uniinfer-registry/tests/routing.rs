@@ -107,6 +107,7 @@ fn manifest() -> ModelManifest {
         audio: None,
         vision: None,
         pipeline: None,
+        image: None,
     }
 }
 

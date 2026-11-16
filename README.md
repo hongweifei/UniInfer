@@ -530,7 +530,7 @@ sha256 = "9f8e6c1d0a4b7e2f5c8d1a3b6e9f0c2d4a7b1e8f3c6d9a2b5e0f4c7d1a8b3e6f"  # �
 | `/v1/chat/completions` | POST | 已实现 | 文本/单图生成，`stream: true` 走 SSE |
 | `/v1/audio/transcriptions` | POST | 已实现 | 语音转写；WAV + 清单 `[audio]` 契约，按 Registry 路由引擎 |
 | `/v1/audio/speech` | POST | 计划（501） | 语音合成 |
-| `/v1/images/generations` | POST | 计划（501） | 文生图 |
+| `/v1/images/generations` | POST | 管线已实现 | 文生图 capability + `ModelOutput::Image`；真实扩散后端待接，测试使用 tiny fixture |
 | `/v1/images/edits` | POST | 计划（501） | img2img / inpaint / outpaint |
 | `/v1/videos/generations` | POST | 计划（501） | 视频生成任务 |
 | `/v1/videos/generations/{id}` | GET | 计划（501） | 任务查询 |

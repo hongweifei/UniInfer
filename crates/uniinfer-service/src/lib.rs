@@ -16,7 +16,9 @@ use uniinfer_core::{
 use uniinfer_registry::{EngineRegistry, EngineRoute, SessionLease};
 
 mod audio;
+mod image;
 pub use audio::AudioSlot;
+pub use image::ImageSlot;
 pub use uniinfer_core::CancelToken;
 
 /// Acquire one of a slot's request permits, returning `Busy` on timeout.
@@ -42,6 +44,21 @@ pub enum ModelRequest {
         samples: Vec<f32>,
         deadline: Option<std::time::Instant>,
     },
+    Image {
+        spec: ImageGenerationSpec,
+    },
+}
+
+/// Image generation parameters after manifest defaults are applied by the API.
+#[derive(Debug, Clone)]
+pub struct ImageGenerationSpec {
+    pub prompt: String,
+    pub negative_prompt: Option<String>,
+    pub width: u32,
+    pub height: u32,
+    pub steps: usize,
+    pub guidance: f32,
+    pub seed: Option<u64>,
 }
 
 /// Common execution contract for every loaded model slot.
@@ -143,6 +160,33 @@ impl Runtime {
                 .load_manifest_with_cancel(manifest, base_dir, cancel)?,
         );
         Ok(Arc::new(AudioSlot::new(lease)?))
+    }
+
+    /// Load an image-generation model.
+    pub fn load_image_manifest(
+        &self,
+        manifest: ModelManifest,
+        base_dir: &Path,
+    ) -> Result<Arc<ImageSlot>> {
+        self.load_image_manifest_cancellable(manifest, base_dir, CancelToken::new())
+    }
+
+    pub fn load_image_manifest_cancellable(
+        &self,
+        manifest: ModelManifest,
+        base_dir: &Path,
+        cancel: CancelToken,
+    ) -> Result<Arc<ImageSlot>> {
+        if manifest.image.is_none() {
+            return Err(EngineError::ManifestInvalid(
+                "image runtime requires [image]".into(),
+            ));
+        }
+        let lease = Arc::new(
+            self.registry
+                .load_manifest_with_cancel(manifest, base_dir, cancel)?,
+        );
+        Ok(Arc::new(ImageSlot::new(lease, base_dir)?))
     }
 
     /// Load one model and validate the text-generation contract.

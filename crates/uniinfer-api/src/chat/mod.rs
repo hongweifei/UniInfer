@@ -241,12 +241,14 @@ pub(crate) async fn chat(
         .filter(|model| !model.is_empty() && *model != "auto")
     {
         Some(model) => model.to_owned(),
-        None => state.select_capability(&capability, false).ok_or_else(|| {
-            ApiError::not_found(
-                "no_capability_match",
-                "no configured model matches this request",
-            )
-        })?,
+        None => state
+            .select_capability(&capability, false, false)
+            .ok_or_else(|| {
+                ApiError::not_found(
+                    "no_capability_match",
+                    "no configured model matches this request",
+                )
+            })?,
     };
     if !state.catalog.contains_key(&model) {
         return Err(ApiError::not_found(
