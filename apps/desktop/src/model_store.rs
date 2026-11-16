@@ -477,7 +477,7 @@ fn build_variants(
         });
     }
 
-    let mut groups: std::collections::BTreeMap<String, Vec<&RemoteInfo>> =
+    let mut groups: std::collections::BTreeMap<(String, String), Vec<&RemoteInfo>> =
         std::collections::BTreeMap::new();
     for file in files
         .iter()
@@ -487,7 +487,8 @@ fn build_variants(
             .path
             .rsplit_once('/')
             .map_or(String::new(), |(dir, _)| dir.to_string());
-        groups.entry(dir).or_default().push(file);
+        let quant = onnx_quant_suffix(&file.path);
+        groups.entry((dir, quant)).or_default().push(file);
     }
     if !groups.is_empty() {
         let mut groups = groups.into_iter().collect::<Vec<_>>();
@@ -496,21 +497,35 @@ fn build_variants(
             let b_size = b.1.iter().map(|file| file.size).sum::<u64>();
             a_size.cmp(&b_size).then_with(|| a.0.cmp(&b.0))
         });
-        for (dir, items) in groups {
+        for ((dir, quant), items) in groups {
             let mut selected = items
-                .into_iter()
+                .iter()
                 .map(|file| remote_file(repo_files, file))
                 .collect::<Vec<_>>();
+            for data in files
+                .iter()
+                .filter(|file| is_onnx_external_data(&file.path))
+            {
+                if items.iter().any(|graph| data.path.starts_with(&graph.path)) {
+                    selected.push(remote_file(repo_files, data));
+                }
+            }
             selected.extend(sidecars(repo_files));
             dedup_files(&mut selected);
-            let label = if dir.is_empty() {
-                "ONNX 默认".to_string()
+            let label = if quant.is_empty() {
+                if dir.is_empty() {
+                    "ONNX 默认".to_string()
+                } else {
+                    dir.clone()
+                }
+            } else if dir.is_empty() {
+                format!("ONNX {quant}")
             } else {
-                dir.clone()
+                format!("{dir} · {quant}")
             };
             let quantization = quant_label(&label);
             variants.push(VariantSpec {
-                key: format!("onnx:{dir}"),
+                key: format!("onnx:{dir}:{quant}"),
                 label,
                 source: dir,
                 format: "onnx".into(),
@@ -540,6 +555,33 @@ fn build_variants(
 fn dedup_files(files: &mut Vec<RemoteFile>) {
     files.sort_by(|a, b| a.path.cmp(&b.path));
     files.dedup_by(|a, b| a.path == b.path);
+}
+
+fn is_onnx_external_data(path: &str) -> bool {
+    let name = path.rsplit('/').next().unwrap_or(path).to_ascii_lowercase();
+    name.contains(".onnx_data") || name.ends_with(".onnx.data")
+}
+
+fn onnx_quant_suffix(path: &str) -> String {
+    let name = path.rsplit('/').next().unwrap_or(path);
+    let stem = name.split(".onnx").next().unwrap_or(name);
+    let lower = stem.to_ascii_lowercase();
+    for suffix in [
+        "q4f16",
+        "q4",
+        "q8",
+        "fp16",
+        "fp32",
+        "int8",
+        "uint8",
+        "quantized",
+        "bnb4",
+    ] {
+        if lower.ends_with(&format!("_{suffix}")) {
+            return suffix.to_string();
+        }
+    }
+    String::new()
 }
 
 fn quant_label(path: &str) -> String {
@@ -1099,6 +1141,49 @@ mod tests {
     }
 
     #[test]
+    fn onnx_plan_includes_external_data_per_quantization() {
+        let model = repo(
+            "onnx-community/Qwen3.5-0.8B-ONNX",
+            Source::HuggingFace,
+            &[
+                ("onnx/decoder_model_merged.onnx", 10),
+                ("onnx/decoder_model_merged.onnx_data", 100),
+                ("onnx/decoder_model_merged_q4.onnx", 5),
+                ("onnx/decoder_model_merged_q4.onnx_data", 50),
+                ("onnx/embed_tokens.onnx", 2),
+                ("onnx/embed_tokens.onnx_data", 20),
+                ("onnx/embed_tokens_q4.onnx", 1),
+                ("onnx/embed_tokens_q4.onnx_data", 10),
+                ("config.json", 1),
+            ],
+        );
+        let variants = build_variants(&model, None).expect("variants");
+        assert_eq!(variants.len(), 2);
+        for variant in &variants {
+            let has_data = variant
+                .files
+                .iter()
+                .any(|file| file.path.ends_with(".onnx_data"));
+            assert!(has_data, "variant {} lost external data", variant.key);
+        }
+        let q4 = variants
+            .iter()
+            .find(|variant| variant.key == "onnx:onnx:q4")
+            .expect("q4 variant");
+        assert!(q4.files.iter().any(|file| file.path.ends_with("_q4.onnx")));
+        assert!(
+            !q4.files
+                .iter()
+                .any(|file| file.path.ends_with("merged.onnx"))
+        );
+        assert!(
+            q4.files
+                .iter()
+                .any(|file| file.path.ends_with("_q4.onnx_data"))
+        );
+    }
+
+    #[test]
     fn safetensors_plan_keeps_shards_and_sidecars() {
         let model = repo(
             "Qwen/Qwen3-0.6B",
@@ -1131,6 +1216,28 @@ mod tests {
                 .iter()
                 .all(|file| file.url.starts_with("https://modelscope.cn/"))
         );
+    }
+
+    #[test]
+    #[ignore = "network: probes live Hugging Face ONNX external data"]
+    fn live_hf_onnx_plan_keeps_external_data() {
+        tauri::async_runtime::block_on(async {
+            let repo = fetch_hf_repo("onnx-community/Qwen3.5-0.8B-ONNX")
+                .await
+                .expect("repo files");
+            let variants = build_variants(&repo, None).expect("variants");
+            assert!(variants.iter().any(|variant| variant.format == "onnx"));
+            for variant in variants.iter().filter(|variant| variant.format == "onnx") {
+                assert!(
+                    variant
+                        .files
+                        .iter()
+                        .any(|file| file.path.ends_with(".onnx_data")),
+                    "variant {} is missing external data",
+                    variant.key
+                );
+            }
+        });
     }
 
     #[test]
