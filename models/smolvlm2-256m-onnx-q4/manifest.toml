@@ -1,6 +1,6 @@
 id = "smolvlm2-256m-onnx-q4"
 runtime = "onnx"
-implementation = "onnx.vision"
+implementation = "onnx.pipeline"
 format = "onnx"
 quantization = "int4"
 streaming_capable = false
@@ -21,18 +21,42 @@ tokenizer_file = "tokenizer.json"
 
 [vision]
 family = "smolvlm"
-vision_graph = "vision_encoder_q4.onnx"
-embed_graph = "embed_tokens_q4.onnx"
-text_graph = "decoder_model_merged_q4.onnx"
-preprocessor_file = "preprocessor_config_512.json"
-preprocessor = "smolvlm"
-pixel_input = "pixel_values"
-grid_input = "pixel_attention_mask"
 image_token = "<image>"
 image_token_id = 49190
 image_seq_len = 64
 global_image_token_id = 49152
 fake_image_token_id = 49189
+
+[pipeline]
+image_preprocessor = "smolvlm"
+preprocessor_file = "preprocessor_config_512.json"
+token_layout = "smolvlm"
+output = "decoder.logits"
+
+[[pipeline.steps]]
+kind = "graph"
+name = "vision"
+file = "vision_encoder_q4.onnx"
+inputs = { pixel_values = "preprocess.pixel_values", pixel_attention_mask = "preprocess.pixel_attention_mask" }
+
+[[pipeline.steps]]
+kind = "graph"
+name = "embed"
+file = "embed_tokens_q4.onnx"
+inputs = { input_ids = "input_ids" }
+
+[[pipeline.steps]]
+kind = "merge"
+source = "vision.image_features"
+target = "embed.inputs_embeds"
+token = "image"
+
+[[pipeline.steps]]
+kind = "graph"
+name = "decoder"
+file = "decoder_model_merged_q4.onnx"
+inputs = { inputs_embeds = "embed.inputs_embeds" }
+auto = ["attention_mask", "position_ids", "past_key_values"]
 
 [[files]]
 path = "vision_encoder_q4.onnx"

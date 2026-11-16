@@ -55,13 +55,14 @@ async fn onnx_vision_chat_returns_text() {
         )
         .await
         .expect("response");
-    assert_eq!(response.status(), StatusCode::OK);
+    let status = response.status();
     let bytes = response
         .into_body()
         .collect()
         .await
         .expect("body")
         .to_bytes();
+    assert_eq!(status, StatusCode::OK);
     let body: serde_json::Value = serde_json::from_slice(&bytes).expect("json");
     let content = body["choices"][0]["message"]["content"]
         .as_str()

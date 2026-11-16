@@ -291,7 +291,7 @@ cargo run -p uniinfer-cli --features llama-mtmd -- serve \
 
 `/v1/chat/completions` 的 `image_url` 会经 `LlamaMtmdSession::generate_text` 原生解码；Qwen2.5-VL 7B Q4 清单同样可用，但测试默认使用 256M 模型。
 
-ONNX 视觉走分图 ONNX export（`vision_encoder` + `embed_tokens` + `decoder_model_merged`）：
+ONNX 视觉走 manifest 声明的 graph pipeline（`vision_encoder` + `embed_tokens` + `decoder_model_merged`）：
 
 ```bash
 models/fetch-smolvlm2-256m-onnx.sh
@@ -299,7 +299,7 @@ cargo run -p uniinfer-cli -- serve \
   --manifest models/smolvlm2-256m-onnx-q4/manifest.toml
 ```
 
-当前 adapter 固定支持未分块的单图预处理（清单里 `preprocessor_config_512.json` 将 `do_image_splitting` 设为 `false`，512×512）。开启分块会在加载期返回明确的 `UnsupportedEngine`，不会静默算错。
+清单用 `[[pipeline.steps]]` 声明 graph 顺序、tensor 绑定、merge 点和输出；引擎不再认识 SmolVLM 的固定角色。当前预处理 profile 支持未分块单图（`preprocessor_config_512.json` 将 `do_image_splitting` 设为 `false`，512×512）；开启分块会在加载期返回明确 `UnsupportedEngine`。
 
 构建前置条件：CMake、C++ 编译器（Windows 用 MSVC）和 `libclang`（bindgen 需要）。Windows 示例：
 

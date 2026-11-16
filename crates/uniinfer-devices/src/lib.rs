@@ -44,6 +44,7 @@ mod tests {
             text: None,
             audio: None,
             vision: None,
+            pipeline: None,
         }
     }
 

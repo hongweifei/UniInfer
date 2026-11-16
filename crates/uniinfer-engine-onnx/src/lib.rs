@@ -14,8 +14,8 @@ mod asr;
 mod genai;
 mod graph;
 mod io;
+mod pipeline;
 mod session;
-mod vlm;
 
 use genai::{GenaiSpec, load_genai_config};
 use graph::Graph;
@@ -146,7 +146,7 @@ impl InferenceEngine for OnnxEngine {
     fn implementations(&self) -> &[&'static str] {
         &[
             "onnx.graph",
-            "onnx.vision",
+            "onnx.pipeline",
             "onnx.asr.whisper",
             "onnx.asr.ctc",
         ]
@@ -205,8 +205,8 @@ impl InferenceEngine for OnnxEngine {
             .ok_or_else(|| EngineError::PlacementUnsatisfiable("empty placement".into()))?;
         spec.manifest.verify_files(&spec.base_dir)?;
 
-        if spec.manifest.implementation == "onnx.vision" {
-            return vlm::load(&self.environment, &spec, class);
+        if spec.manifest.implementation == "onnx.pipeline" {
+            return pipeline::load(&self.environment, &spec, class);
         }
 
         let model_file = spec

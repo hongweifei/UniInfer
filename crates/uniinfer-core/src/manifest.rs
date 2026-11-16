@@ -339,25 +339,8 @@ pub struct TextConfig {
 pub struct VisionConfig {
     /// Vision adapter/family name.
     pub family: String,
-    /// Image preprocessing profile selected by the ONNX pipeline.
-    #[serde(default)]
-    pub preprocessor: Option<String>,
     #[serde(default)]
     pub mmproj_file: Option<PathBuf>,
-    #[serde(default)]
-    pub preprocessor_file: Option<PathBuf>,
-    #[serde(default)]
-    pub vision_graph: Option<PathBuf>,
-    #[serde(default)]
-    pub embed_graph: Option<PathBuf>,
-    #[serde(default)]
-    pub text_graph: Option<PathBuf>,
-    #[serde(default)]
-    pub config_file: Option<PathBuf>,
-    #[serde(default)]
-    pub pixel_input: Option<String>,
-    #[serde(default)]
-    pub grid_input: Option<String>,
     #[serde(default)]
     pub image_token: Option<String>,
     #[serde(default)]
@@ -368,6 +351,39 @@ pub struct VisionConfig {
     pub global_image_token_id: Option<u32>,
     #[serde(default)]
     pub fake_image_token_id: Option<u32>,
+}
+
+/// One step of an ONNX graph pipeline.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum PipelineStep {
+    Graph {
+        name: String,
+        file: PathBuf,
+        #[serde(default)]
+        inputs: BTreeMap<String, String>,
+        #[serde(default)]
+        auto: Vec<String>,
+    },
+    Merge {
+        source: String,
+        target: String,
+        token: String,
+    },
+}
+
+/// Declarative ONNX pipeline.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PipelineConfig {
+    #[serde(default)]
+    pub image_preprocessor: Option<String>,
+    #[serde(default)]
+    pub preprocessor_file: Option<PathBuf>,
+    #[serde(default)]
+    pub token_layout: Option<String>,
+    pub output: String,
+    pub steps: Vec<PipelineStep>,
 }
 
 /// Audio preprocessing contract shared by every speech adapter.
@@ -480,6 +496,8 @@ pub struct ModelManifest {
     pub audio: Option<AudioConfig>,
     #[serde(default)]
     pub vision: Option<VisionConfig>,
+    #[serde(default)]
+    pub pipeline: Option<PipelineConfig>,
 }
 
 impl ModelManifest {
@@ -574,6 +592,40 @@ impl ModelManifest {
                     "capability {} marks an input both required and optional",
                     capability.name
                 )));
+            }
+        }
+        if self.implementation == "onnx.pipeline" {
+            let pipeline = self.pipeline.as_ref().ok_or_else(|| {
+                EngineError::ManifestInvalid("onnx.pipeline requires [pipeline]".into())
+            })?;
+            if pipeline.steps.is_empty() {
+                return Err(EngineError::ManifestInvalid(
+                    "pipeline.steps is empty".into(),
+                ));
+            }
+            let mut names = std::collections::BTreeSet::new();
+            for step in &pipeline.steps {
+                match step {
+                    PipelineStep::Graph { name, file, .. } => {
+                        if name.is_empty() || !names.insert(name) {
+                            return Err(EngineError::ManifestInvalid(
+                                "pipeline graph step names must be unique and non-empty".into(),
+                            ));
+                        }
+                        if file.is_absolute() {
+                            return Err(EngineError::ManifestInvalid(
+                                "pipeline graph path must be relative".into(),
+                            ));
+                        }
+                    }
+                    PipelineStep::Merge { source, target, .. } => {
+                        if source == target {
+                            return Err(EngineError::ManifestInvalid(
+                                "pipeline merge source and target must differ".into(),
+                            ));
+                        }
+                    }
+                }
             }
         }
         if self.context_len == 0 || self.context_len > 1_048_576 {

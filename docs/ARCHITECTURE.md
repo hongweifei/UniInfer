@@ -12,7 +12,7 @@
 
 ```text
 manifest.runtime          onnx | candle | llama | whisper | process
-manifest.implementation   adapter contract, e.g. onnx.vision / candle.text
+manifest.implementation   adapter contract, e.g. onnx.pipeline / candle.text
 manifest.capabilities     user-visible capability set
 ```
 
@@ -59,7 +59,7 @@ flowchart TB
 ```toml
 id = "example"
 runtime = "onnx"
-implementation = "onnx.vision"
+implementation = "onnx.pipeline"
 format = "onnx"
 quantization = "int4"
 
@@ -101,7 +101,7 @@ graph(s) + declared inputs/outputs + adapter profile
 当前实现：
 
 - `onnx.graph`：单个 ONNX 图，named tensors 直通。
-- `onnx.vision`：vision + embed + decoder 多图，`family = "smolvlm"` 选择预处理 profile。
+- `onnx.pipeline`：manifest 声明 graph steps、tensor bindings、merge 点和 output；`image_preprocessor` / `token_layout` 只选择 adapter profile。
 - `onnx.asr.whisper` / `onnx.asr.ctc`：语音多图。
 
 新增 ONNX 模型时，优先只新增 manifest；只有新的图契约或新的预处理语义才新增 adapter。
@@ -121,7 +121,7 @@ graph(s) + declared inputs/outputs + adapter profile
 - 删除 `schema_version`。
 - 删除 `InferenceEngine::supports_architecture`。
 - 路由改为 `runtime + implementation`。
-- ONNX 视觉实现从 `onnx_smolvlm` 改为 `onnx.vision` + `preprocessor = "smolvlm"`。
+- ONNX 视觉实现改为 `onnx.pipeline`：graph steps / bindings / merge / output 全部由 manifest 声明。
 - 统一 `[text].family`、`[vision].family`、`[audio].family`。
 - `native` 文本解码移出 `EngineSession`，改为独立的 `NativeTextDecoder` capability。
 - `TextGenerator` 的 image 特例改为通用 auxiliary tensor 输入。
