@@ -228,6 +228,7 @@ pub(crate) async fn install_model(
     tokio::fs::create_dir_all(&staging)
         .await
         .map_err(|error| format!("create {}: {error}", staging.display()))?;
+    let _staging_cleanup = StagingCleanup(staging.clone());
     let total = plan.files.iter().map(|file| file.size).sum::<u64>();
     if source == Source::ModelScope {
         let files = plan.files.clone();
@@ -361,6 +362,16 @@ fn slug(repo: &str) -> String {
         .collect::<String>()
         .trim_matches('-')
         .to_string()
+}
+
+struct StagingCleanup(PathBuf);
+
+impl Drop for StagingCleanup {
+    fn drop(&mut self) {
+        if self.0.exists() {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
 }
 
 fn models_root() -> PathBuf {
