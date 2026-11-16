@@ -6,11 +6,13 @@ use http_body_util::BodyExt;
 use tower::ServiceExt;
 use uniinfer_api::{ApiConfig, AppState, routes};
 
+mod common;
+
 #[tokio::test]
 async fn audio_endpoint_runs_through_model_executor() {
     let manifest = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../models/whisper-tiny.en-onnx/manifest.toml");
-    if !manifest.is_file() {
+    if !common::fixture_ready(&manifest) {
         eprintln!("skip: Whisper ONNX fixture is not downloaded");
         return;
     }

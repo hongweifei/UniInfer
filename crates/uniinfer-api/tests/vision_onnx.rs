@@ -8,11 +8,13 @@ use serde_json::json;
 use tower::ServiceExt;
 use uniinfer_api::{ApiConfig, AppState, routes};
 
+mod common;
+
 #[tokio::test]
 async fn onnx_vision_chat_returns_text() {
     let manifest = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../models/smolvlm2-256m-onnx-q4/manifest.toml");
-    if !manifest.is_file() {
+    if !common::fixture_ready(&manifest) {
         eprintln!("skip: SmolVLM ONNX fixture is not downloaded");
         return;
     }
@@ -84,7 +86,7 @@ async fn onnx_vision_chat_returns_text() {
 async fn onnx_vision_chat_accepts_two_images() {
     let manifest = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../models/smolvlm2-256m-onnx-q4/manifest.toml");
-    if !manifest.is_file() {
+    if !common::fixture_ready(&manifest) {
         eprintln!("skip: SmolVLM ONNX fixture is not downloaded");
         return;
     }
