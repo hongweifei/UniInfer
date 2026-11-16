@@ -41,7 +41,7 @@
 
 | 里程碑 | 交付 | 前置 | 出口摘要 |
 | :--- | :--- | :--- | :--- |
-| M6 | 真实图像生成：`plakat` + SD-Turbo/SD1.5/SDXL/FLUX GGUF | 当前基线 | 固定 seed 可复现；显存峰值入库 |
+| M6 | ONNX 扩散：`onnx.diffusion` + SD-Turbo ONNX；SD1.5/SDXL/FLUX 随后 | 当前基线 | 固定 seed 可复现；CPU/GPU 延迟与显存入库 |
 | M7 | 图像编辑与视频生成：edits、LTX/AnimateDiff、异步 job | M6 | 图像编辑可用；2s 视频端到端；取消释放显存 |
 | M8 | 实时多通道：TTS、`output.audio/image/video`、预览帧 | M6、M7 | 首音频/首帧延迟入库；过载有界 |
 | M9 | 设备矩阵与混合推理：NPU EP、T1–T4、代价模型 | 当前基线 | 设备探测正确；NPU 数值达标；层卸载可用 |
@@ -50,26 +50,43 @@
 
 ## 5. 里程碑详述
 
-### M6 · 真实图像生成
+### M6 · ONNX 扩散
 
-**范围**：`plakat` 接入 `ImageSlot`，`/v1/images/generations` 使用真实扩散模型。
+**范围**：新增 `onnx.diffusion` 实现，用 ONNX Runtime 串联 CLIP 文本编码器、UNet、VAE 解码器与 Euler 调度器，`/v1/images/generations` 使用真实扩散模型。
+
+**首个模型**：`Heliosoph/sd-turbo-onnx`，FP32，512×512，1–4 步，guidance 1.0。该导出使用标准 diffusers ONNX 布局：
+
+```text
+text_encoder/model.onnx   input_ids -> last_hidden_state
+unet/model.onnx           sample + timestep + encoder_hidden_states -> out_sample
+vae_decoder/model.onnx    latent_sample -> sample
+tokenizer/vocab.json + merges.txt
+scheduler/scheduler_config.json
+```
 
 **交付**
 
-- `plakat` adapter，锁定版本并隔离其 API。
-- SD-Turbo / SD1.5：512×512、1–20 步、guidance、negative prompt。
-- SDXL：分辨率与显存预算。
-- FLUX.1-dev GGUF：Q4/Q5/Q8 变体、文本编码器、VAE。
-- 固定 seed、任务进度 `ModelEvent::Progress`、取消。
+- `DiffusionConfig`：组件路径、张量名、调度器参数、latent 通道、VAE scale、默认步数与 guidance。
+- `OnnxDiffusionSession`：CLIP tokenize、EulerDiscrete 调度、UNet 循环、VAE 解码、f32 image 输出。
+- 固定 seed 的初始 latent，可复现。
+- `ImageSlot` 传入 `width/height/steps/guidance/seed` 与 negative prompt。
+- 每一步 `ModelEvent::Progress`；取消检查在步边界执行，并终止当前 ORT run。
 - OOM 映射 `InsufficientVram`，驱逐后重试一次。
-- 显存峰值与耗时写入基线。
+- CPU 与 CUDA 的延迟、峰值内存/显存写入基线。
 
 **出口**
 
-- 固定 seed + 同设备/驱动逐字节复现 PNG。
-- FLUX Q5_K_M 在 16GB 显存完成 1024×1024、20 步；超预算组合在预检返回 `InsufficientVram` 与实测峰值。
-- 取消后显存回落到加载前 ±5%。
+- 512×512、1 步与 4 步各生成有效 PNG；固定 seed 在同设备、同驱动逐字节复现。
+- 1 步 CPU 延迟与峰值内存入库；CUDA 可用时 4 步延迟入库。
+- 取消在第 k 步返回 `Cancelled`，显存回落到加载前 ±5%。
 - 2 个并发请求按 permit 排队。
+- `onnx.diffusion` 与 `onnx.graph`、`onnx.pipeline` 的契约测试同时通过。
+
+**后续路径**
+
+- SD1.5 / SDXL ONNX：同一 `onnx.diffusion`，增加 dual text encoder 与 UNet 条件输入。
+- FLUX ONNX：增加 T5/CLIP 双编码器、guidance embedding 与 transformer blocks。
+- `plakat` 作为 GGUF/Safetensors 图像后端，在 ONNX 路径稳定后接入，用于 SDXL/FLUX GGUF。
 
 **范围边界**：实时预览帧、多 ControlNet、视频。
 
@@ -210,7 +227,10 @@
 
 | 风险 | 触发信号 | 应对 |
 | :--- | :--- | :--- |
-| plakat API 漂移 | 升级后编译失败 | 锁定版本 + adapter 隔离；升级独立 PR |
+| ONNX 扩散图张量名不一致 | 加载后输入/输出名与预期不符 | manifest 显式记录每个组件的输入/输出名；加载时校验 |
+| 调度器数值偏差 | 同 seed 输出与 diffusers 不一致 | 以 diffusers EulerDiscrete 为参考，固定 sigmas/timesteps 单测 |
+| SD-Turbo 许可限制 | 商业使用门槛 | 模型目录随附许可说明；不默认分发权重 |
+| plakat API 漂移 | 升级后编译失败 | 锁定版本 + adapter 隔离；ONNX 主路径不受影响 |
 | 流式扩散回调缺失 | G1 结论为否 | batch + 进度合成预览帧 |
 | RAVE 模型缺失 | G2 结论为否 | 实时视频采用逐帧滤镜 |
 | FLUX 显存超标 | 峰值超过 16GB | 预检拒绝；NF4/更高量化作为可选 |

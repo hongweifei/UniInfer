@@ -353,7 +353,7 @@ apps/desktop           Tauri 2 桌面端
 - `ort` 固定版本，使用 `download-binaries`。
 - Candle 固定版本；模型 family 通过 adapter 注册。
 - `llama-cpp-2` 内置编译，feature 门控。
-- `plakat`、扩散与视频后端作为后续 Image/Video executor 接入。
+- `onnx.diffusion` 作为图像生成主路径；`plakat` 承载 GGUF/Safetensors 图像后端；`candle-video` 承载视频后端。
 
 ## 性能与基线
 
@@ -361,7 +361,7 @@ apps/desktop           Tauri 2 桌面端
 
 ## 路线图
 
-**M6 · 真实图像生成。** `plakat` 接入 `ImageSlot`：SD-Turbo、SD1.5、SDXL、FLUX.1-dev GGUF；negative prompt、steps、guidance、seed、进度、OOM 预检与固定 seed 复现。
+**M6 · ONNX 扩散。** 新增 `onnx.diffusion`：CLIP 文本编码器、UNet、VAE 解码器与 Euler 调度器；首个模型 `sd-turbo-onnx`，512×512、1–4 步、固定 seed、逐步进度与 OOM 预检。SD1.5、SDXL、FLUX ONNX 随后接入。
 
 **M7 · 图像编辑与视频。** `/v1/images/edits` 支持 img2img、inpaint、outpaint；`/v1/videos/generations` 提供异步 job、查询、取消；`candle-video` LTX-Video 2B/13B 与 `plakat` AnimateDiff 输出 MP4。
 

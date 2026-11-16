@@ -118,16 +118,26 @@ size / steps / guidance / seed
   -> PNG / WebP
 ```
 
-Batch 路径由 `plakat` 承载：
+ONNX 主路径使用 `onnx.diffusion`：
 
-- SD-Turbo / SD1.5：512×512、少步数。
-- SDXL：高分辨率。
-- FLUX.1-dev GGUF：Q4/Q5/Q8 与文本编码器、VAE。
-- img2img、inpaint、outpaint：`/v1/images/edits`。
+```text
+CLIP tokenizer
+  -> text_encoder/model.onnx
+  -> EulerDiscrete scheduler
+  -> unet/model.onnx loop
+  -> vae_decoder/model.onnx
+  -> RGB8
+```
+
+`[diffusion]` 声明组件文件、张量名、调度器参数、latent 通道、VAE scale 与默认步数。首个模型为 `Heliosoph/sd-turbo-onnx`：512×512、1–4 步、guidance 1.0、EulerDiscrete。
+
+- SD1.5 / SDXL：同一实现，增加双文本编码器与 UNet 条件输入。
+- FLUX：增加 T5/CLIP 双编码器与 guidance embedding。
+- img2img、inpaint、outpaint：`/v1/images/edits`，复用 VAE encoder 与 UNet。
 - 进度通过 `ModelEvent::Progress { step, total }`。
 - 固定 seed 复现；OOM 映射 `InsufficientVram`。
 
-实时预览帧走流式扩散管线；管线提供逐步回调时推送原生预览帧，批量后端通过步进进度生成预览帧。
+`plakat` 作为 GGUF/Safetensors 后端，在 ONNX 路径稳定后接入，承载 SDXL/FLUX GGUF 与 AnimateDiff。
 
 ## 6. 视频生成
 
@@ -210,5 +220,5 @@ Tauri 2 桌面端在进程内启动 loopback API，复用同一配置、模型�
 - ONNX Runtime 由 `ort` 提供，固定版本。
 - Candle 固定版本，文本/视觉 family 通过 adapter 注册。
 - `llama-cpp-2` 内置编译，feature 门控。
-- `plakat`、`candle-video` 作为图像与视频后端接入。
+- `onnx.diffusion` 作为图像生成主路径；`plakat` 承载 GGUF/Safetensors 图像后端；`candle-video` 承载视频后端。
 - `frink`、`mistral.rs` 作为可选引擎评估。
