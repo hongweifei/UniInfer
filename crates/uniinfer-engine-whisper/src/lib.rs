@@ -12,7 +12,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use uniinfer_core::{
     Device, DeviceClass, EngineError, EngineLoadSpec, EngineSession, InferenceEngine, Modality,
-    ModelFormat, ModelManifest, Quantization, Result, Tensor, TensorData, TensorDtype, TensorSpec,
+    ModelFormat, Quantization, Result, Runtime, Tensor, TensorData, TensorDtype, TensorSpec,
 };
 use whisper_rs::{
     FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters, WhisperError,
