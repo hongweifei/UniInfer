@@ -87,6 +87,71 @@ async fn chat_completion_returns_generated_bytes() {
 }
 
 #[tokio::test]
+async fn chat_completion_auto_selects_capability() {
+    let body = json!({
+        "model": "auto",
+        "messages": [{"role": "user", "content": "ab"}],
+        "max_tokens": 3
+    })
+    .to_string();
+    let response = app()
+        .oneshot(post("/v1/chat/completions", &body))
+        .await
+        .expect("response");
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = body_json(response).await;
+    assert_eq!(body["model"], "tiny-byte-onnx");
+    assert_eq!(body["choices"][0]["message"]["content"], "cde");
+}
+
+#[tokio::test]
+async fn auto_selection_picks_vision_model_for_image_input() {
+    let text = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../models/tiny-onnx/manifest.toml");
+    let vision =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../models/tiny-onnx/manifest-vision.toml");
+    let state = AppState::new(&ApiConfig::new(text.clone()).with_manifests(vec![text, vision]))
+        .expect("state");
+    let app = routes::router(state);
+    let body = json!({
+        "model": "auto",
+        "messages": [{"role": "user", "content": [
+            {"type": "image_url", "image_url": {"url": "data:image/png;base64,aGk="}},
+            {"type": "text", "text": "ab"}
+        ]}],
+        "max_tokens": 3
+    })
+    .to_string();
+    let response = app
+        .oneshot(post("/v1/chat/completions", &body))
+        .await
+        .expect("response");
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = body_json(response).await;
+    assert_eq!(body["model"], "tiny-vision-onnx");
+    assert_eq!(body["choices"][0]["message"]["content"], "cde");
+}
+
+#[tokio::test]
+async fn chat_rejects_image_for_text_only_capability() {
+    let body = json!({
+        "model": "tiny-byte-onnx",
+        "messages": [{"role": "user", "content": [
+            {"type": "image_url", "image_url": {"url": "data:image/png;base64,aGk="}},
+            {"type": "text", "text": "ab"}
+        ]}],
+        "max_tokens": 1
+    })
+    .to_string();
+    let response = app()
+        .oneshot(post("/v1/chat/completions", &body))
+        .await
+        .expect("response");
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let body = body_json(response).await;
+    assert_eq!(body["code"], "unsupported_capability");
+}
+
+#[tokio::test]
 async fn streaming_emits_deltas_and_done() {
     let body = json!({
         "model": "tiny-byte-onnx",
@@ -298,9 +363,9 @@ async fn audio_endpoint_reports_missing_model() {
         .body(Body::from(body))
         .expect("request");
     let response = app().oneshot(request).await.expect("response");
-    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
     let body = body_json(response).await;
-    assert_eq!(body["code"], "missing_model");
+    assert_eq!(body["code"], "no_capability_match");
 }
 
 #[tokio::test]

@@ -461,7 +461,9 @@ curl http://127.0.0.1:8080/v1/chat/completions \
   }'
 ```
 
-`image_url` 的远程 HTTP URL 暂不支持；`audio` / `video` parts 返回 `400 unsupported_content`。模型输出中的 `<tool_call>...</tool_call>` 或纯 JSON `{name, arguments}` 会解析为结构化 `tool_calls`，`finish_reason` 为 `tool_calls`。流式请求会在结束时发送 tool_calls chunk。
+`image_url` 的远程 HTTP URL 暂不支持；`audio` / `video` parts 返回 `400 unsupported_content`。
+
+`model` 可以省略或设为 `"auto"`：服务端按 `operation + required/optional inputs + outputs + mode` 选择第一个匹配且可放置的模型；显式指定模型时同样会校验该模型声明的 capability。模型输出中的 `<tool_call>...</tool_call>` 或纯 JSON `{name, arguments}` 会解析为结构化 `tool_calls`，`finish_reason` 为 `tool_calls`。流式请求会在结束时发送 tool_calls chunk。
 
 采样参数：`temperature`（0–2，0 为 greedy）、`top_p`（0–1）、`top_k`（0–4096，0 表示不截断）、`seed`、`frequency_penalty` 与 `presence_penalty`（均 0–2）。只传采样字段而未传 `temperature` 时默认 `temperature=1.0`；非法取值返回 `400 invalid_sampling`。
 

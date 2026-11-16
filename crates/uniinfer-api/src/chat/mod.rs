@@ -22,7 +22,8 @@ use stream::stream_response;
 
 #[derive(Debug, Deserialize)]
 pub(crate) struct ChatRequest {
-    model: String,
+    #[serde(default)]
+    model: Option<String>,
     messages: Vec<ChatMessage>,
     #[serde(default)]
     stream: bool,
@@ -99,6 +100,15 @@ struct ParsedContent {
 }
 
 impl ChatContent {
+    fn contains_image(&self) -> bool {
+        match self {
+            Self::Text(_) => false,
+            Self::Parts(parts) => parts.iter().any(|part| {
+                part.get("type").and_then(serde_json::Value::as_str) == Some("image_url")
+            }),
+        }
+    }
+
     fn into_parts(self, image_marker: &str) -> Result<ParsedContent, ApiError> {
         match self {
             Self::Text(text) => Ok(ParsedContent {
@@ -208,16 +218,43 @@ pub(crate) async fn chat(
     let deadline = state
         .request_timeout
         .map(|timeout| std::time::Instant::now() + timeout);
-    if !state.catalog.contains_key(&request.model) {
+    let has_image = request
+        .messages
+        .iter()
+        .filter_map(|message| message.content.as_ref())
+        .any(ChatContent::contains_image);
+    let capability = CapabilityRequest {
+        operation: Operation::Generate,
+        present_inputs: std::iter::once(Modality::Text)
+            .chain(has_image.then_some(Modality::Image))
+            .collect(),
+        requested_outputs: vec![Modality::Text],
+        mode: if request.stream {
+            Mode::Stream
+        } else {
+            Mode::Batch
+        },
+    };
+    let model = match request
+        .model
+        .as_deref()
+        .filter(|model| !model.is_empty() && *model != "auto")
+    {
+        Some(model) => model.to_owned(),
+        None => state.select_capability(&capability, false).ok_or_else(|| {
+            ApiError::not_found(
+                "no_capability_match",
+                "no configured model matches this request",
+            )
+        })?,
+    };
+    if !state.catalog.contains_key(&model) {
         return Err(ApiError::not_found(
             "model_not_found",
-            format!("model {} is not configured", request.model),
+            format!("model {model} is not configured"),
         ));
     }
-    let slot = state
-        .text_slot(&request.model)
-        .await
-        .map_err(ApiError::from)?;
+    let slot = state.text_slot(&model).await.map_err(ApiError::from)?;
     let tool_choice = request.tool_choice.clone();
     let tools = if tool_choice.as_ref().and_then(serde_json::Value::as_str) == Some("none") {
         Vec::new()
@@ -251,32 +288,17 @@ pub(crate) async fn chat(
             })
         })
         .collect::<Result<Vec<_>, ApiError>>()?;
-    let capability = CapabilityRequest {
-        operation: Operation::Generate,
-        present_inputs: std::iter::once(Modality::Text)
-            .chain((!images.is_empty()).then_some(Modality::Image))
-            .collect(),
-        requested_outputs: vec![Modality::Text],
-        mode: if request.stream {
-            Mode::Stream
-        } else {
-            Mode::Batch
-        },
-    };
     if !slot.manifest().supports(&capability) {
         return Err(ApiError::bad_request(
             "unsupported_capability",
-            format!(
-                "model {} does not declare a capability for this request",
-                request.model
-            ),
+            format!("model {model} does not declare a capability for this request"),
         ));
     }
     if !images.is_empty() {
         if slot.manifest().vision.is_none() {
             return Err(ApiError::bad_request(
                 "model_does_not_support_images",
-                format!("model {} has no vision configuration", request.model),
+                format!("model {model} has no vision configuration"),
             ));
         }
         if marker.is_empty() {
@@ -324,7 +346,7 @@ pub(crate) async fn chat(
     sampling.validate().map_err(ApiError::from)?;
     let mut prepared = state
         .router
-        .prepare_text(&request.model, prompt, request.max_tokens)
+        .prepare_text(&model, prompt, request.max_tokens)
         .await
         .map_err(ApiError::from)?;
     prepared.images = images;

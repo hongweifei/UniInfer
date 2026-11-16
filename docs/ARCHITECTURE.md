@@ -26,6 +26,17 @@ runtime + implementation + format + quantization + input modalities + placement
 
 `implementation` 是 adapter 契约，不是模型名。多个模型共享同一实现时，只新增 manifest 和 profile。
 
+请求先形成 capability 签名，再筛选 manifest：
+
+```text
+request -> CapabilityRequest
+        -> manifests where capability.matches(request)
+        -> EngineRegistry route (runtime + implementation + placement)
+        -> load
+```
+
+显式 `model` 也会先做 capability 校验；`model = "auto"` 或省略时按 capability 自动选择。
+
 ## 3. 分层
 
 ```mermaid

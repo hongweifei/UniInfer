@@ -51,8 +51,22 @@ pub(crate) async fn transcribe(
         }
     }
 
-    let model = model.ok_or_else(|| ApiError::bad_request("missing_model", "model is required"))?;
     let audio = audio.ok_or_else(|| ApiError::bad_request("missing_audio", "file is required"))?;
+    let capability = CapabilityRequest {
+        operation: Operation::Transcribe,
+        present_inputs: vec![Modality::Audio],
+        requested_outputs: vec![Modality::Text],
+        mode: Mode::Batch,
+    };
+    let model = match model.filter(|model| !model.is_empty() && model != "auto") {
+        Some(model) => model,
+        None => state.select_capability(&capability, true).ok_or_else(|| {
+            ApiError::not_found(
+                "no_capability_match",
+                "no configured model matches audio transcription",
+            )
+        })?,
+    };
     let entry = state.catalog_entry(&model).ok_or_else(|| {
         ApiError::not_found(
             "model_not_found",
@@ -65,12 +79,6 @@ pub(crate) async fn transcribe(
             format!("model {model} is not an audio-only model"),
         ));
     }
-    let capability = CapabilityRequest {
-        operation: Operation::Transcribe,
-        present_inputs: vec![Modality::Audio],
-        requested_outputs: vec![Modality::Text],
-        mode: Mode::Batch,
-    };
     if !entry.manifest.supports(&capability) {
         return Err(ApiError::bad_request(
             "unsupported_capability",

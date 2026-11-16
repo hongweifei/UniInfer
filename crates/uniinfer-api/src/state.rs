@@ -4,7 +4,7 @@ use std::sync::{Arc, Mutex};
 
 use tokio::sync::Mutex as AsyncMutex;
 use uniinfer_config::ConfigHandle;
-use uniinfer_core::{CancelToken, EngineError, ModelManifest, Result};
+use uniinfer_core::{CancelToken, CapabilityRequest, EngineError, ModelManifest, Result};
 use uniinfer_service::{AudioSlot, ModelSlot, Runtime};
 
 use crate::api_config::ApiConfig;
@@ -85,6 +85,41 @@ impl AppState {
             load_lock: Arc::new(AsyncMutex::new(())),
             audio_lru: Arc::new(Mutex::new(VecDeque::new())),
             max_loaded_models: config.max_loaded_models,
+        })
+    }
+
+    /// Select the first configured model that satisfies a capability request.
+    /// Loaded models are preferred over lazy candidates.
+    pub(crate) fn select_capability(
+        &self,
+        request: &CapabilityRequest,
+        audio_only: bool,
+    ) -> Option<String> {
+        let mut ids = self
+            .catalog
+            .iter()
+            .filter(|(_, entry)| entry.audio_only == audio_only)
+            .filter(|(_, entry)| entry.manifest.supports(request))
+            .map(|(id, _)| id.clone())
+            .collect::<Vec<_>>();
+        ids.sort();
+        let loaded = ids.iter().find(|id| {
+            if audio_only {
+                self.audio_slots
+                    .lock()
+                    .ok()
+                    .is_some_and(|slots| slots.contains_key(*id))
+            } else {
+                self.router.peek_slot(id).is_some()
+            }
+        });
+        if let Some(id) = loaded {
+            return Some(id.clone());
+        }
+        ids.into_iter().find(|id| {
+            self.catalog
+                .get(id)
+                .is_some_and(|entry| self.runtime.probe_manifest(&entry.manifest).is_ok())
         })
     }
 
