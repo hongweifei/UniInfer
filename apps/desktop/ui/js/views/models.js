@@ -1,6 +1,7 @@
 import { h, clear } from '../dom.js';
 import { icon } from '../icons.js';
-import { formatBytes, isAudioModel, isImageModel, errorMessage, friendlyRouteError, capabilitySummary, modelCategories, modelTags, MODEL_CATEGORIES } from '../format.js';
+import { formatBytes, isAudioModel, isImageModel, errorMessage, friendlyRouteError, capabilitySummary } from '../format.js';
+import { modelCategories, modelTags, MODEL_CATEGORIES } from '../model-meta.js';
 import { toast, emptyState, chip, setBusy, openModal, confirmDialog } from '../components/ui.js';
 import { mountCatalog } from '../components/catalog.js';
 

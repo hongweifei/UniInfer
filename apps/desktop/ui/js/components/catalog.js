@@ -1,7 +1,8 @@
 import { h, clear } from '../dom.js';
 import { icon } from '../icons.js';
 import { toast, openModal, chip } from './ui.js';
-import { formatBytes, formatName, onlineCategories, onlineTags, MODEL_CATEGORIES } from '../format.js';
+import { formatBytes, formatName } from '../format.js';
+import { onlineCategories, onlineTags, MODEL_CATEGORIES } from '../model-meta.js';
 
 const invoke = (command, args) => window.__TAURI__?.core?.invoke(command, args);
 
