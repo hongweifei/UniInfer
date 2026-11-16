@@ -60,7 +60,7 @@ impl Capability {
     /// Match a concrete request against this capability.
     #[must_use]
     pub fn matches(&self, request: &CapabilityRequest) -> bool {
-        if self.operation != request.operation || self.mode != request.mode {
+        if self.operation != request.operation || !self.mode.accepts(request.mode) {
             return false;
         }
         if self
@@ -79,6 +79,19 @@ impl Capability {
             .requested_outputs
             .iter()
             .all(|modality| self.outputs.contains(modality))
+    }
+}
+
+impl Mode {
+    /// Batch requests may use a streaming model; streaming requests may not
+    /// use a batch-only model. Duplex is exact.
+    #[must_use]
+    pub fn accepts(self, requested: Self) -> bool {
+        match requested {
+            Self::Batch => matches!(self, Self::Batch | Self::Stream | Self::Duplex),
+            Self::Stream => matches!(self, Self::Stream | Self::Duplex),
+            Self::Duplex => self == Self::Duplex,
+        }
     }
 }
 

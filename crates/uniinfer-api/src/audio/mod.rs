@@ -3,7 +3,7 @@
 use axum::extract::{Multipart, State};
 use axum::response::{IntoResponse, Response};
 use uniinfer_backends::audio::decode_wav_mono;
-use uniinfer_core::EngineError;
+use uniinfer_core::{CapabilityRequest, EngineError, Modality, Mode, Operation};
 
 use crate::error::ApiError;
 use crate::state::AppState;
@@ -63,6 +63,18 @@ pub(crate) async fn transcribe(
         return Err(ApiError::bad_request(
             "model_not_audio",
             format!("model {model} is not an audio-only model"),
+        ));
+    }
+    let capability = CapabilityRequest {
+        operation: Operation::Transcribe,
+        present_inputs: vec![Modality::Audio],
+        requested_outputs: vec![Modality::Text],
+        mode: Mode::Batch,
+    };
+    if !entry.manifest.supports(&capability) {
+        return Err(ApiError::bad_request(
+            "unsupported_capability",
+            format!("model {model} does not declare audio transcription"),
         ));
     }
     let slot = state.audio_slot(&model).await.map_err(ApiError::from)?;

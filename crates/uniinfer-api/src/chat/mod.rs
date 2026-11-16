@@ -6,7 +6,7 @@ use axum::response::Response;
 use base64::Engine as _;
 use serde::Deserialize;
 use uniinfer_backends::{ChatMessage as BackendMessage, Sampling};
-use uniinfer_core::CancelToken;
+use uniinfer_core::{CancelToken, CapabilityRequest, Modality, Mode, Operation};
 use uniinfer_router::PreparedText;
 use uniinfer_service::ModelSlot;
 
@@ -251,6 +251,27 @@ pub(crate) async fn chat(
             })
         })
         .collect::<Result<Vec<_>, ApiError>>()?;
+    let capability = CapabilityRequest {
+        operation: Operation::Generate,
+        present_inputs: std::iter::once(Modality::Text)
+            .chain((!images.is_empty()).then_some(Modality::Image))
+            .collect(),
+        requested_outputs: vec![Modality::Text],
+        mode: if request.stream {
+            Mode::Stream
+        } else {
+            Mode::Batch
+        },
+    };
+    if !slot.manifest().supports(&capability) {
+        return Err(ApiError::bad_request(
+            "unsupported_capability",
+            format!(
+                "model {} does not declare a capability for this request",
+                request.model
+            ),
+        ));
+    }
     if !images.is_empty() {
         if slot.manifest().vision.is_none() {
             return Err(ApiError::bad_request(
