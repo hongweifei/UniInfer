@@ -135,7 +135,6 @@ mod tests {
                 addr: "127.0.0.1:9090".parse().expect("addr"),
                 ..ServerConfig::default()
             },
-            ..UniInferConfig::default()
         };
         config.save(&path).expect("save");
         let loaded = UniInferConfig::load(&path).expect("load");
@@ -149,7 +148,6 @@ mod tests {
                 addr: "0.0.0.0:8080".parse().expect("addr"),
                 ..ServerConfig::default()
             },
-            ..UniInferConfig::default()
         };
         assert!(matches!(config.validate(), Err(ConfigError::Invalid(_))));
         let with_token = UniInferConfig {
@@ -158,7 +156,6 @@ mod tests {
                 token: Some("secret".into()),
                 ..ServerConfig::default()
             },
-            ..UniInferConfig::default()
         };
         assert!(with_token.validate().is_ok());
     }

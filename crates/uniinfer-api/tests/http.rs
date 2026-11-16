@@ -377,7 +377,6 @@ async fn config_endpoint_round_trips_and_saves() {
     let path = dir.path().join("uniinfer.toml");
     let config = UniInferConfig {
         server: ServerConfig::default(),
-        ..UniInferConfig::default()
     };
     let handle = Arc::new(ConfigHandle::new(config, Some(path.clone())));
 
@@ -554,7 +553,6 @@ async fn config_get_redacts_token_and_put_preserves_it() {
             token: Some("secret".into()),
             ..ServerConfig::default()
         },
-        ..UniInferConfig::default()
     };
     durable.save(&path).expect("save");
     let handle = Arc::new(ConfigHandle::load(path.clone()).expect("load"));
