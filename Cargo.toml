@@ -67,3 +67,9 @@ unsafe_code = "deny"
 
 [workspace.lints.clippy]
 all = "warn"
+
+[patch.crates-io]
+# onnx-protobuf 0.2.3 generated code pins protobuf 3.4.0, which is affected
+# by RUSTSEC-2024-0437. The vendored copy updates the generated version check
+# so the crate can run with patched protobuf 3.7.2.
+onnx-protobuf = { path = "vendor/onnx-protobuf" }
