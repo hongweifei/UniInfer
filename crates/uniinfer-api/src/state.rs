@@ -37,7 +37,6 @@ pub struct AppState {
     pub(crate) catalog: Arc<RwLock<HashMap<String, CatalogEntry>>>,
     pub(crate) backends: Arc<BackendStore>,
     pub(crate) active_backend: Option<(String, String)>,
-    pub(crate) backend_catalog_url: Option<String>,
     load_lock: Arc<AsyncMutex<()>>,
 }
 
@@ -113,7 +112,6 @@ impl AppState {
             catalog: Arc::new(RwLock::new(catalog)),
             backends,
             active_backend,
-            backend_catalog_url: config.backend_catalog_url.clone(),
             load_lock: Arc::new(AsyncMutex::new(())),
         })
     }

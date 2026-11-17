@@ -46,9 +46,6 @@ pub struct ServerConfig {
     /// Relative paths resolve against the config file directory.
     #[serde(default)]
     pub backend_dir: Option<std::path::PathBuf>,
-    /// Optional JSON catalog URL for available backends.
-    #[serde(default)]
-    pub backend_catalog_url: Option<String>,
 }
 
 fn default_addr() -> SocketAddr {
@@ -77,7 +74,6 @@ impl Default for ServerConfig {
             vram_reserve_mb: 0,
             host_reserve_mb: 0,
             backend_dir: None,
-            backend_catalog_url: None,
         }
     }
 }

@@ -19,7 +19,6 @@ pub struct ApiConfig {
     pub vram_reserve_mb: u64,
     pub host_reserve_mb: u64,
     pub backend_dir: PathBuf,
-    pub backend_catalog_url: Option<String>,
     pub config: Option<Arc<ConfigHandle>>,
 }
 
@@ -43,7 +42,6 @@ impl ApiConfig {
             vram_reserve_mb: 0,
             host_reserve_mb: 0,
             backend_dir: std::path::PathBuf::from("backends"),
-            backend_catalog_url: None,
             config: None,
         }
     }
@@ -79,7 +77,6 @@ impl ApiConfig {
             vram_reserve_mb: config.server.vram_reserve_mb,
             host_reserve_mb: config.server.host_reserve_mb,
             backend_dir,
-            backend_catalog_url: config.server.backend_catalog_url.clone(),
             config: Some(handle),
         })
     }

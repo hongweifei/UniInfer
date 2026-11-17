@@ -63,7 +63,6 @@ pub(crate) async fn list(State(state): State<AppState>) -> Result<Json<Value>, A
         "active": selected.map(|(id, version)| backend_ref(&id, &version)),
         "running": backend_ref(&running.0, &running.1),
         "directory": state.backends.root(),
-        "catalog_url": state.backend_catalog_url,
         "backends": data,
     })))
 }
