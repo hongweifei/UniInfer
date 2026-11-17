@@ -7,11 +7,13 @@ use uniinfer_core::{
 use uniinfer_devices::DeviceInventory;
 use uniinfer_engine_onnx::OnnxEngine;
 
+mod common;
+
 #[test]
 #[ignore = "loads the 256 MiB SmolVLM ONNX fixture"]
 fn smolvlm_onnx_returns_logits_for_image() {
     let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../models/smolvlm2-256m-onnx-q4");
-    if !dir.join("manifest.toml").is_file() {
+    if !common::fixture_ready(&dir.join("manifest.toml")) {
         eprintln!("skip: SmolVLM ONNX fixture is not downloaded");
         return;
     }
@@ -74,7 +76,7 @@ fn smolvlm_onnx_returns_logits_for_image() {
 #[ignore = "loads the 256 MiB SmolVLM ONNX fixture"]
 fn smolvlm_onnx_returns_logits_for_two_images() {
     let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../models/smolvlm2-256m-onnx-q4");
-    if !dir.join("manifest.toml").is_file() {
+    if !common::fixture_ready(&dir.join("manifest.toml")) {
         eprintln!("skip: SmolVLM ONNX fixture is not downloaded");
         return;
     }

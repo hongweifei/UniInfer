@@ -7,14 +7,17 @@ use uniinfer_core::{
 use uniinfer_devices::DeviceInventory;
 use uniinfer_engine_onnx::OnnxEngine;
 
+mod common;
+
 #[test]
 fn whisper_manifest_loads_through_pipeline_adapter() {
     let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../models/whisper-tiny.en-onnx");
-    if !dir.join("manifest.toml").is_file() {
+    let manifest_path = dir.join("manifest.toml");
+    if !common::fixture_ready(&manifest_path) {
         eprintln!("skip: Whisper ONNX fixture is not downloaded");
         return;
     }
-    let manifest = ModelManifest::load(&dir.join("manifest.toml")).expect("manifest");
+    let manifest = ModelManifest::load(&manifest_path).expect("manifest");
     let inventory = DeviceInventory::probe();
     let placement = inventory
         .plan(&manifest, &[DeviceClass::Cpu])
