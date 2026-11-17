@@ -7,16 +7,14 @@ import { toast, themeIcon, confirmDialog } from './components/ui.js';
 import { deleteMedia } from './media-store.js';
 import { initDownloads, subscribeDownloads, activeDownloads } from './downloads.js';
 import { mountChat } from './views/chat.js';
-import { mountTranscribe } from './views/transcribe.js';
-import { mountImages } from './views/images.js';
 import { mountModels } from './views/models.js';
+import { mountMedia } from './views/media.js';
 import { mountBackends } from './views/backends.js';
 import { mountSettings } from './views/settings.js';
 
 const views = {
   chat: { title: '对话', subtitle: '和本地模型聊天，支持图片输入', mount: mountChat },
-  transcribe: { title: '语音转写', subtitle: '把 WAV 音频转成可编辑文本', mount: mountTranscribe },
-  images: { title: '图像生成', subtitle: '用提示词生成图片', mount: mountImages },
+  media: { title: '媒体', subtitle: '转写、生成与多模态工具', mount: mountMedia },
   models: { title: '模型', subtitle: '管理本地模型与设备', mount: mountModels },
   backends: { title: '后端', subtitle: '下载和管理推理后端', mount: mountBackends },
   settings: { title: '设置', subtitle: '外观、对话与运行时', mount: mountSettings },
@@ -24,8 +22,7 @@ const views = {
 
 const navItems = [
   ['chat', '对话', 'chat'],
-  ['transcribe', '语音转写', 'wave'],
-  ['images', '图像生成', 'image'],
+  ['media', '媒体', 'sparkles'],
   ['models', '模型', 'models'],
   ['backends', '后端', 'box'],
   ['settings', '设置', 'settings'],
@@ -73,11 +70,20 @@ function sortModels(list) {
   return [...list].sort((a, b) => modelRank(a) - modelRank(b) || a.id.localeCompare(b.id));
 }
 
+function mediaTab() {
+  return ['transcribe', 'images', 'tts', 'video'].includes(state.mediaTab) ? state.mediaTab : 'transcribe';
+}
+
 function modelsForView(view) {
   let list = models;
-  if (view === 'chat') list = list.filter(isChatModel);
-  else if (view === 'transcribe') list = list.filter(isAudioModel);
-  else if (view === 'images') list = list.filter(isImageModel);
+  if (view === 'chat') {
+    list = list.filter(isChatModel);
+  } else if (view === 'media') {
+    const tab = mediaTab();
+    if (tab === 'transcribe') list = list.filter(isAudioModel);
+    else if (tab === 'images') list = list.filter(isImageModel);
+    else return [];
+  }
   return list.filter((model) => !model.route_error);
 }
 
@@ -249,6 +255,9 @@ function createContext() {
     currentModel,
     setModel,
     navigate,
+    mediaTab,
+    setMediaTab: (tab) => openMedia(tab),
+    openMedia,
     subview: () => state.subview,
     setSubview,
     refreshModels,
@@ -269,6 +278,16 @@ function createContext() {
 function renderSidebarOnly() {
   const existing = app.querySelector('.sidebar');
   if (existing) existing.replaceWith(sidebar());
+}
+
+function openMedia(tab) {
+  if (!['transcribe', 'images', 'tts', 'video'].includes(tab)) return;
+  state.mediaTab = tab;
+  state.view = 'media';
+  persist();
+  chooseModelForView('media');
+  renderShell();
+  renderView();
 }
 
 function setModel(id) {
@@ -298,6 +317,7 @@ function cycleTheme() {
 function navigate(view) {
   if (!views[view]) return;
   state.view = view;
+  if (view === 'media') state.mediaTab = mediaTab();
   if (view === 'models' && !['online', 'downloads', 'installed', 'devices', 'import'].includes(state.subview)) state.subview = 'online';
   persist();
   chooseModelForView(view);

@@ -102,8 +102,8 @@ export function mountModels(root, ctx) {
       title: routeError ? friendlyRouteError(routeError.message) : unsupported ?? '使用此模型',
       onClick: () => {
         ctx.setModel(model.id);
-        if (isImageModel(model)) ctx.navigate('images');
-        else if (isAudioModel(model)) ctx.navigate('transcribe');
+        if (isImageModel(model)) ctx.openMedia('images');
+        else if (isAudioModel(model)) ctx.openMedia('transcribe');
         else ctx.navigate('chat');
       },
     }, h('span', { html: icon('play', 13) }), h('span', { text: '使用' }));

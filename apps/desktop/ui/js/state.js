@@ -8,6 +8,7 @@ function freshState() {
   return {
     view: 'chat',
     subview: 'online',
+    mediaTab: 'transcribe',
     theme: 'system',
     selectedModel: null,
     conversations: [],
@@ -22,7 +23,7 @@ export function loadState() {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return base;
     const saved = JSON.parse(raw);
-    return {
+    const merged = {
       ...base,
       ...saved,
       chatOptions: { ...defaultOptions, ...(saved.chatOptions ?? {}) },
@@ -42,6 +43,11 @@ export function loadState() {
           }))
         : [],
     };
+    if (merged.view === 'transcribe' || merged.view === 'images') {
+      merged.mediaTab = merged.view;
+      merged.view = 'media';
+    }
+    return merged;
   } catch {
     return base;
   }
