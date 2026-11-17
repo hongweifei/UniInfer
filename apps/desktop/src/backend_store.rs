@@ -51,26 +51,6 @@ pub(crate) async fn install_backend(
     install_package(&app, package).await
 }
 
-#[tauri::command]
-pub(crate) async fn pick_backend_folder() -> Option<String> {
-    tauri::async_runtime::spawn_blocking(|| {
-        rfd::FileDialog::new()
-            .set_title("选择后端包目录（包含 backend.toml）")
-            .pick_folder()
-            .map(|path| path.display().to_string())
-    })
-    .await
-    .ok()
-    .flatten()
-}
-
-#[tauri::command]
-pub(crate) async fn import_backend(path: String) -> Result<InstallResult, String> {
-    tauri::async_runtime::spawn_blocking(move || import_local(Path::new(&path)))
-        .await
-        .map_err(|error| format!("导入任务失败：{error}"))?
-}
-
 async fn install_package(
     app: &AppHandle,
     package: BackendManifest,
@@ -175,46 +155,6 @@ async fn download_file(
     tokio::fs::rename(&tmp, destination)
         .await
         .map_err(|error| format!("安装 {} 失败：{error}", destination.display()))
-}
-
-fn import_local(source: &Path) -> Result<InstallResult, String> {
-    let manifest_path = source.join("backend.toml");
-    let raw = std::fs::read_to_string(&manifest_path)
-        .map_err(|error| format!("读取 {} 失败：{error}", manifest_path.display()))?;
-    let package: BackendManifest =
-        toml::from_str(&raw).map_err(|error| format!("解析后端清单失败：{error}"))?;
-    validate_manifest(&package).map_err(|error| error.to_string())?;
-    let store = BackendStore::new(backend_dir());
-    store.ensure().map_err(|error| error.to_string())?;
-    let staging = staging_dir(&store, &package.id, &package.version);
-    let result = copy_package(source, &staging, &package).and_then(|()| {
-        store
-            .write_manifest(&staging, &package)
-            .map_err(|error| format!("写入后端清单失败：{error}"))
-    });
-    if let Err(error) = result {
-        let _ = std::fs::remove_dir_all(&staging);
-        return Err(error);
-    }
-    finalize_package(&store, &package, &staging)
-}
-
-fn copy_package(source: &Path, staging: &Path, package: &BackendManifest) -> Result<(), String> {
-    for file in &package.files {
-        let from = source.join(&file.path);
-        let to = staging.join(&file.path);
-        if let Some(parent) = to.parent() {
-            std::fs::create_dir_all(parent)
-                .map_err(|error| format!("创建目录失败：{error}"))?;
-        }
-        std::fs::copy(&from, &to).map_err(|error| {
-            format!("复制 {} 失败：{error}", from.display())
-        })?;
-    }
-    if !staging.join(&package.worker).is_file() {
-        return Err(format!("后端包缺少 worker：{}", package.worker));
-    }
-    Ok(())
 }
 
 fn finalize_package(
