@@ -119,8 +119,10 @@ pub struct BackendManifest {
     /// Informational platform label such as `windows-x86_64`.
     #[serde(default)]
     pub platform: String,
-    /// Worker executable path relative to the package directory.
+    /// Worker/server executable path relative to the package directory.
     pub worker: String,
+    #[serde(default)]
+    pub launcher: BackendLauncher,
     #[serde(default)]
     pub devices: Vec<DeviceClass>,
     #[serde(default)]
@@ -154,11 +156,23 @@ pub struct InstalledBackend {
     manifest: BackendManifest,
 }
 
+/// How the selected distribution is launched by the runtime.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum BackendLauncher {
+    /// UniInfer's tensor worker protocol.
+    #[default]
+    Worker,
+    /// Official llama.cpp `llama-server`.
+    LlamaServer,
+}
+
 /// The subset needed by the engine registry to launch a sidecar.
 #[derive(Debug, Clone)]
 pub struct BackendLaunch {
     pub id: String,
     pub version: String,
+    pub launcher: BackendLauncher,
     pub worker: PathBuf,
     pub devices: Vec<DeviceClass>,
 }
@@ -206,6 +220,7 @@ impl InstalledBackend {
         Ok(BackendLaunch {
             id: self.manifest.id.clone(),
             version: self.manifest.version.clone(),
+            launcher: self.manifest.launcher,
             worker,
             devices: self.manifest.devices.clone(),
         })
@@ -458,6 +473,7 @@ mod tests {
             license: None,
             platform: "test".into(),
             worker: "bin/worker.exe".into(),
+            launcher: BackendLauncher::Worker,
             devices: vec![DeviceClass::Gpu],
             engines: vec![BackendEngine {
                 id: "test-vulkan".into(),

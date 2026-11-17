@@ -21,7 +21,8 @@ name = "llama.cpp Vulkan"
 version = "0.1.0"
 description = "GGUF text inference on Vulkan"
 platform = "windows-x86_64"
-worker = "bin/uniinfer-worker.exe"
+launcher = "llama-server"
+worker = "llama-server.exe"
 devices = ["gpu"]
 
 [[engines]]
@@ -39,13 +40,14 @@ modalities = ["text"]
 devices = ["gpu"]
 
 [[files]]
-path = "bin/uniinfer-worker.exe"
-url = "https://example.com/llama-vulkan/uniinfer-worker.exe"
+path = "llama-b11836-bin-win-vulkan-x64.zip"
+url = "https://github.com/ggml-org/llama.cpp/releases/download/b11836/llama-b11836-bin-win-vulkan-x64.zip"
 size = 123456789
 sha256 = "..."
 ```
 
-- `worker` 必须是相对路径，并且位于 `files` 中。
+- `worker` 必须是相对路径，并且位于 `files` 中；`launcher = "llama-server"` 表示使用官方 `llama-server` 适配器，`worker` 指向解压后的官方可执行文件。
+- `.zip` 引擎归档会自动解压，`worker` 使用解压后的相对路径。
 - 安装时校验文件大小与 SHA-256；缺少 `sha256` 的文件不会被拒绝，但生产目录应始终提供。
 - `devices` 用于放置预算，可选 `cpu`、`gpu`、`npu`。
 - `engines` 必须至少包含一项，逐项写清推理引擎 id、名称、runtime、vendor、variant、category、格式、模态与设备；界面会按官方项目和加速变体分组展示。
@@ -62,7 +64,8 @@ sha256 = "..."
       "version": "0.1.0",
       "description": "GGUF on Vulkan",
       "platform": "windows-x86_64",
-      "worker": "bin/uniinfer-worker.exe",
+      "worker": "llama-server.exe",
+      "launcher": "llama-server",
       "devices": ["gpu"],
       "engines": [
         {
@@ -82,8 +85,8 @@ sha256 = "..."
       ],
       "files": [
         {
-          "path": "bin/uniinfer-worker.exe",
-          "url": "https://example.com/uniinfer-worker.exe",
+          "path": "llama-b11836-bin-win-vulkan-x64.zip",
+          "url": "https://github.com/ggml-org/llama.cpp/releases/download/b11836/llama-b11836-bin-win-vulkan-x64.zip",
           "size": 123456789,
           "sha256": "..."
         }
@@ -93,13 +96,14 @@ sha256 = "..."
 }
 ```
 
-## 构建后端包
+## 官方引擎
 
-```powershell
-cargo build --release -p uniinfer-worker --features llama-vulkan
-```
+- `llama.cpp`：下载官方 release 的 `llama-server` 压缩包，设置 `launcher = "llama-server"`。UniInfer 启动官方 server，通过 `/completion` 流式协议适配。
+- `ONNX Runtime`：官方 DLL 仍需 `ort/load-dynamic` 适配，当前由内置 ONNX Runtime 提供。
+- `whisper.cpp`：官方 server/CLI 需要 ASR 适配器，当前由内置 whisper.cpp 提供。
+- `Candle`：上游不提供官方二进制，只能作为内置 Rust 引擎。
 
-将 `uniinfer-worker.exe` 及其依赖 DLL 放入包目录，生成 `backend.toml` 和 SHA-256，上传到任意静态文件服务即可。CUDA 包使用 `--features llama-cuda,ep-cuda`，DirectML 包使用 `--features ep-directml`，CoreML 包使用 `--features ep-coreml,candle-metal`。
+内部 `backend.toml` 只是安装后的启动描述，用户不需要编辑或手动导入。
 
 ## 运行时语义
 

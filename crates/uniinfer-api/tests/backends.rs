@@ -27,6 +27,7 @@ fn install_fake(store: &BackendStore, id: &str, version: &str) {
         license: None,
         platform: "test".into(),
         worker: "bin/worker.exe".into(),
+        launcher: uniinfer_backend_store::BackendLauncher::Worker,
         devices: vec![uniinfer_core::DeviceClass::Gpu],
         engines: vec![BackendEngine {
             id: "llama-vulkan".into(),

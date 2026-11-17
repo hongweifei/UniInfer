@@ -93,12 +93,32 @@ async fn download_package(
         }
         download_file(&client, file, &destination).await?;
     }
+    extract_archives(staging, package)?;
     if !staging.join(&package.worker).is_file() {
-        return Err(format!("后端包缺少 worker：{}", package.worker));
+        return Err(format!("引擎包缺少启动文件：{}", package.worker));
     }
     store
         .write_manifest(staging, package)
         .map_err(|error| format!("写入后端清单失败：{error}"))
+}
+
+fn extract_archives(staging: &Path, package: &BackendManifest) -> Result<(), String> {
+    for file in &package.files {
+        if !file.path.to_ascii_lowercase().ends_with(".zip") {
+            continue;
+        }
+        let archive_path = staging.join(&file.path);
+        let archive_file = std::fs::File::open(&archive_path)
+            .map_err(|error| format!("打开 {} 失败：{error}", archive_path.display()))?;
+        let mut archive = zip::ZipArchive::new(archive_file)
+            .map_err(|error| format!("解压 {} 失败：{error}", archive_path.display()))?;
+        archive
+            .extract(staging)
+            .map_err(|error| format!("解压 {} 失败：{error}", archive_path.display()))?;
+        std::fs::remove_file(&archive_path)
+            .map_err(|error| format!("清理 {} 失败：{error}", archive_path.display()))?;
+    }
+    Ok(())
 }
 
 async fn download_file(

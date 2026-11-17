@@ -5,7 +5,7 @@
 
 use std::sync::Arc;
 
-use uniinfer_backend_store::BackendRuntime;
+use uniinfer_backend_store::{BackendLauncher, BackendRuntime};
 use uniinfer_core::Result;
 use uniinfer_devices::DeviceInventory;
 use uniinfer_engine_candle::CandleEngine;
@@ -13,6 +13,7 @@ use uniinfer_engine_candle::CandleEngine;
 use uniinfer_engine_llama::LlamaEngine;
 #[cfg(feature = "llama-mtmd")]
 use uniinfer_engine_llama::LlamaMtmdEngine;
+use uniinfer_engine_llama_server::LlamaServerEngine;
 use uniinfer_engine_onnx::OnnxEngine;
 use uniinfer_engine_process::ProcessEngine;
 #[cfg(feature = "whisper")]
@@ -65,12 +66,20 @@ pub fn build_with_backend(isolate_models: bool, backend: BackendRuntime) -> Resu
 
     let mut registry = EngineRegistry::new(inventory);
     match backend {
-        BackendRuntime::Sidecar(backend) => {
-            registry.register(Arc::new(ProcessEngine::with_worker_and_devices(
-                backend.worker,
-                backend.devices,
-            )));
-        }
+        BackendRuntime::Sidecar(backend) => match backend.launcher {
+            BackendLauncher::Worker => {
+                registry.register(Arc::new(ProcessEngine::with_worker_and_devices(
+                    backend.worker,
+                    backend.devices,
+                )));
+            }
+            BackendLauncher::LlamaServer => {
+                registry.register(Arc::new(LlamaServerEngine::new(
+                    backend.worker,
+                    backend.devices,
+                )));
+            }
+        },
         BackendRuntime::Builtin if isolate_models => {
             registry.register(Arc::new(ProcessEngine::new()));
         }
