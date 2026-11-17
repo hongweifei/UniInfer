@@ -32,6 +32,16 @@ pub(crate) fn apply(config: &mut UniInferConfig) -> Result<()> {
             ConfigError::Invalid(format!("UNIINFER_MODEL_LOAD_TIMEOUT_MS: {error}"))
         })?;
     }
+    if let Ok(value) = std::env::var("UNIINFER_VRAM_RESERVE_MB") {
+        config.server.vram_reserve_mb = value
+            .parse()
+            .map_err(|error| ConfigError::Invalid(format!("UNIINFER_VRAM_RESERVE_MB: {error}")))?;
+    }
+    if let Ok(value) = std::env::var("UNIINFER_HOST_RESERVE_MB") {
+        config.server.host_reserve_mb = value
+            .parse()
+            .map_err(|error| ConfigError::Invalid(format!("UNIINFER_HOST_RESERVE_MB: {error}")))?;
+    }
     if let Ok(value) = std::env::var("UNIINFER_ISOLATE_MODELS") {
         config.server.isolate_models = matches!(value.as_str(), "1" | "true" | "yes");
     }

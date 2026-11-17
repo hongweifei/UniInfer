@@ -62,13 +62,22 @@ impl EngineRegistry {
         self.ledger.summary()
     }
 
+    pub fn set_reserves(&self, vram_bytes: u64, host_bytes: u64) {
+        self.ledger.set_reserves(vram_bytes, host_bytes);
+    }
+
     fn budget(&self) -> DeviceBudget {
         let (reserved_vram, reserved_host) = self.ledger.reserved();
+        let reserves = self.ledger.reserves();
         let mut devices = self.inventory.devices().to_vec();
         for device in &mut devices {
             let used = match device.class {
-                DeviceClass::Cpu => reserved_host,
-                DeviceClass::Gpu => reserved_vram.get(&device.id).copied().unwrap_or(0),
+                DeviceClass::Cpu => reserved_host.saturating_add(reserves.1),
+                DeviceClass::Gpu => reserved_vram
+                    .get(&device.id)
+                    .copied()
+                    .unwrap_or(0)
+                    .saturating_add(reserves.0),
                 DeviceClass::Npu => 0,
             };
             device.available_memory_bytes = device.available_memory_bytes.saturating_sub(used);

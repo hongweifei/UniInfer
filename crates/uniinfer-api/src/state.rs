@@ -40,6 +40,10 @@ pub struct AppState {
 impl AppState {
     pub fn new(config: &ApiConfig) -> Result<Self> {
         let runtime = Arc::new(Runtime::new_with_process(config.isolate_models)?);
+        runtime.set_reserves(
+            config.vram_reserve_mb.saturating_mul(1024 * 1024),
+            config.host_reserve_mb.saturating_mul(1024 * 1024),
+        );
         let mut manifest_paths = HashMap::new();
         let mut catalog = HashMap::new();
         for path in &config.manifests {

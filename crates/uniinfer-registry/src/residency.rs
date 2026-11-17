@@ -5,6 +5,7 @@
 
 use std::collections::HashMap;
 use std::path::Path;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use uniinfer_core::{
@@ -50,6 +51,8 @@ impl Drop for Reservation {
 #[derive(Clone, Default)]
 pub(super) struct ResidencyLedger {
     inner: Arc<Mutex<LedgerState>>,
+    vram_reserve: Arc<AtomicU64>,
+    host_reserve: Arc<AtomicU64>,
 }
 
 impl ResidencyLedger {
@@ -63,7 +66,26 @@ impl ResidencyLedger {
             .inner
             .lock()
             .map_err(|_| EngineError::Other("residency ledger lock poisoned".into()))?;
-        check_limits(&state, inventory, placement, residency)
+        check_limits(
+            &state,
+            inventory,
+            placement,
+            residency,
+            self.vram_reserve.load(Ordering::Relaxed),
+            self.host_reserve.load(Ordering::Relaxed),
+        )
+    }
+
+    pub(super) fn set_reserves(&self, vram: u64, host: u64) {
+        self.vram_reserve.store(vram, Ordering::Relaxed);
+        self.host_reserve.store(host, Ordering::Relaxed);
+    }
+
+    pub(super) fn reserves(&self) -> (u64, u64) {
+        (
+            self.vram_reserve.load(Ordering::Relaxed),
+            self.host_reserve.load(Ordering::Relaxed),
+        )
     }
 
     pub(super) fn reserved(&self) -> (HashMap<String, u64>, u64) {
@@ -83,7 +105,14 @@ impl ResidencyLedger {
             .inner
             .lock()
             .map_err(|_| EngineError::Other("residency ledger lock poisoned".into()))?;
-        check_limits(&state, inventory, placement, residency)?;
+        check_limits(
+            &state,
+            inventory,
+            placement,
+            residency,
+            self.vram_reserve.load(Ordering::Relaxed),
+            self.host_reserve.load(Ordering::Relaxed),
+        )?;
         let gpu = placement
             .devices
             .iter()
@@ -125,6 +154,8 @@ fn check_limits(
     inventory: &DeviceInventory,
     placement: &PlacementPlan,
     residency: Residency,
+    vram_reserve: u64,
+    host_reserve: u64,
 ) -> Result<()> {
     let gpu = placement
         .devices
@@ -138,7 +169,7 @@ fn check_limits(
             });
         };
         let used = state.vram.get(&gpu.id).copied().unwrap_or(0);
-        let available = gpu.available_memory_bytes;
+        let available = gpu.available_memory_bytes.saturating_sub(vram_reserve);
         if available > 0 && used.saturating_add(residency.vram_bytes) > available {
             return Err(EngineError::InsufficientVram {
                 required: format!("{} bytes", residency.vram_bytes),
@@ -152,7 +183,7 @@ fn check_limits(
             .iter()
             .find(|device| device.class == DeviceClass::Cpu)
     {
-        let available = cpu.available_memory_bytes;
+        let available = cpu.available_memory_bytes.saturating_sub(host_reserve);
         if available > 0 && state.host_bytes.saturating_add(residency.host_bytes) > available {
             return Err(EngineError::InsufficientMemory {
                 required: format!("{} bytes", residency.host_bytes),

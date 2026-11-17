@@ -389,3 +389,22 @@ fn ledger_reserves_and_releases_session_residency() {
     let lease = registry.load(&path).expect("reload after release");
     drop(lease);
 }
+
+#[test]
+fn reserves_reduce_admission_budget() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let mut manifest = manifest();
+    manifest.implementation = "onnx.offload".into();
+    let path = write_manifest(temp.path(), &manifest);
+    let mut registry = EngineRegistry::new(gpu_budget());
+    registry.register(std::sync::Arc::new(GpuOffloadEngine));
+    registry.set_reserves(401, 0);
+    let error = match registry.load(&path) {
+        Ok(_) => panic!("reserve should reject 600-byte session"),
+        Err(error) => error,
+    };
+    assert!(matches!(error, EngineError::InsufficientVram { .. }));
+    registry.set_reserves(0, 0);
+    let lease = registry.load(&path).expect("load after reserve release");
+    drop(lease);
+}

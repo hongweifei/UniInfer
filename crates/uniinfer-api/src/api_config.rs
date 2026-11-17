@@ -16,6 +16,8 @@ pub struct ApiConfig {
     pub request_timeout: std::time::Duration,
     pub model_load_timeout: std::time::Duration,
     pub isolate_models: bool,
+    pub vram_reserve_mb: u64,
+    pub host_reserve_mb: u64,
     pub config: Option<Arc<ConfigHandle>>,
 }
 
@@ -36,6 +38,8 @@ impl ApiConfig {
             request_timeout: std::time::Duration::ZERO,
             model_load_timeout: std::time::Duration::ZERO,
             isolate_models: false,
+            vram_reserve_mb: 0,
+            host_reserve_mb: 0,
             config: None,
         }
     }
@@ -56,6 +60,8 @@ impl ApiConfig {
                 config.server.model_load_timeout_ms,
             ),
             isolate_models: config.server.isolate_models,
+            vram_reserve_mb: config.server.vram_reserve_mb,
+            host_reserve_mb: config.server.host_reserve_mb,
             config: Some(handle),
         })
     }

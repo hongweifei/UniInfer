@@ -36,6 +36,12 @@ pub struct ServerConfig {
     /// Route text models through `uniinfer-worker` child processes.
     #[serde(default)]
     pub isolate_models: bool,
+    /// Memory held back from GPU scheduling, in MiB.
+    #[serde(default)]
+    pub vram_reserve_mb: u64,
+    /// Memory held back from host scheduling, in MiB.
+    #[serde(default)]
+    pub host_reserve_mb: u64,
 }
 
 fn default_addr() -> SocketAddr {
@@ -61,6 +67,8 @@ impl Default for ServerConfig {
             request_timeout_ms: 0,
             model_load_timeout_ms: 0,
             isolate_models: false,
+            vram_reserve_mb: 0,
+            host_reserve_mb: 0,
         }
     }
 }

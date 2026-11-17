@@ -115,6 +115,10 @@ impl Runtime {
         self.registry.residency()
     }
 
+    pub fn set_reserves(&self, vram_bytes: u64, host_bytes: u64) {
+        self.registry.set_reserves(vram_bytes, host_bytes);
+    }
+
     /// Resolve engine and device placement without loading weights.
     pub fn probe_manifest(&self, manifest: &ModelManifest) -> Result<EngineRoute> {
         self.registry.route(manifest)

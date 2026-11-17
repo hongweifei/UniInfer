@@ -116,6 +116,12 @@ flowchart TB
 | Safetensors | 视觉语言 | `candle.vision` | 已实现 |
 | GGML | Whisper 语音转写 | `whisper.ggml` | 已实现 |
 
+### 运行配置
+
+- 设置页提供整机级「省内存 / 平衡 / 性能」预设，可调整最大驻留模型数、GPU/主机内存预留和请求超时。
+- 每个已安装模型有独立运行配置：设备策略、优先设备、CPU 回退、层卸载、KV cache 位置与上下文长度；不同大小/格式的模型分别保存。
+- 模型配置会显示模型体积与 GPU 可用内存，并给出自动层卸载、KV 放 RAM/VRAM 的建议。
+
 ### 分层驻留
 
 - 设备探测会报告 `memory_bytes` 与 `available_memory_bytes`；CPU 来自系统内存，llama.cpp GPU 来自后端空闲显存。

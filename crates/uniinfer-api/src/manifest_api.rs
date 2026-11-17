@@ -22,9 +22,17 @@ pub(crate) async fn get(
             ApiError::not_found("model_not_found", format!("model {id} is not loaded"))
         })?;
     let manifest = ModelManifest::load(&path)?;
+    let base = path.parent().unwrap_or_else(|| std::path::Path::new("."));
+    let size_bytes = manifest
+        .files
+        .iter()
+        .filter_map(|file| std::fs::metadata(base.join(&file.path)).ok())
+        .map(|metadata| metadata.len())
+        .sum::<u64>();
     Ok(Json(json!({
         "id": id,
         "path": path,
+        "size_bytes": size_bytes,
         "manifest": manifest,
     })))
 }
