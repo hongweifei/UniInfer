@@ -11,8 +11,6 @@ use uniinfer_service::{AudioSlot, ImageSlot, ModelSlot, Runtime};
 use crate::api_config::ApiConfig;
 use crate::cache::MediaCache;
 
-const MAX_MEMORY_LOAD_RETRIES: usize = 8;
-
 /// A configured model that has not necessarily been loaded yet.
 #[derive(Debug, Clone)]
 pub(crate) struct CatalogEntry {
@@ -269,27 +267,24 @@ impl AppState {
             || std::path::PathBuf::from("."),
             std::path::Path::to_path_buf,
         );
-        let mut attempts = 0;
-        let slot = loop {
-            let runtime = Arc::clone(&runtime);
-            let manifest = manifest.clone();
-            let base = base.clone();
-            let loaded =
-                tokio::task::spawn_blocking(move || runtime.load_image_manifest(manifest, &base))
+        let state = self;
+        let slot = crate::loading::retry_memory(
+            id,
+            || {
+                let runtime = Arc::clone(&runtime);
+                let manifest = manifest.clone();
+                let base = base.clone();
+                async move {
+                    tokio::task::spawn_blocking(move || {
+                        runtime.load_image_manifest(manifest, &base)
+                    })
                     .await
-                    .map_err(|_| EngineError::Other("image load task panicked".into()))?;
-            match loaded {
-                Ok(slot) => break slot,
-                Err(error)
-                    if is_memory_error(&error)
-                        && attempts < MAX_MEMORY_LOAD_RETRIES
-                        && self.evict_for_memory(id) =>
-                {
-                    attempts += 1;
+                    .map_err(|_| EngineError::Other("image load task panicked".into()))?
                 }
-                Err(error) => return Err(error),
-            }
-        };
+            },
+            |id| state.evict_for_memory(id),
+        )
+        .await?;
         self.media.insert_image(id, Arc::clone(&slot));
         Ok(slot)
     }
@@ -312,26 +307,23 @@ impl AppState {
         }
         let runtime = Arc::clone(&self.runtime);
         let path = entry.path;
-        let mut attempts = 0;
-        let slot = loop {
-            let runtime = Arc::clone(&runtime);
-            let path = path.clone();
-            let cancel = CancelToken::new();
-            let task_cancel = cancel.clone();
-            let task =
-                tokio::task::spawn_blocking(move || runtime.load_cancellable(&path, task_cancel));
-            match self.await_load(task, cancel).await {
-                Ok(slot) => break slot,
-                Err(error)
-                    if is_memory_error(&error)
-                        && attempts < MAX_MEMORY_LOAD_RETRIES
-                        && self.evict_for_memory(id) =>
-                {
-                    attempts += 1;
-                }
-                Err(error) => return Err(error),
-            }
-        };
+        let timeout = self.model_load_timeout();
+        let state = self;
+        let slot = crate::loading::retry_memory(
+            id,
+            || {
+                let runtime = Arc::clone(&runtime);
+                let path = path.clone();
+                let cancel = CancelToken::new();
+                let task_cancel = cancel.clone();
+                let task = tokio::task::spawn_blocking(move || {
+                    runtime.load_cancellable(&path, task_cancel)
+                });
+                async move { crate::loading::await_load(timeout, task, cancel).await }
+            },
+            |id| state.evict_for_memory(id),
+        )
+        .await?;
         self.router.insert_slot(id, Arc::clone(&slot))?;
         Ok(slot)
     }
@@ -354,58 +346,25 @@ impl AppState {
         }
         let runtime = Arc::clone(&self.runtime);
         let path = entry.path;
-        let mut attempts = 0;
-        let slot = loop {
-            let runtime = Arc::clone(&runtime);
-            let path = path.clone();
-            let cancel = CancelToken::new();
-            let task_cancel = cancel.clone();
-            let task = tokio::task::spawn_blocking(move || {
-                runtime.load_audio_cancellable(&path, task_cancel)
-            });
-            match self.await_load(task, cancel).await {
-                Ok(slot) => break slot,
-                Err(error)
-                    if is_memory_error(&error)
-                        && attempts < MAX_MEMORY_LOAD_RETRIES
-                        && self.evict_for_memory(id) =>
-                {
-                    attempts += 1;
-                }
-                Err(error) => return Err(error),
-            }
-        };
+        let timeout = self.model_load_timeout();
+        let state = self;
+        let slot = crate::loading::retry_memory(
+            id,
+            || {
+                let runtime = Arc::clone(&runtime);
+                let path = path.clone();
+                let cancel = CancelToken::new();
+                let task_cancel = cancel.clone();
+                let task = tokio::task::spawn_blocking(move || {
+                    runtime.load_audio_cancellable(&path, task_cancel)
+                });
+                async move { crate::loading::await_load(timeout, task, cancel).await }
+            },
+            |id| state.evict_for_memory(id),
+        )
+        .await?;
         self.media.insert_audio(id, Arc::clone(&slot));
         Ok(slot)
-    }
-
-    async fn await_load<T>(
-        &self,
-        task: tokio::task::JoinHandle<Result<T>>,
-        cancel: CancelToken,
-    ) -> Result<T> {
-        let Some(timeout) = self.model_load_timeout() else {
-            return task
-                .await
-                .map_err(|error| EngineError::Other(format!("model load task: {error}")))?;
-        };
-        let started = std::time::Instant::now();
-        let joined = match tokio::time::timeout(timeout, task).await {
-            Ok(joined) => joined,
-            Err(_) => {
-                cancel.cancel();
-                return Err(EngineError::Timeout);
-            }
-        };
-        let loaded =
-            joined.map_err(|error| EngineError::Other(format!("model load task: {error}")))??;
-        // The deadline timer has ~1ms granularity, so a load can finish after the
-        // budget but before the timer fires. Discard it as timed out too.
-        if started.elapsed() > timeout {
-            cancel.cancel();
-            return Err(EngineError::Timeout);
-        }
-        Ok(loaded)
     }
 
     pub(crate) fn unload_text(&self, id: &str) -> bool {
@@ -457,13 +416,6 @@ impl AppState {
             })
             .unwrap_or_default()
     }
-}
-
-fn is_memory_error(error: &EngineError) -> bool {
-    matches!(
-        error,
-        EngineError::InsufficientVram { .. } | EngineError::InsufficientMemory { .. }
-    )
 }
 
 fn collect_manifests(dir: &Path, depth: usize, out: &mut Vec<PathBuf>) {
@@ -550,10 +502,10 @@ mod tests {
     async fn load_past_deadline_returns_timeout_and_cancels_task() {
         let state = state(std::time::Duration::from_millis(5));
         let cancel = CancelToken::new();
-        let error = state
-            .await_load(slow_load(), cancel.clone())
-            .await
-            .expect_err("timeout");
+        let error =
+            crate::loading::await_load(state.model_load_timeout(), slow_load(), cancel.clone())
+                .await
+                .expect_err("timeout");
         assert!(matches!(error, EngineError::Timeout));
         assert!(cancel.is_cancelled());
     }
@@ -563,8 +515,7 @@ mod tests {
         let state = state(std::time::Duration::from_millis(1));
         let cancel = CancelToken::new();
         let task = slow_load();
-        let error = state
-            .await_load(task, cancel.clone())
+        let error = crate::loading::await_load(state.model_load_timeout(), task, cancel.clone())
             .await
             .expect_err("timeout");
         assert!(matches!(error, EngineError::Timeout));
@@ -575,8 +526,7 @@ mod tests {
     async fn load_within_deadline_returns_value() {
         let state = state(std::time::Duration::from_secs(5));
         let cancel = CancelToken::new();
-        state
-            .await_load(slow_load(), cancel.clone())
+        crate::loading::await_load(state.model_load_timeout(), slow_load(), cancel.clone())
             .await
             .expect("load");
         assert!(!cancel.is_cancelled());
@@ -586,8 +536,7 @@ mod tests {
     async fn zero_deadline_never_times_out() {
         let state = state(std::time::Duration::ZERO);
         let cancel = CancelToken::new();
-        state
-            .await_load(slow_load(), cancel.clone())
+        crate::loading::await_load(state.model_load_timeout(), slow_load(), cancel.clone())
             .await
             .expect("load");
         assert!(!cancel.is_cancelled());

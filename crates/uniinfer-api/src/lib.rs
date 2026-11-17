@@ -9,6 +9,7 @@ mod config;
 mod error;
 mod extract;
 mod images;
+mod loading;
 mod manifest_api;
 mod model_lifecycle;
 mod models;

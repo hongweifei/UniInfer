@@ -6,8 +6,8 @@ use std::time::Duration;
 
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use uniinfer_backends::{
-    ByteTokenizer, ChatMessage, ChatTemplate, GenerationOutput, GenerationSpec,
-    HuggingFaceTokenizer, ModelEvent, ModelOutput, TextGenerator, Tokenizer, fallback_prompt,
+    ChatMessage, ChatTemplate, GenerationOutput, GenerationSpec, ModelEvent, ModelOutput,
+    TextGenerator, fallback_prompt,
 };
 use uniinfer_core::{
     Device, EngineError, EngineSession, ModelManifest, NativeFinish, NativeTextRequest,
@@ -17,6 +17,7 @@ use uniinfer_registry::{EngineRegistry, EngineRoute, SessionLease};
 
 mod audio;
 mod image;
+mod text_slot;
 pub use audio::AudioSlot;
 pub use image::ImageSlot;
 pub use uniinfer_core::CancelToken;
@@ -213,7 +214,7 @@ impl Runtime {
             || std::path::PathBuf::from("."),
             std::path::Path::to_path_buf,
         );
-        self.build_text_slot(lease, &base_dir)
+        text_slot::build(lease, &base_dir)
     }
 
     /// Load an in-memory text manifest against a model directory.
@@ -242,58 +243,7 @@ impl Runtime {
             self.registry
                 .load_manifest_with_cancel(manifest, base_dir, cancel)?,
         );
-        self.build_text_slot(lease, base_dir)
-    }
-
-    fn build_text_slot(
-        &self,
-        lease: std::sync::Arc<SessionLease>,
-        base_dir: &Path,
-    ) -> Result<Arc<ModelSlot>> {
-        let manifest = lease.manifest();
-        let text = manifest
-            .text
-            .as_ref()
-            .ok_or_else(|| EngineError::ManifestInvalid("manifest has no [text] section".into()))?;
-        let tokenizer = manifest.tokenizer.as_deref().unwrap_or_default();
-        let base = base_dir.to_path_buf();
-        let tokenizer: Arc<dyn Tokenizer> = match tokenizer {
-            "bytes" => Arc::new(ByteTokenizer::new(text.vocab_size)?),
-            "hf" => {
-                let file = text.tokenizer_file.as_ref().ok_or_else(|| {
-                    EngineError::ManifestInvalid("text.tokenizer_file is required for hf".into())
-                })?;
-                Arc::new(HuggingFaceTokenizer::from_file(base.join(file))?)
-            }
-            other => {
-                return Err(EngineError::UnsupportedEngine(format!(
-                    "tokenizer {other:?}"
-                )));
-            }
-        };
-        let chat_template = text
-            .tokenizer_file
-            .as_ref()
-            .map(|file| {
-                ChatTemplate::from_tokenizer_config(
-                    &base.join(file).with_file_name("tokenizer_config.json"),
-                )
-            })
-            .transpose()?
-            .flatten();
-        let generator = TextGenerator::new(
-            tokenizer,
-            text.vocab_size,
-            manifest.context_len,
-            text.eos_token,
-        );
-
-        Ok(Arc::new(ModelSlot {
-            generator,
-            chat_template,
-            lease,
-            permit: Arc::new(Semaphore::new(1)),
-        }))
+        text_slot::build(lease, base_dir)
     }
 }
 
