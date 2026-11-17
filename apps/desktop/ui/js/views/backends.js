@@ -27,11 +27,23 @@ const ENGINE_SUMMARIES = {
   whisper: '语音转写引擎，支持 Whisper 模型。',
 };
 const TAG_LABELS = { ...FORMAT_LABELS, ...MODALITY_LABELS };
+const STATE_TTL_MS = 30_000;
+const CATALOG_TTL_MS = 10 * 60_000;
+const pageCache = {
+  state: null,
+  stateAt: 0,
+  catalog: null,
+  catalogAt: 0,
+};
+let catalogPromise = null;
 
 export function mountBackends(root, ctx) {
-  let state = { backends: [], directory: '' };
-  let catalog = null;
-  let loading = true;
+  let state = pageCache.state ?? { backends: [], directory: '' };
+  let catalog = pageCache.catalog;
+  let loading = !pageCache.state;
+  let catalogLoading = !catalog;
+  let stateError = '';
+  let catalogError = '';
   let busy = false;
 
   const builtinHost = h('div', { class: 'backend-grid' });
@@ -43,7 +55,7 @@ export function mountBackends(root, ctx) {
   const errorBanner = h('div', { class: 'notice error', hidden: true });
   const refreshButton = h('button', {
     class: 'btn btn-icon ghost sm', type: 'button', title: '重新读取后端列表',
-    onClick: () => void refresh(),
+    onClick: () => void refresh({ force: true, reloadCatalog: true }),
   }, h('span', { html: icon('refresh', 14) }));
   const downloadButton = h('button', {
     class: 'btn sm ghost', type: 'button',
@@ -61,28 +73,81 @@ export function mountBackends(root, ctx) {
     errorBanner.textContent = message;
   }
 
-  async function refresh({ reloadCatalog = true } = {}) {
-    loading = true;
-    showError('');
-    render();
+  function updateError() {
+    showError(stateError || catalogError);
+  }
+
+  async function refresh({ reloadCatalog = true, force = false } = {}) {
+    if (!force && pageCache.state && Date.now() - pageCache.stateAt < STATE_TTL_MS) {
+      state = pageCache.state;
+      loading = false;
+      render();
+      if (reloadCatalog) void loadCatalog(force);
+      return;
+    }
+    if (!pageCache.state) {
+      loading = true;
+      render();
+    }
+    stateError = '';
     let message = '';
     try {
-      state = await ctx.api.backends();
-      if (reloadCatalog) {
-        try {
-          catalog = await invoke('fetch_backend_catalog');
-          if (catalog?.warnings?.length) {
-            message = `部分引擎目录不可用：${catalog.warnings.join('；')}`;
-          }
-        } catch (error) {
-          message = `官方引擎目录不可用：${errorMessage(error)}`;
-        }
-      }
+      const next = await ctx.api.backends();
+      state = next;
+      pageCache.state = next;
+      pageCache.stateAt = Date.now();
     } catch (error) {
-      message = errorMessage(error);
+      stateError = errorMessage(error);
+    }
+    loading = false;
+    updateError();
+    render();
+    if (reloadCatalog) void loadCatalog(force);
+  }
+
+  async function loadCatalog(force = false) {
+    if (!force && pageCache.catalog && Date.now() - pageCache.catalogAt < CATALOG_TTL_MS) {
+      catalog = pageCache.catalog;
+      catalogLoading = false;
+      catalogError = catalog?.warnings?.length
+        ? `部分引擎目录不可用：${catalog.warnings.join('；')}`
+        : '';
+      updateError();
+      render();
+      return;
+    }
+    if (catalogPromise) {
+      catalogLoading = true;
+      render();
+      try {
+        catalog = await catalogPromise;
+        catalogError = catalog?.warnings?.length
+          ? `部分引擎目录不可用：${catalog.warnings.join('；')}`
+          : '';
+      } catch (error) {
+        catalogError = `官方引擎目录不可用：${errorMessage(error)}`;
+      } finally {
+        catalogLoading = false;
+        updateError();
+        render();
+      }
+      return;
+    }
+    catalogLoading = true;
+    catalogError = '';
+    render();
+    catalogPromise = invoke('fetch_backend_catalog');
+    try {
+      const next = await catalogPromise;
+      catalog = next;
+      pageCache.catalog = next;
+      pageCache.catalogAt = Date.now();
+    } catch (error) {
+      catalogError = `官方引擎目录不可用：${errorMessage(error)}`;
     } finally {
-      loading = false;
-      showError(message);
+      catalogPromise = null;
+      catalogLoading = false;
+      updateError();
       render();
     }
   }
@@ -111,7 +176,7 @@ export function mountBackends(root, ctx) {
     if (!ok) return;
     try {
       await ctx.api.removeBackend(backend.id);
-      await refresh({ reloadCatalog: false });
+      await refresh({ reloadCatalog: false, force: true });
       toast('后端已删除', 'success');
     } catch (error) {
       toast(errorMessage(error), 'error');
@@ -342,7 +407,7 @@ export function mountBackends(root, ctx) {
       availableGroups.set(packageInfo.name, group);
     }
     availableCount.textContent = `${availableGroups.size} 个引擎`;
-    if (loading) {
+    if (catalogLoading && !catalog) {
       availableHost.append(h('div', { class: 'backend-loading', text: '正在读取目录…' }));
     } else if (!catalog) {
       availableHost.append(emptyBackend(
@@ -417,7 +482,7 @@ export function mountBackends(root, ctx) {
     for (const task of tasks) {
       if (task.kind !== 'backend' || !isTerminalStatus(task.status) || refreshedBackends.has(task.id)) continue;
       refreshedBackends.add(task.id);
-      if (task.status === 'done') void refresh({ reloadCatalog: false });
+      if (task.status === 'done') void refresh({ reloadCatalog: false, force: true });
     }
   });
   void refresh();
