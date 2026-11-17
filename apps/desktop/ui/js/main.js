@@ -98,10 +98,6 @@ function chooseModelForView(view) {
   persist();
 }
 
-function ctxOpenDownloads() {
-  downloadPopover?.open();
-}
-
 function sidebar() {
   const context = [];
   if (state.view === 'chat') {
@@ -183,10 +179,6 @@ function sidebar() {
       nav.append(h('button', { class: 'nav-item', type: 'button', onClick: action },
         h('span', { html: icon(iconName, 16) }), h('span', { text: label })));
     }
-    nav.append(h('button', {
-      class: 'nav-item', type: 'button',
-      onClick: () => ctxOpenDownloads(),
-    }, h('span', { html: icon('download', 16) }), h('span', { text: '下载任务' })));
     context.push(nav);
   } else if (state.view === 'models') {
     const links = [
@@ -304,7 +296,6 @@ function createContext() {
     subview: () => state.subview,
     setSubview,
     refreshModels,
-    openDownloads: () => downloadPopover?.open(),
     persist,
     setTheme,
     restart: () => window.__TAURI__?.core?.invoke('restart_app'),

@@ -57,11 +57,6 @@ export function mountBackends(root, ctx) {
     class: 'btn btn-icon ghost sm', type: 'button', title: '重新读取后端列表',
     onClick: () => void refresh({ force: true, reloadCatalog: true }),
   }, h('span', { html: icon('refresh', 14) }));
-  const downloadButton = h('button', {
-    class: 'btn sm ghost', type: 'button',
-    onClick: () => ctx.openDownloads(),
-  }, h('span', { html: icon('download', 14) }), h('span', { text: '下载任务' }));
-
 
   function showError(message) {
     if (!message) {
@@ -435,7 +430,6 @@ export function mountBackends(root, ctx) {
           h('p', { text: '后端安装后即可被模型选用；模型各自配置后端与设备变体。' }),
         ),
         h('div', { class: 'backend-hero-side' },
-          downloadButton,
           refreshButton,
         ),
       ),

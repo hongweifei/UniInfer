@@ -47,11 +47,6 @@ export function mountModels(root, ctx) {
   const importButton = h('button', { class: 'btn primary', type: 'button', disabled: true, onClick: () => void importModel() },
     h('span', { html: icon('plus', 14) }), h('span', { text: '导入模型' }));
   const importResult = h('div', { class: 'notice', text: '选择一个包含 manifest.toml 的模型目录。路径需要位于配置根目录内。' });
-  const promoteButton = h('button', {
-    class: 'btn', type: 'button', hidden: true,
-    onClick: () => window.__TAURI__?.core?.invoke('restart_app'),
-  }, h('span', { html: icon('refresh', 14) }), h('span', { text: '重启以加载' }));
-
   const folderButton = h('button', { class: 'btn btn-icon', type: 'button', title: '选择目录', onClick: () => void pickFolder(), html: icon('folder', 15) });
 
   async function pickFolder() {
@@ -259,7 +254,6 @@ export function mountModels(root, ctx) {
       await ctx.api.importModel(importPath.value.trim());
       importResult.className = 'notice';
       importResult.textContent = '模型已导入并加入模型库。';
-      promoteButton.hidden = true;
       await ctx.api.request('/v1/models/refresh', { method: 'POST' }).catch(() => {});
       await ctx.refreshModels();
       toast('模型已导入', 'success');
@@ -520,8 +514,7 @@ export function mountModels(root, ctx) {
       list,
     ),
     h('div', { class: 'card', attrs: { id: 'import-model' }, hidden: subview !== 'import' },
-      h('div', { class: 'section-title' }, h('h2', { text: '导入模型' }), h('span', { class: 'spacer' }),
-        promoteButton),
+      h('div', { class: 'section-title' }, h('h2', { text: '导入模型' }), h('span', { class: 'spacer' })),
       h('div', { class: 'import-box' },
         h('div', { class: 'input-row' }, importPath, folderButton, inspectButton, importButton),
         importResult,
