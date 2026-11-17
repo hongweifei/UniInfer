@@ -128,6 +128,7 @@ impl OnnxEngine {
                     class,
                     backend,
                     memory_bytes: 0,
+                    available_memory_bytes: 0,
                 })
             })
             .collect()

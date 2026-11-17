@@ -10,6 +10,7 @@ description = "Device discovery and placement planning"
 
 [dependencies]
 uniinfer-core.workspace = true
+sysinfo.workspace = true
 
 [lints]
 workspace = true

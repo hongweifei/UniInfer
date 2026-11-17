@@ -90,7 +90,8 @@ fn smolvlm_gguf_describes_image() {
     let prompt =
         "<|im_start|>User:<__media__>What color is this image?<end_of_utterance>\nAssistant:";
     let mut bytes = Vec::new();
-    let output = session
+    let decoder = session.native_decoder().expect("native decoder");
+    let output = decoder
         .generate_text(
             uniinfer_core::NativeTextRequest {
                 prompt,
@@ -110,8 +111,7 @@ fn smolvlm_gguf_describes_image() {
                 true
             },
         )
-        .expect("generate")
-        .expect("native");
+        .expect("generate");
     let text = String::from_utf8_lossy(&bytes);
     eprintln!("smolvlm: {text}");
     assert!(!output.bytes.is_empty());

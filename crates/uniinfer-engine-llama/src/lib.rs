@@ -7,16 +7,18 @@
 
 use llama_cpp_2::llama_backend::LlamaBackend;
 use llama_cpp_2::model::LlamaModel;
-use llama_cpp_2::model::params::LlamaModelParams;
 use std::sync::Arc;
 use uniinfer_core::{
     Device as CoreDevice, DeviceClass, EngineError, EngineLoadSpec, EngineSession, InferenceEngine,
     Modality, ModelFormat, Quantization, Result, Runtime, TensorDtype, TensorSpec,
 };
 
+#[cfg(feature = "mtmd")]
 mod mtmd;
+mod offload;
 mod session;
 
+#[cfg(feature = "mtmd")]
 pub use mtmd::LlamaMtmdEngine;
 use session::LlamaSession;
 
@@ -86,6 +88,7 @@ impl LlamaEngine {
             class: DeviceClass::Cpu,
             backend: "cpu".into(),
             memory_bytes: 0,
+            available_memory_bytes: 0,
         }];
         let mut gpu = false;
         for device in &probed {
@@ -104,6 +107,7 @@ impl LlamaEngine {
                 class,
                 backend: device.backend.to_lowercase(),
                 memory_bytes: u64::try_from(device.memory_total).unwrap_or(0),
+                available_memory_bytes: u64::try_from(device.memory_free).unwrap_or(0),
             });
         }
         tracing::info!(?devices, gpu, "llama.cpp devices probed");
@@ -156,6 +160,14 @@ impl InferenceEngine for LlamaEngine {
         &self.devices
     }
 
+    fn supports_layer_offload(&self) -> bool {
+        true
+    }
+
+    fn supports_kv_cache_offload(&self) -> bool {
+        true
+    }
+
     fn load_session(&self, spec: EngineLoadSpec) -> Result<Box<dyn EngineSession>> {
         if spec.manifest.format != ModelFormat::Gguf {
             return Err(EngineError::UnsupportedFormat(spec.manifest.format));
@@ -201,12 +213,9 @@ impl InferenceEngine for LlamaEngine {
             .ok_or_else(|| EngineError::ManifestInvalid("files is empty".into()))?;
         let path = spec.base_dir.join(&model_file.path);
 
-        let mut params = LlamaModelParams::default();
-        if class == DeviceClass::Gpu {
-            params = params.with_n_gpu_layers(999);
-        }
+        let offload = offload::plan(&spec, &path, &self.backend)?;
         let model = Arc::new(
-            LlamaModel::load_from_file(&self.backend, &path, &params).map_err(|error| {
+            LlamaModel::load_from_file(&self.backend, &path, &offload.params).map_err(|error| {
                 if spec.cancel.is_cancelled() {
                     EngineError::Cancelled
                 } else {
@@ -246,6 +255,7 @@ impl InferenceEngine for LlamaEngine {
             model,
             &self.backend,
             spec.manifest.context_len,
+            offload.offload_kqv,
             inputs,
             outputs,
         )?))

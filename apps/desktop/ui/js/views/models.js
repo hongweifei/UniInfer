@@ -215,7 +215,7 @@ export function mountModels(root, ctx) {
           h('div', { text: `${device.class.toUpperCase()} · ${device.backend}` }),
           h('div', { class: 'device-id', text: device.id }),
         ),
-        h('span', { class: 'faint', text: device.memory_bytes ? formatBytes(device.memory_bytes) : '内存未知' }),
+        h('span', { class: 'faint', text: device.memory_bytes ? `${formatBytes(device.memory_bytes)}${device.available_memory_bytes ? ` · ${formatBytes(device.available_memory_bytes)} 可用` : ''}` : '内存未知' }),
       ));
     }
   }

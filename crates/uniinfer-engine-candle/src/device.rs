@@ -19,6 +19,7 @@ pub(crate) fn probe_device_ids(classes: &[DeviceClass]) -> Vec<CoreDevice> {
             class: *class,
             backend: "candle".into(),
             memory_bytes: 0,
+            available_memory_bytes: 0,
         })
         .collect()
 }

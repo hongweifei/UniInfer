@@ -119,16 +119,17 @@ async fn main() -> Result<()> {
 fn devices() -> Result<()> {
     let runtime = Runtime::new().context("initialize runtime")?;
     println!(
-        "{:<10} {:<16} {:<10} {:>12}",
-        "ID", "CLASS", "BACKEND", "MEMORY"
+        "{:<10} {:<16} {:<10} {:>12} {:>12}",
+        "ID", "CLASS", "BACKEND", "MEMORY", "AVAILABLE"
     );
     for device in runtime.devices() {
         println!(
-            "{:<10} {:<16} {:<10} {:>12}",
+            "{:<10} {:<16} {:<10} {:>12} {:>12}",
             device.id,
             device.class.to_string(),
             device.backend,
-            format_bytes(device.memory_bytes)
+            format_bytes(device.memory_bytes),
+            format_bytes(device.available_memory_bytes)
         );
     }
     Ok(())

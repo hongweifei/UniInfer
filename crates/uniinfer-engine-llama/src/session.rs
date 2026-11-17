@@ -141,6 +141,7 @@ impl LlamaSession {
         model: Arc<LlamaModel>,
         backend: &LlamaBackend,
         context_len: usize,
+        offload_kqv: bool,
         inputs: Vec<TensorSpec>,
         outputs: Vec<TensorSpec>,
     ) -> Result<Self> {
@@ -149,7 +150,8 @@ impl LlamaSession {
         let batch = u32::try_from(BATCH_TOKENS.min(context_len)).unwrap_or(u32::MAX);
         let params = LlamaContextParams::default()
             .with_n_ctx(std::num::NonZeroU32::new(n_ctx))
-            .with_n_batch(batch);
+            .with_n_batch(batch)
+            .with_offload_kqv(offload_kqv);
         let context = ModelContext::try_new(model, |model| {
             model
                 .new_context(backend, params)

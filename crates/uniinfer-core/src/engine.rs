@@ -133,6 +133,16 @@ pub trait InferenceEngine: Send + Sync {
 
     fn supported_devices(&self) -> &[DeviceClass];
 
+    /// Whether the engine can split transformer layers between host and device.
+    fn supports_layer_offload(&self) -> bool {
+        false
+    }
+
+    /// Whether the engine can keep KV cache in host memory.
+    fn supports_kv_cache_offload(&self) -> bool {
+        false
+    }
+
     fn capabilities(&self) -> EngineCapabilities {
         let formats = self.supported_formats().to_vec();
         let modalities = formats

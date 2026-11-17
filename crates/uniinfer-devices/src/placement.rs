@@ -81,12 +81,16 @@ impl DeviceInventory {
             }
         }
 
-        let offload_layers = match manifest.placement.offload_layers.as_deref() {
-            None | Some("0") => 0,
+        let (offload_layers, auto_offload) = match manifest.placement.offload_layers.as_deref() {
+            None | Some("0") => (0, false),
+            Some("auto") => (0, true),
             Some(value) => {
-                return Err(EngineError::PlacementUnsatisfiable(format!(
-                    "offload_layers={value} is not implemented"
-                )));
+                let layers = value.parse::<usize>().map_err(|_| {
+                    EngineError::PlacementUnsatisfiable(format!(
+                        "offload_layers={value} must be a non-negative integer or \"auto\""
+                    ))
+                })?;
+                (layers, false)
             }
         };
 
@@ -104,6 +108,7 @@ impl DeviceInventory {
             stages,
             devices,
             offload_layers,
+            auto_offload,
             kv_cache: manifest
                 .placement
                 .kv_cache

@@ -7,7 +7,6 @@ use llama_cpp_2::context::params::LlamaContextParams;
 use llama_cpp_2::llama_backend::LlamaBackend;
 use llama_cpp_2::llama_batch::LlamaBatch;
 use llama_cpp_2::model::LlamaModel;
-use llama_cpp_2::model::params::LlamaModelParams;
 use llama_cpp_2::mtmd::{MtmdBitmap, MtmdContext, MtmdContextParams, MtmdInputText};
 use llama_cpp_2::sampling::LlamaSampler;
 use self_cell::self_cell;
@@ -78,6 +77,7 @@ impl LlamaMtmdEngine {
                     class,
                     backend: device.backend.to_lowercase(),
                     memory_bytes: u64::try_from(device.memory_total).unwrap_or(0),
+                    available_memory_bytes: u64::try_from(device.memory_free).unwrap_or(0),
                 })
             })
             .collect()
@@ -119,6 +119,14 @@ impl InferenceEngine for LlamaMtmdEngine {
         DEVICES
     }
 
+    fn supports_layer_offload(&self) -> bool {
+        true
+    }
+
+    fn supports_kv_cache_offload(&self) -> bool {
+        true
+    }
+
     fn load_session(&self, spec: EngineLoadSpec) -> Result<Box<dyn EngineSession>> {
         let vision = spec
             .manifest
@@ -143,18 +151,9 @@ impl InferenceEngine for LlamaMtmdEngine {
         let mmproj_path = spec.base_dir.join(mmproj);
         spec.manifest.verify_files(&spec.base_dir)?;
 
-        let class = spec
-            .placement
-            .devices
-            .first()
-            .map(|device| device.class)
-            .ok_or_else(|| EngineError::PlacementUnsatisfiable("empty placement".into()))?;
-        let mut params = LlamaModelParams::default();
-        if class == DeviceClass::Gpu {
-            params = params.with_n_gpu_layers(999);
-        }
+        let offload = super::offload::plan(&spec, &model_path, &self.backend)?;
         let model = Arc::new(
-            LlamaModel::load_from_file(&self.backend, &model_path, &params)
+            LlamaModel::load_from_file(&self.backend, &model_path, &offload.params)
                 .map_err(|error| EngineError::LoadFailed(format!("llama mtmd model: {error}")))?,
         );
         let mtmd = MtmdContext::init_from_file(
@@ -170,7 +169,8 @@ impl InferenceEngine for LlamaMtmdEngine {
             .with_n_ctx(std::num::NonZeroU32::new(
                 u32::try_from(context_len).unwrap_or(u32::MAX),
             ))
-            .with_n_batch(u32::try_from(512.min(context_len)).unwrap_or(512));
+            .with_n_batch(u32::try_from(512.min(context_len)).unwrap_or(512))
+            .with_offload_kqv(offload.offload_kqv);
         let context = ModelContext::try_new(model.clone(), |model| {
             model
                 .new_context(&self.backend, context_params)

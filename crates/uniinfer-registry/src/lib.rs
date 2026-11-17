@@ -181,7 +181,67 @@ impl EngineRegistry {
             }
 
             match self.inventory.plan(manifest, engine.supported_devices()) {
-                Ok(placement) => return Ok((Arc::clone(engine), placement)),
+                Ok(mut placement) => {
+                    if (placement.offload_layers > 0 || placement.auto_offload)
+                        && !engine.supports_layer_offload()
+                    {
+                        saw_device = true;
+                        tracing::debug!(
+                            engine = engine.engine_name(),
+                            "engine does not support layer offload"
+                        );
+                        continue;
+                    }
+                    if placement.kv_cache == uniinfer_core::KvCachePlacement::Ram
+                        && !engine.supports_kv_cache_offload()
+                    {
+                        saw_device = true;
+                        tracing::debug!(
+                            engine = engine.engine_name(),
+                            "engine does not support KV cache offload"
+                        );
+                        continue;
+                    }
+                    // Offload-capable engines use auto tiering when the manifest
+                    // does not force a fixed layer count or CPU-only execution.
+                    if engine.supports_layer_offload()
+                        && manifest.placement.offload_layers.is_none()
+                        && placement
+                            .devices
+                            .first()
+                            .is_some_and(|device| device.class == uniinfer_core::DeviceClass::Gpu)
+                    {
+                        placement.auto_offload = true;
+                    }
+                    if placement.offload_layers == 0
+                        && !placement.auto_offload
+                        && let Some(min_vram) = manifest.min_vram.as_deref()
+                    {
+                        let required =
+                            uniinfer_core::parse_memory_size(min_vram).ok_or_else(|| {
+                                EngineError::ManifestInvalid(format!(
+                                    "invalid min_vram: {min_vram}"
+                                ))
+                            })?;
+                        if let Some(gpu) = placement
+                            .devices
+                            .iter()
+                            .find(|device| device.class == uniinfer_core::DeviceClass::Gpu)
+                            && gpu.available_memory_bytes > 0
+                            && required > gpu.available_memory_bytes
+                        {
+                            saw_device = true;
+                            tracing::debug!(
+                                engine = engine.engine_name(),
+                                required,
+                                available = gpu.available_memory_bytes,
+                                "min_vram does not fit free GPU memory"
+                            );
+                            continue;
+                        }
+                    }
+                    return Ok((Arc::clone(engine), placement));
+                }
                 Err(EngineError::PlacementUnsatisfiable(reason)) => {
                     saw_device = true;
                     tracing::debug!(%reason, "engine placement unavailable");

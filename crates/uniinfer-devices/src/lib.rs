@@ -67,12 +67,14 @@ mod tests {
                 class: DeviceClass::Cpu,
                 backend: "cpu".into(),
                 memory_bytes: 0,
+                available_memory_bytes: 0,
             },
             Device {
                 id: "gpu:0".into(),
                 class: DeviceClass::Gpu,
                 backend: "test".into(),
                 memory_bytes: 0,
+                available_memory_bytes: 0,
             },
         ])
     }
@@ -98,18 +100,21 @@ mod tests {
                 class: DeviceClass::Cpu,
                 backend: "cpu".into(),
                 memory_bytes: 0,
+                available_memory_bytes: 0,
             },
             Device {
                 id: "gpu:0".into(),
                 class: DeviceClass::Gpu,
                 backend: "gpu".into(),
                 memory_bytes: 0,
+                available_memory_bytes: 0,
             },
             Device {
                 id: "npu:0".into(),
                 class: DeviceClass::Npu,
                 backend: "npu".into(),
                 memory_bytes: 0,
+                available_memory_bytes: 0,
             },
         ]);
         let plan = inventory
@@ -166,12 +171,34 @@ mod tests {
     }
 
     #[test]
-    fn unsupported_offload_is_rejected() {
+    fn numeric_offload_layers_are_resolved() {
         let mut placement = config(PlacementPolicy::Auto);
         placement.offload_layers = Some("4".into());
+        let plan = gpu_inventory()
+            .plan(&manifest(placement), &[DeviceClass::Cpu, DeviceClass::Gpu])
+            .expect("plan");
+        assert_eq!(plan.offload_layers, 4);
+        assert!(!plan.auto_offload);
+    }
+
+    #[test]
+    fn auto_offload_is_resolved_without_layers() {
+        let mut placement = config(PlacementPolicy::Auto);
+        placement.offload_layers = Some("auto".into());
+        let plan = gpu_inventory()
+            .plan(&manifest(placement), &[DeviceClass::Cpu, DeviceClass::Gpu])
+            .expect("plan");
+        assert_eq!(plan.offload_layers, 0);
+        assert!(plan.auto_offload);
+    }
+
+    #[test]
+    fn invalid_offload_value_is_rejected() {
+        let mut placement = config(PlacementPolicy::Auto);
+        placement.offload_layers = Some("many".into());
         let error = gpu_inventory()
             .plan(&manifest(placement), &[DeviceClass::Cpu])
             .expect_err("must reject");
-        assert!(error.to_string().contains("offload_layers=4"));
+        assert!(error.to_string().contains("offload_layers=many"));
     }
 }

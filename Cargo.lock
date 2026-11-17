@@ -3164,6 +3164,7 @@ dependencies = [
 name = "uniinfer-devices"
 version = "0.0.0"
 dependencies = [
+ "sysinfo",
  "uniinfer-core",
 ]
 

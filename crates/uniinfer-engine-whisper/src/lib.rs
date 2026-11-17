@@ -49,6 +49,7 @@ impl WhisperEngine {
             class: DeviceClass::Cpu,
             backend: "whisper.cpp".into(),
             memory_bytes: 0,
+            available_memory_bytes: 0,
         }]
     }
 }

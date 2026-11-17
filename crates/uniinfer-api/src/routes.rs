@@ -226,6 +226,7 @@ async fn devices(State(state): State<AppState>) -> Json<Value> {
                 "class": device.class,
                 "backend": device.backend,
                 "memory_bytes": device.memory_bytes,
+                "available_memory_bytes": device.available_memory_bytes,
             })
         })
         .collect::<Vec<_>>();

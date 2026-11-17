@@ -15,12 +15,18 @@ impl DeviceInventory {
     pub fn probe() -> Self {
         let parallelism =
             std::thread::available_parallelism().map_or(1, std::num::NonZeroUsize::get);
+        let (total_memory, available_memory) =
+            sysinfo::System::new().map_or((0, 0), |mut system| {
+                system.refresh_memory();
+                (system.total_memory(), system.available_memory())
+            });
         Self {
             devices: vec![Device {
                 id: "cpu:0".into(),
                 class: DeviceClass::Cpu,
                 backend: format!("cpu/{parallelism}t"),
-                memory_bytes: 0,
+                memory_bytes: total_memory,
+                available_memory_bytes: available_memory,
             }],
         }
     }

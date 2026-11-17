@@ -1,9 +1,9 @@
 use std::path::{Path, PathBuf};
 
 use uniinfer_core::{
-    Capability, DeviceClass, EngineError, EngineLoadSpec, EngineSession, InferenceEngine, Modality,
-    Mode, ModelFormat, ModelManifest, Operation, PlacementConfig, PlacementPolicy, Quantization,
-    Result, Runtime, Tensor, TensorData, TensorSpec,
+    Capability, Device, DeviceClass, EngineError, EngineLoadSpec, EngineSession, InferenceEngine,
+    Modality, Mode, ModelFormat, ModelManifest, Operation, PlacementConfig, PlacementPolicy,
+    Quantization, Result, Runtime, Tensor, TensorData, TensorSpec,
 };
 use uniinfer_devices::DeviceInventory;
 use uniinfer_registry::EngineRegistry;
@@ -43,6 +43,50 @@ impl InferenceEngine for FakeEngine {
 
     fn supported_devices(&self) -> &[DeviceClass] {
         &[DeviceClass::Cpu]
+    }
+
+    fn load_session(&self, _spec: EngineLoadSpec) -> Result<Box<dyn EngineSession>> {
+        Ok(Box::new(Noop))
+    }
+}
+
+struct GpuOffloadEngine;
+
+impl InferenceEngine for GpuOffloadEngine {
+    fn engine_name(&self) -> &'static str {
+        "fake-offload"
+    }
+
+    fn runtime(&self) -> Runtime {
+        Runtime::Onnx
+    }
+
+    fn implementations(&self) -> &[&'static str] {
+        &["onnx.offload"]
+    }
+
+    fn supported_formats(&self) -> &[ModelFormat] {
+        &[ModelFormat::Onnx]
+    }
+
+    fn supported_modalities(&self, _format: ModelFormat) -> &[Modality] {
+        &[Modality::Text]
+    }
+
+    fn supported_quantizations(&self, _format: ModelFormat) -> &[Quantization] {
+        &[Quantization::Fp32]
+    }
+
+    fn supported_devices(&self) -> &[DeviceClass] {
+        &[DeviceClass::Cpu, DeviceClass::Gpu]
+    }
+
+    fn supports_layer_offload(&self) -> bool {
+        true
+    }
+
+    fn supports_kv_cache_offload(&self) -> bool {
+        true
     }
 
     fn load_session(&self, _spec: EngineLoadSpec) -> Result<Box<dyn EngineSession>> {
@@ -183,6 +227,16 @@ fn rejects_unsupported_format() {
 }
 
 #[test]
+fn rejects_layer_offload_on_engine_without_support() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let mut manifest = manifest();
+    manifest.placement.offload_layers = Some("4".into());
+    let path = write_manifest(temp.path(), &manifest);
+    let error = registry().load(&path).err().expect("must reject");
+    assert!(matches!(error, EngineError::PlacementUnsatisfiable(_)));
+}
+
+#[test]
 fn rejects_pinned_device_unavailable_to_engine() {
     let temp = tempfile::tempdir().expect("tempdir");
     let mut manifest = manifest();
@@ -193,5 +247,62 @@ fn rejects_pinned_device_unavailable_to_engine() {
         .insert("llm".into(), DeviceClass::Gpu);
     let path = write_manifest(temp.path(), &manifest);
     let error = registry().load(&path).err().expect("must reject");
+    assert!(matches!(error, EngineError::PlacementUnsatisfiable(_)));
+}
+
+#[test]
+fn defaults_to_auto_offload_for_capable_gpu_engine() {
+    let inventory = DeviceInventory::from(vec![
+        Device {
+            id: "cpu:0".into(),
+            class: DeviceClass::Cpu,
+            backend: "cpu".into(),
+            memory_bytes: 16 * 1024 * 1024 * 1024,
+            available_memory_bytes: 8 * 1024 * 1024 * 1024,
+        },
+        Device {
+            id: "gpu:0".into(),
+            class: DeviceClass::Gpu,
+            backend: "fake".into(),
+            memory_bytes: 8 * 1024 * 1024 * 1024,
+            available_memory_bytes: 6 * 1024 * 1024 * 1024,
+        },
+    ]);
+    let mut registry = EngineRegistry::new(inventory);
+    registry.register(std::sync::Arc::new(GpuOffloadEngine));
+    let mut manifest = manifest();
+    manifest.implementation = "onnx.offload".into();
+    let route = registry.route(&manifest).expect("route");
+    assert!(route.placement.auto_offload);
+    assert_eq!(route.placement.devices[0].class, DeviceClass::Gpu);
+}
+
+#[test]
+fn rejects_min_vram_when_full_gpu_load_does_not_fit() {
+    let inventory = DeviceInventory::from(vec![
+        Device {
+            id: "cpu:0".into(),
+            class: DeviceClass::Cpu,
+            backend: "cpu".into(),
+            memory_bytes: 16 * 1024 * 1024 * 1024,
+            available_memory_bytes: 8 * 1024 * 1024 * 1024,
+        },
+        Device {
+            id: "gpu:0".into(),
+            class: DeviceClass::Gpu,
+            backend: "fake".into(),
+            memory_bytes: 8 * 1024 * 1024 * 1024,
+            available_memory_bytes: 4 * 1024 * 1024 * 1024,
+        },
+    ]);
+    let mut registry = EngineRegistry::new(inventory);
+    registry.register(std::sync::Arc::new(GpuOffloadEngine));
+    let mut manifest = manifest();
+    manifest.implementation = "onnx.offload".into();
+    manifest.placement.offload_layers = Some("0".into());
+    manifest.min_vram = Some("6GiB".into());
+    let Err(error) = registry.route(&manifest) else {
+        panic!("must reject");
+    };
     assert!(matches!(error, EngineError::PlacementUnsatisfiable(_)));
 }
