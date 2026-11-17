@@ -1,46 +1,29 @@
 use uniinfer_backend_store::{BackendEngine, BackendFile, BackendLauncher, BackendManifest};
 
-use super::variants::{cudart_asset, variant_slug, windows_variants};
+use super::variants::variant_slug;
 use super::{GITHUB_MIRROR, GithubAsset, GithubRelease};
 
-struct CatalogSpec {
-    name: &'static str,
-    id_prefix: &'static str,
-    asset_prefix: &'static str,
-    worker: &'static str,
-    launcher: BackendLauncher,
-    runtime: &'static str,
-    category: &'static str,
-    implementations: &'static [&'static str],
-    formats: &'static [&'static str],
-    modalities: &'static [&'static str],
+/// A catalog entry shared by every downloadable backend provider.
+pub(super) struct CatalogSpec {
+    pub(super) name: &'static str,
+    pub(super) id_prefix: &'static str,
+    pub(super) worker: &'static str,
+    pub(super) launcher: BackendLauncher,
+    pub(super) runtime: &'static str,
+    pub(super) category: &'static str,
+    pub(super) implementations: &'static [&'static str],
+    pub(super) formats: &'static [&'static str],
+    pub(super) modalities: &'static [&'static str],
+    pub(super) license: &'static str,
 }
 
-const LLAMA: CatalogSpec = CatalogSpec {
-    name: "llama.cpp",
-    id_prefix: "llama-cpp",
-    asset_prefix: "llama-",
-    worker: "llama-server.exe",
-    launcher: BackendLauncher::LlamaServer,
-    runtime: "llama",
-    category: "language",
-    implementations: &["llama.text"],
-    formats: &["gguf"],
-    modalities: &["text"],
-};
-
-const STABLE_DIFFUSION: CatalogSpec = CatalogSpec {
-    name: "stable-diffusion.cpp",
-    id_prefix: "stable-diffusion",
-    asset_prefix: "sd-",
-    worker: "sd-server.exe",
-    launcher: BackendLauncher::StableDiffusionServer,
-    runtime: "stable-diffusion.cpp",
-    category: "image",
-    implementations: &["sd.txt2img"],
-    formats: &["safetensors", "gguf"],
-    modalities: &["text", "image"],
-};
+/// One downloadable Windows x64 variant of a provider release.
+pub(super) struct VariantSpec<'a> {
+    pub(super) key: String,
+    pub(super) label: String,
+    pub(super) files: Vec<&'a GithubAsset>,
+    pub(super) devices: Vec<uniinfer_core::DeviceClass>,
+}
 
 fn asset_url(url: &str, mirrored: bool) -> String {
     if mirrored {
@@ -63,19 +46,21 @@ fn asset_file(asset: &GithubAsset, mirrored: bool) -> BackendFile {
     }
 }
 
-fn catalog_from_variants(
+pub(super) fn catalog_from_variants(
     release: &GithubRelease,
     mirrored: bool,
     spec: &CatalogSpec,
+    variants: Vec<VariantSpec<'_>>,
 ) -> Vec<BackendManifest> {
-    windows_variants(&release.assets, spec.asset_prefix)
+    variants
         .into_iter()
         .map(|variant| {
             let id = format!("{}-{}", spec.id_prefix, variant_slug(&variant.key));
-            let mut files = vec![asset_file(variant.asset, mirrored)];
-            if let Some(cudart) = cudart_asset(&release.assets, &variant.key) {
-                files.push(asset_file(cudart, mirrored));
-            }
+            let files = variant
+                .files
+                .iter()
+                .map(|asset| asset_file(asset, mirrored))
+                .collect::<Vec<_>>();
             let description = format!("官方 {} Windows {} 构建", spec.name, variant.label);
             BackendManifest {
                 id: id.clone(),
@@ -83,7 +68,7 @@ fn catalog_from_variants(
                 version: release.tag_name.clone(),
                 description: description.clone(),
                 homepage: Some(release.html_url.clone()),
-                license: Some("MIT".into()),
+                license: Some(spec.license.into()),
                 platform: "windows-x86_64".into(),
                 worker: spec.worker.into(),
                 launcher: spec.launcher,
@@ -118,12 +103,4 @@ fn catalog_from_variants(
             }
         })
         .collect()
-}
-
-pub(super) fn llama_catalog(release: &GithubRelease, mirrored: bool) -> Vec<BackendManifest> {
-    catalog_from_variants(release, mirrored, &LLAMA)
-}
-
-pub(super) fn sd_catalog(release: &GithubRelease, mirrored: bool) -> Vec<BackendManifest> {
-    catalog_from_variants(release, mirrored, &STABLE_DIFFUSION)
 }

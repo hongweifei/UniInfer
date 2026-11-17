@@ -29,6 +29,7 @@ llama-cuda = ["uniinfer-engine-set/llama-cuda"]
 llama-rocm = ["uniinfer-engine-set/llama-rocm"]
 llama-metal = ["uniinfer-engine-set/llama-metal"]
 whisper = ["uniinfer-engine-set/whisper"]
+onnx-dynamic = ["uniinfer-engine-set/onnx-dynamic"]
 
 [dependencies]
 uniinfer-core.workspace = true

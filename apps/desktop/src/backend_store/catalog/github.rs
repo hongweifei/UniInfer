@@ -1,6 +1,5 @@
 use std::time::Duration;
 
-use super::variants::has_windows_x64_assets;
 use super::{GITHUB_MIRROR, GithubAsset, GithubRelease};
 
 const ASSET_MIRRORS: &[&str] = &[
@@ -70,18 +69,23 @@ async fn github_atom_releases(
     }
     // Some repositories publish release notes without the asset list. The
     // expanded assets fragment has the same files without using the GitHub API.
-    // Stop at the newest release that has a Windows x64 binary.
+    // Keep every release that has assets; each provider applies its own asset
+    // naming rules (llama/sd use `-bin-win-`, whisper/ONNX do not).
+    let mut found = Vec::new();
     for mut release in releases {
         if release.assets.is_empty()
             && let Ok(assets) = fetch_expanded_assets(client, repo, &release.tag_name).await
         {
             release.assets = assets;
         }
-        if has_windows_x64_assets(&release.assets) {
-            return Ok((vec![release], mirrored));
+        if !release.assets.is_empty() {
+            found.push(release);
         }
     }
-    Err("Atom feed 没有可解析的 Windows release 资产".into())
+    if found.is_empty() {
+        return Err("Atom feed 没有可解析的 Windows release 资产".into());
+    }
+    Ok((found, mirrored))
 }
 
 async fn fetch_expanded_assets(

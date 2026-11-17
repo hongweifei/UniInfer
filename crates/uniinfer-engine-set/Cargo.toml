@@ -29,16 +29,19 @@ llama-cuda = ["llama", "uniinfer-engine-llama/cuda"]
 llama-rocm = ["llama", "uniinfer-engine-llama/rocm"]
 llama-metal = ["llama", "uniinfer-engine-llama/metal"]
 whisper = ["dep:uniinfer-engine-whisper", "uniinfer-engine-whisper/whisper"]
+onnx-dynamic = ["uniinfer-engine-onnx/load-dynamic"]
 
 [dependencies]
 uniinfer-core.workspace = true
 uniinfer-devices.workspace = true
 uniinfer-registry.workspace = true
 uniinfer-backend-store.workspace = true
+tracing.workspace = true
 uniinfer-engine-onnx.workspace = true
 uniinfer-engine-process.workspace = true
 uniinfer-engine-llama-server.workspace = true
 uniinfer-engine-sd-server.workspace = true
+uniinfer-engine-whisper-server.workspace = true
 uniinfer-engine-candle.workspace = true
 uniinfer-engine-llama = { workspace = true, optional = true }
 uniinfer-engine-whisper = { workspace = true, optional = true }

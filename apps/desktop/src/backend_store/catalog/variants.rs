@@ -1,19 +1,4 @@
-use super::{GithubAsset, GithubRelease};
-
-pub(super) fn has_windows_x64_assets(assets: &[GithubAsset]) -> bool {
-    assets.iter().any(|asset| {
-        let name = asset.name.to_ascii_lowercase();
-        name.contains("-bin-win-") && name.ends_with("-x64.zip")
-    })
-}
-
-pub(super) fn has_llama_windows_assets(release: &GithubRelease) -> bool {
-    !windows_variants(&release.assets, "llama-").is_empty()
-}
-
-pub(super) fn has_sd_windows_assets(release: &GithubRelease) -> bool {
-    !windows_variants(&release.assets, "sd-").is_empty()
-}
+use super::GithubAsset;
 
 pub(super) struct WindowsVariant<'a> {
     pub(super) key: String,

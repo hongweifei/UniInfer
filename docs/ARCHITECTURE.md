@@ -196,5 +196,6 @@ fn execute(
 - ONNX 文本、视觉 pipeline、Whisper/CTC 转写与图像生成 fixture。
 - Candle GGUF/Safetensors 文本与 Safetensors 视觉。
 - llama.cpp GGUF 文本与 mtmd 视觉。
-- whisper.cpp GGML 转写。
+- whisper.cpp GGML 转写；可下载的 `whisper-server` 通过 ASR HTTP 适配。
+- 可下载 ONNX Runtime DLL（`onnx-dynamic` 构建）与对应 EP 变体。
 - Tauri 2 桌面端。

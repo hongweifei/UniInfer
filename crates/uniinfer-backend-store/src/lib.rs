@@ -170,6 +170,10 @@ pub enum BackendLauncher {
     LlamaServer,
     /// Official stable-diffusion.cpp `sd-server`.
     StableDiffusionServer,
+    /// Official whisper.cpp `whisper-server`.
+    WhisperServer,
+    /// Official ONNX Runtime shared library.
+    OnnxRuntime,
 }
 
 /// The subset needed by the engine registry to launch a sidecar.

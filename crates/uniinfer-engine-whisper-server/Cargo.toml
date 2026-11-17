@@ -1,0 +1,19 @@
+[package]
+name = "uniinfer-engine-whisper-server"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+description = "Official whisper.cpp whisper-server speech engine adapter"
+
+[dependencies]
+uniinfer-core.workspace = true
+reqwest = { workspace = true, features = ["multipart"] }
+serde_json.workspace = true
+hound.workspace = true
+tracing.workspace = true
+
+[lints]
+workspace = true

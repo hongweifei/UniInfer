@@ -19,6 +19,7 @@ use uniinfer_engine_process::ProcessEngine;
 use uniinfer_engine_sd_server::StableDiffusionServerEngine;
 #[cfg(feature = "whisper")]
 use uniinfer_engine_whisper::WhisperEngine;
+use uniinfer_engine_whisper_server::WhisperServerEngine;
 use uniinfer_registry::EngineRegistry;
 
 /// Build the default engine registry and probe every engine's devices.
@@ -49,7 +50,29 @@ pub fn build_with_backends(
     isolate_models: bool,
     sidecars: &[uniinfer_backend_store::BackendLaunch],
 ) -> Result<EngineRegistry> {
-    let onnx = OnnxEngine::new()?;
+    #[cfg(feature = "onnx-dynamic")]
+    let onnx_backend = sidecars
+        .iter()
+        .find(|backend| backend.launcher == BackendLauncher::OnnxRuntime);
+    #[cfg(feature = "onnx-dynamic")]
+    if let Some(backend) = onnx_backend {
+        uniinfer_engine_onnx::configure_dynamic_library(&backend.worker)?;
+    }
+    #[cfg(feature = "onnx-dynamic")]
+    let onnx = match onnx_backend {
+        Some(backend) => OnnxEngine::with_identity(&backend.family, &backend.variant),
+        None => OnnxEngine::new(),
+    };
+    #[cfg(not(feature = "onnx-dynamic"))]
+    let onnx = OnnxEngine::new();
+    let onnx = match onnx {
+        Ok(engine) => Some(engine),
+        Err(error) if cfg!(feature = "onnx-dynamic") => {
+            tracing::warn!(%error, "ONNX Runtime unavailable; install an ONNX Runtime backend");
+            None
+        }
+        Err(error) => return Err(error),
+    };
     let candle = CandleEngine::new()?;
     #[cfg(feature = "llama")]
     let llama = LlamaEngine::new()?;
@@ -59,8 +82,10 @@ pub fn build_with_backends(
     let whisper = WhisperEngine::new();
 
     let mut inventory = DeviceInventory::probe();
-    for device in onnx.probe_devices() {
-        inventory.register(device);
+    if let Some(onnx) = &onnx {
+        for device in onnx.probe_devices() {
+            inventory.register(device);
+        }
     }
     for device in candle.probe_devices() {
         inventory.register(device);
@@ -82,7 +107,9 @@ pub fn build_with_backends(
     if isolate_models {
         registry.register(Arc::new(ProcessEngine::new()));
     }
-    registry.register(Arc::new(onnx));
+    if let Some(onnx) = onnx {
+        registry.register(Arc::new(onnx));
+    }
     #[cfg(feature = "llama-mtmd")]
     registry.register(Arc::new(mtmd));
     #[cfg(feature = "llama")]
@@ -136,6 +163,21 @@ fn register_sidecar(registry: &EngineRegistry, backend: &uniinfer_backend_store:
                 backend.family.clone(),
                 backend.variant.clone(),
             )));
+        }
+        BackendLauncher::WhisperServer => {
+            registry.register_sidecar(Arc::new(WhisperServerEngine::with_identity(
+                backend.worker.clone(),
+                backend.devices.clone(),
+                backend.family.clone(),
+                backend.variant.clone(),
+            )));
+        }
+        BackendLauncher::OnnxRuntime => {
+            #[cfg(not(feature = "onnx-dynamic"))]
+            tracing::warn!(
+                id = %backend.id,
+                "ONNX Runtime package requires an onnx-dynamic build"
+            );
         }
     }
 }

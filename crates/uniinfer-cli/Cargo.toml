@@ -28,6 +28,7 @@ llama-vulkan = ["uniinfer-api/llama-vulkan"]
 llama-cuda = ["uniinfer-api/llama-cuda"]
 llama-rocm = ["uniinfer-api/llama-rocm"]
 whisper = ["uniinfer-api/whisper"]
+onnx-dynamic = ["uniinfer-api/onnx-dynamic"]
 
 [dependencies]
 uniinfer-api.workspace = true

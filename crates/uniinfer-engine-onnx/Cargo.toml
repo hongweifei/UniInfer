@@ -24,6 +24,7 @@ protobuf = "3.7.2"
 
 [features]
 default = []
+load-dynamic = ["ort/load-dynamic"]
 ep-cuda = ["ort/cuda"]
 ep-tensorrt = ["ort/tensorrt"]
 ep-coreml = ["ort/coreml"]

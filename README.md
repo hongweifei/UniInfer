@@ -126,7 +126,7 @@ flowchart TB
 ### 可下载后端
 
 - 桌面端「后端」页把内置引擎与外置 Sidecar 分开完整列出；外置后端按官方项目分组，同一项目下展示全部已安装变体。
-- 自动读取 `llama.cpp` 和 `stable-diffusion.cpp` 官方 release，按变体下载并校验；`llama-server` 走 HTTP 流式适配，`sd-server` 走图像生成适配。
+- 自动读取 `llama.cpp`、`stable-diffusion.cpp`、`whisper.cpp` 和 `ONNX Runtime` 官方 release，按变体下载并校验；`llama-server` 走 HTTP 流式适配，`sd-server` 走图像生成适配，`whisper-server` 走 ASR `/inference` 适配，ONNX Runtime 通过 `onnx-dynamic` 构建动态加载 DLL。
 - 安装到配置目录下的 `backends/`；没有全局激活状态，安装后即可在模型运行配置中选择。后端下载与模型下载共用标题栏右侧的下载弹层，支持排队、进度、取消、重试和清理。
 - 每个模型可在 `[backend]` 中指定后端族与变体；变体为 `auto` 时按设备后端名称匹配加速变体，没有匹配时回退 CPU。内置引擎不需要下载，始终作为默认回退。
 - 官方引擎适配和内部启动描述见 [docs/BACKENDS.md](docs/BACKENDS.md)。
@@ -156,7 +156,7 @@ flowchart TB
 ### 前置条件
 
 - Rust stable。
-- ONNX Runtime 由 `ort` 的 `download-binaries` feature 提供。
+- ONNX Runtime 由 `ort` 的 `download-binaries` feature 提供；下载 ONNX Runtime 后端并使用官方 DLL 时，启用 `onnx-dynamic` feature。
 - 构建 `llama` / `llama-mtmd` feature 时安装 CMake、C++ 编译器和 `libclang`。
 
 ### 构建
@@ -405,6 +405,7 @@ crates/
   uniinfer-engine-candle Candle text / vision family
   uniinfer-engine-llama  llama.cpp text / mtmd
   uniinfer-engine-whisper whisper.cpp
+  uniinfer-engine-whisper-server whisper.cpp whisper-server 适配
   uniinfer-service     ModelSlot / AudioSlot / ImageSlot / ModelExecutor
   uniinfer-router      会话、指标、取消
   uniinfer-api         OpenAI REST / SSE / WebSocket

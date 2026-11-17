@@ -6,7 +6,7 @@ UniInfer 把内置引擎与下载后端统一管理：每个内置引擎（ONNX 
 
 桌面端「后端」页面支持：
 
-- 自动从 `llama.cpp` 和 `stable-diffusion.cpp` 官方 release 发现全部 Windows x64 变体，包括 CPU、Vulkan、CUDA、ROCm、SYCL、OpenVINO 等。
+- 自动从 `llama.cpp`、`stable-diffusion.cpp`、`whisper.cpp` 和 `ONNX Runtime` 官方 release 发现 Windows x64 变体，包括 CPU、Vulkan、CUDA、ROCm、SYCL、OpenVINO 等。
 - 按官方项目、版本和加速变体下载并校验，安装到 `<配置文件目录>/backends/<id>/<version>/`。
 - 卸载引擎；安装后后端即存在于列表中，供模型配置选择。
 - 同一项目的全部变体按项目分组展示；每个引擎只显示一张卡片，变体是独立下载项，CUDA 等带版本号的变体会分别保留。
@@ -47,10 +47,12 @@ size = 123456789
 sha256 = "..."
 ```
 
-- `worker` 必须是相对路径，并且位于 `files` 中；`launcher = "llama-server"` 表示使用官方 `llama-server` 适配器，`worker` 指向解压后的官方可执行文件。
+- `worker` 必须是相对路径，并且位于 `files` 中；`launcher` 可选 `worker`、`llama-server`、`stable-diffusion-server`、`whisper-server`、`onnx-runtime`，分别对应内部 worker 协议、llama.cpp、stable-diffusion.cpp、whisper.cpp 和动态 ONNX Runtime。
 - `.zip` 引擎归档会自动解压，`worker` 使用解压后的相对路径。
 - 安装时校验文件大小与 SHA-256；缺少 `sha256` 的文件不会被拒绝，但生产目录应始终提供。
 - `devices` 用于放置预算，可选 `cpu`、`gpu`、`npu`。
+- 可下载 ONNX Runtime 的 `worker` 是 `onnxruntime.dll`，不是可执行文件；它由 `OnnxRuntime` launcher 在选择模型前加载。
+- whisper.cpp 的官方压缩包把可执行文件放在 `Release/`，安装器会递归定位 `whisper-server.exe` 并改写清单中的相对路径。
 - `engines` 必须至少包含一项，逐项写清推理引擎 id、名称、runtime、vendor、variant、category、格式、模态与设备；界面会按官方项目和加速变体分组展示。
 - 官方 `llama-server` 适配器使用官方 HTTP `/completion` 流式协议。
 
@@ -58,9 +60,11 @@ sha256 = "..."
 
 - `llama.cpp`：下载官方 release 的 `llama-server` 压缩包，设置 `launcher = "llama-server"`。UniInfer 启动官方 server，通过 `/completion` 流式协议适配。
 - `stable-diffusion.cpp`：下载官方 `sd-server` 压缩包（含 ROCm 变体），设置 `launcher = "stable-diffusion-server"`。UniInfer 启动官方 server，通过 A1111兼容的 `/sdapi/v1/txt2img` 生成图像；模型 manifest 需要提供完整 checkpoint 文件。
-- `ONNX Runtime`：官方 DLL 仍需 `ort/load-dynamic` 适配，当前由内置 ONNX Runtime 提供。
-- `whisper.cpp`：官方 server/CLI 需要 ASR 适配器，当前由内置 whisper.cpp 提供。
+- `whisper.cpp`：下载官方夜间 release 的 `whisper-server.exe` 压缩包，设置 `launcher = "whisper-server"`。UniInfer 启动官方 server，通过 `/inference` 上传 16 kHz WAV 并读取 JSON `text`。CPU、BLAS、CUDA 变体分别标注设备。
+- `ONNX Runtime`：下载官方 Windows ZIP 中的 `onnxruntime.dll`，设置 `launcher = "onnx-runtime"`。构建必须启用 `onnx-dynamic` feature；启动时由已安装的 ONNX Runtime 包选择 DLL。没有安装包时动态构建会跳过 ONNX 引擎，不能回退到内置静态 ORT。安装或切换 ONNX Runtime 包后需要重启进程，因为 ORT 的进程级环境只能初始化一次。
 - `Candle`：上游不提供官方二进制，只能作为内置 Rust 引擎。
+- 动态 ONNX Runtime 需要单独构建：`cargo build -p uniinfer-cli --features onnx-dynamic`。桌面端对应 feature 为 `onnx-dynamic`；默认构建仍使用静态内置 ORT。
+- 下载 ONNX Runtime 变体只提供对应版本的 DLL/EP 库；实际可用的执行提供器仍由构建 feature 决定（例如 `ep-cuda`、`ep-directml`）。没有对应 EP 的变体不会因为下载而自动启用。
 
 内部 `backend.toml` 只是安装后的启动描述，用户不需要编辑或手动导入。
 

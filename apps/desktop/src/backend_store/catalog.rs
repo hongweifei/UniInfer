@@ -2,6 +2,7 @@ use uniinfer_backend_store::{BackendCatalog, validate_manifest};
 
 mod github;
 mod manifests;
+mod providers;
 mod variants;
 
 pub(super) const GITHUB_MIRROR: &str = "https://gh-proxy.com/";
@@ -26,32 +27,22 @@ pub(super) async fn fetch() -> Result<BackendCatalog, String> {
     let client = reqwest::Client::new();
     let mut catalog = BackendCatalog::default();
     let mut errors = Vec::new();
-    match github::github_releases(&client, "ggml-org/llama.cpp").await {
-        Ok((releases, mirrored)) => {
-            if let Some(release) = releases
-                .into_iter()
-                .find(variants::has_llama_windows_assets)
-            {
-                catalog
-                    .backends
-                    .extend(manifests::llama_catalog(&release, mirrored));
-            } else {
-                errors.push("llama.cpp: 最近的 release 没有 Windows 构建".into());
+    for provider in providers::PROVIDERS {
+        match github::github_releases(&client, provider.repo).await {
+            Ok((releases, mirrored)) => {
+                if let Some(release) = releases.into_iter().find(provider.has_assets) {
+                    catalog
+                        .backends
+                        .extend((provider.build)(&release, mirrored));
+                } else {
+                    errors.push(format!(
+                        "{}: 最近的 release 没有 Windows 构建",
+                        provider.name
+                    ));
+                }
             }
+            Err(error) => errors.push(format!("{}: {error}", provider.name)),
         }
-        Err(error) => errors.push(format!("llama.cpp: {error}")),
-    }
-    match github::github_releases(&client, "leejet/stable-diffusion.cpp").await {
-        Ok((releases, mirrored)) => {
-            if let Some(release) = releases.into_iter().find(variants::has_sd_windows_assets) {
-                catalog
-                    .backends
-                    .extend(manifests::sd_catalog(&release, mirrored));
-            } else {
-                errors.push("stable-diffusion.cpp: 最近的 release 没有 Windows 构建".into());
-            }
-        }
-        Err(error) => errors.push(format!("stable-diffusion.cpp: {error}")),
     }
     if catalog.backends.is_empty() {
         return Err(format!(
@@ -69,7 +60,7 @@ pub(super) async fn fetch() -> Result<BackendCatalog, String> {
 #[cfg(test)]
 mod tests {
     use super::github::{parse_atom_releases, parse_expanded_assets};
-    use super::manifests::{llama_catalog, sd_catalog};
+    use super::providers::{llama, stable_diffusion};
     use super::variants::{cudart_asset, windows_variants};
     use super::*;
 
@@ -80,6 +71,96 @@ mod tests {
             size: 1,
             digest: None,
         }
+    }
+
+    #[test]
+    #[ignore = "network: probes live official backend releases"]
+    fn live_catalog_includes_whisper_and_onnx_runtime() {
+        tauri::async_runtime::block_on(async {
+            let catalog = fetch().await.expect("catalog");
+            assert!(catalog.backends.iter().any(|package| {
+                package.name == "whisper.cpp"
+                    && package.launcher == uniinfer_backend_store::BackendLauncher::WhisperServer
+            }));
+            assert!(catalog.backends.iter().any(|package| {
+                package.name == "ONNX Runtime"
+                    && package.launcher == uniinfer_backend_store::BackendLauncher::OnnxRuntime
+            }));
+        });
+    }
+
+    #[test]
+    fn whisper_catalog_discovers_cpu_blas_and_cuda() {
+        let release = GithubRelease {
+            tag_name: "b5454".into(),
+            html_url: "https://example.com/whisper".into(),
+            assets: vec![
+                asset("whisper-bin-x64.zip"),
+                asset("whisper-blas-bin-x64.zip"),
+                asset("whisper-cublas-11.8.0-bin-x64.zip"),
+                asset("whisper-bin-win-cuda-12.4.0-x64.zip"),
+                asset("whisper-bin-win-cpu-arm64.zip"),
+                asset("whisper-bin-Win32.zip"),
+            ],
+        };
+        let packages = providers::whisper::catalog(&release, true);
+        assert_eq!(packages.len(), 4);
+        assert_eq!(packages[0].worker, "whisper-server.exe");
+        assert_eq!(
+            packages[0].launcher,
+            uniinfer_backend_store::BackendLauncher::WhisperServer
+        );
+        assert!(
+            packages
+                .iter()
+                .any(|package| package.id == "whisper-cpp-cuda-12.4")
+        );
+        assert!(
+            packages
+                .iter()
+                .find(|package| package.id == "whisper-cpp-blas")
+                .is_some_and(|package| {
+                    package.devices == vec![uniinfer_core::DeviceClass::Cpu]
+                })
+        );
+        assert!(packages.iter().all(|package| {
+            package
+                .files
+                .iter()
+                .all(|file| file.url.starts_with(super::GITHUB_MIRROR))
+        }));
+    }
+
+    #[test]
+    fn onnxruntime_catalog_discovers_cpu_and_cuda() {
+        let release = GithubRelease {
+            tag_name: "v1.32.0".into(),
+            html_url: "https://example.com/ort".into(),
+            assets: vec![
+                asset("onnxruntime-win-x64-1.32.0.zip"),
+                asset("onnxruntime-win-x64-gpu_cuda12-1.32.0.zip"),
+                asset("onnxruntime-win-x64-gpu_cuda13-1.32.0.zip"),
+                asset("onnxruntime-win-arm64-1.32.0.zip"),
+                asset("onnxruntime-linux-x64-1.32.0.tgz"),
+            ],
+        };
+        let packages = providers::onnx_runtime::catalog(&release, false);
+        assert_eq!(packages.len(), 3);
+        assert!(packages.iter().all(|package| {
+            package.worker == "onnxruntime.dll"
+                && package.launcher == uniinfer_backend_store::BackendLauncher::OnnxRuntime
+        }));
+        assert!(
+            packages
+                .iter()
+                .any(|package| package.id == "onnxruntime-cuda12")
+        );
+        assert!(
+            packages
+                .iter()
+                .find(|package| package.id == "onnxruntime-cpu")
+                .is_some_and(|package| package.devices == vec![uniinfer_core::DeviceClass::Cpu])
+        );
     }
 
     #[test]
@@ -188,7 +269,7 @@ mod tests {
                 asset("llama-b12466-bin-win-vulkan-arm64.zip"),
             ],
         };
-        let packages = llama_catalog(&release, false);
+        let packages = llama::catalog(&release, false);
         assert_eq!(packages.len(), 7);
         assert!(packages.iter().all(|package| package.name == "llama.cpp"));
         assert!(
@@ -230,7 +311,7 @@ mod tests {
                 asset("cudart-sd-bin-win-cu12-x64.zip"),
             ],
         };
-        let packages = sd_catalog(&stable, false);
+        let packages = stable_diffusion::catalog(&stable, false);
         assert_eq!(packages.len(), 4);
         assert!(
             packages

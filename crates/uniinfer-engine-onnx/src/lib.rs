@@ -1,7 +1,11 @@
 //! ONNX Runtime engine.
 
 use std::path::Path;
+#[cfg(feature = "load-dynamic")]
+use std::path::PathBuf;
 use std::sync::LazyLock;
+#[cfg(feature = "load-dynamic")]
+use std::sync::OnceLock;
 
 use ort::environment::Environment;
 use ort::session::Session;
@@ -63,6 +67,21 @@ const QUANTIZATIONS: &[Quantization] = &[
 static ENVIRONMENT: LazyLock<std::result::Result<Environment, String>> =
     LazyLock::new(build_environment);
 
+#[cfg(feature = "load-dynamic")]
+static DYNAMIC_LIBRARY: OnceLock<PathBuf> = OnceLock::new();
+
+/// Select the ONNX Runtime shared library used by the process-wide engine.
+///
+/// This must be called before the first [`OnnxEngine`] is constructed. The
+/// desktop backend store calls it when an installed ONNX Runtime package is
+/// selected; rebuilds that use the default static ORT do not call it.
+#[cfg(feature = "load-dynamic")]
+pub fn configure_dynamic_library(path: impl Into<PathBuf>) -> Result<()> {
+    DYNAMIC_LIBRARY
+        .set(path.into())
+        .map_err(|_| EngineError::LoadFailed("ONNX Runtime library already configured".into()))
+}
+
 fn build_environment() -> std::result::Result<Environment, String> {
     #[allow(unused_mut)]
     let mut providers: Vec<ort::ep::ExecutionProviderDispatch> = Vec::new();
@@ -88,7 +107,24 @@ fn build_environment() -> std::result::Result<Environment, String> {
     #[cfg(feature = "ep-directml")]
     providers.push(ort::ep::DirectML::default().build());
 
-    ort::init()
+    #[cfg(feature = "load-dynamic")]
+    let builder = {
+        let path = DYNAMIC_LIBRARY
+            .get()
+            .cloned()
+            .or_else(|| std::env::var_os("ORT_DYLIB_PATH").map(PathBuf::from))
+            .unwrap_or_else(|| {
+                PathBuf::from(format!(
+                    "{}onnxruntime{}",
+                    std::env::consts::DLL_PREFIX,
+                    std::env::consts::DLL_SUFFIX
+                ))
+            });
+        ort::init_from(path).map_err(|error| error.to_string())?
+    };
+    #[cfg(not(feature = "load-dynamic"))]
+    let builder = ort::init();
+    builder
         .with_name("uniinfer")
         .with_execution_providers(providers)
         .build()
@@ -98,15 +134,29 @@ fn build_environment() -> std::result::Result<Environment, String> {
 /// ONNX Runtime engine with the configured execution providers.
 pub struct OnnxEngine {
     environment: Environment,
+    backend_id: String,
+    variant: String,
 }
 
 impl OnnxEngine {
     pub fn new() -> Result<Self> {
+        Self::with_identity("onnx", "builtin")
+    }
+
+    /// Create an engine that advertises which installed backend selected it.
+    pub fn with_identity(
+        backend_id: impl Into<String>,
+        variant: impl Into<String>,
+    ) -> Result<Self> {
         let environment = ENVIRONMENT
             .as_ref()
             .map_err(|error| EngineError::LoadFailed(format!("ort environment: {error}")))?
             .clone();
-        Ok(Self { environment })
+        Ok(Self {
+            environment,
+            backend_id: backend_id.into(),
+            variant: variant.into(),
+        })
     }
 
     /// Enumerate hardware devices visible to the configured execution providers.
@@ -148,6 +198,14 @@ impl InferenceEngine for OnnxEngine {
 
     fn runtime(&self) -> Runtime {
         Runtime::Onnx
+    }
+
+    fn backend_id(&self) -> &str {
+        &self.backend_id
+    }
+
+    fn backend_variant(&self) -> &str {
+        &self.variant
     }
 
     fn implementations(&self) -> &[&'static str] {

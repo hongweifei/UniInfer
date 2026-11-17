@@ -34,6 +34,7 @@ llama-cuda = ["uniinfer-api/llama-cuda"]
 llama-rocm = ["uniinfer-api/llama-rocm"]
 llama-metal = ["uniinfer-api/llama-metal"]
 whisper = ["uniinfer-api/whisper"]
+onnx-dynamic = ["uniinfer-api/onnx-dynamic"]
 
 [target.'cfg(windows)'.dependencies]
 uniinfer-api = { path = "../../crates/uniinfer-api", features = ["ep-directml"] }
