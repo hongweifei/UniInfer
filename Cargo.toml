@@ -28,6 +28,7 @@ uniinfer-engine-set = { version = "0.0.0", path = "crates/uniinfer-engine-set" }
 uniinfer-engine-process = { version = "0.0.0", path = "crates/uniinfer-engine-process" }
 uniinfer-engine-llama-server = { version = "0.0.0", path = "crates/uniinfer-engine-llama-server" }
 uniinfer-engine-sd-server = { version = "0.0.0", path = "crates/uniinfer-engine-sd-server" }
+uniinfer-engine-sidecar = { version = "0.0.0", path = "crates/uniinfer-engine-sidecar" }
 uniinfer-engine-whisper-server = { version = "0.0.0", path = "crates/uniinfer-engine-whisper-server" }
 uniinfer-backends = { version = "0.0.0", path = "crates/uniinfer-backends" }
 uniinfer-api = { version = "0.0.0", path = "crates/uniinfer-api" }

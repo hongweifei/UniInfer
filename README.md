@@ -406,6 +406,8 @@ crates/
   uniinfer-engine-llama  llama.cpp text / mtmd
   uniinfer-engine-whisper whisper.cpp
   uniinfer-engine-whisper-server whisper.cpp whisper-server 适配
+  uniinfer-engine-llama-server llama.cpp llama-server 适配
+  uniinfer-engine-sidecar 官方 HTTP sidecar 生命周期
   uniinfer-service     ModelSlot / AudioSlot / ImageSlot / ModelExecutor
   uniinfer-router      会话、指标、取消
   uniinfer-api         OpenAI REST / SSE / WebSocket

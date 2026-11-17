@@ -17,7 +17,7 @@ mod completion;
 mod model;
 mod server;
 
-use server::ServerProcess;
+use uniinfer_engine_sidecar::ServerProcess;
 
 const FORMATS: &[ModelFormat] = &[ModelFormat::Gguf];
 const DEVICES: &[DeviceClass] = &[DeviceClass::Cpu, DeviceClass::Gpu];

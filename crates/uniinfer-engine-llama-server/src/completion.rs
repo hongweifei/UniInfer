@@ -9,7 +9,7 @@ use uniinfer_core::{
     NativeTextRequest, Result,
 };
 
-use crate::server::ServerProcess;
+use uniinfer_engine_sidecar::ServerProcess;
 
 #[derive(Serialize)]
 struct CompletionRequest<'a> {

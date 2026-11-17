@@ -4,21 +4,19 @@
 //! `txt2img` endpoint. The server owns prompting and image decoding; the
 //! process is killed for cancellation or session teardown.
 
-use std::net::TcpListener;
 use std::path::PathBuf;
-use std::process::{Child, Command, Stdio};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD as BASE64;
-use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
 use uniinfer_core::{
-    CancelToken, DeviceClass, EngineError, EngineLoadSpec, EngineSession, InferenceEngine,
-    Modality, ModelFormat, NativeImageGenerator, NativeImageOutput, NativeImageRequest,
-    Quantization, Residency, Result, Runtime, Tensor, TensorSpec,
+    DeviceClass, EngineError, EngineLoadSpec, EngineSession, InferenceEngine, Modality,
+    ModelFormat, NativeImageGenerator, NativeImageOutput, NativeImageRequest, Quantization,
+    Residency, Result, Runtime, Tensor, TensorSpec,
 };
+use uniinfer_engine_sidecar::{ServerProcess, SpawnOptions};
 
 const FORMATS: &[ModelFormat] = &[ModelFormat::Gguf, ModelFormat::Safetensors];
 const DEVICES: &[DeviceClass] = &[DeviceClass::Cpu, DeviceClass::Gpu];
@@ -141,47 +139,28 @@ impl InferenceEngine for StableDiffusionServerEngine {
             )));
         }
         let model = model_path(&spec)?;
-        let port = free_port()?;
-        let mut command = Command::new(&self.executable);
-        if let Some(parent) = self.executable.parent() {
-            command.current_dir(parent);
-            #[cfg(windows)]
-            {
-                let path = std::env::var_os("PATH").unwrap_or_default();
-                let mut paths = vec![parent.to_path_buf()];
-                paths.extend(std::env::split_paths(&path));
-                if let Ok(joined) = std::env::join_paths(paths) {
-                    command.env("PATH", joined);
-                }
-            }
-        }
-        let child = command
-            .arg("-m")
-            .arg(&model)
-            .arg("--listen-ip")
-            .arg("127.0.0.1")
-            .arg("--listen-port")
-            .arg(port.to_string())
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .spawn()
-            .map_err(|error| {
-                EngineError::LoadFailed(format!("spawn {}: {error}", self.executable.display()))
-            })?;
-        let process = Arc::new(ServerProcess {
-            child: Mutex::new(child),
-            base: format!("http://127.0.0.1:{port}"),
-            client: Client::builder()
-                .timeout(Duration::from_secs(900))
-                .build()
-                .map_err(|error| EngineError::LoadFailed(format!("HTTP client: {error}")))?,
-        });
-        wait_ready(&process, &spec.cancel)?;
+        let process = uniinfer_engine_sidecar::spawn(SpawnOptions {
+            executable: &self.executable,
+            readiness_path: "/sdapi/v1/options",
+            startup_timeout: Duration::from_secs(600),
+            request_timeout: Duration::from_secs(900),
+            cancel: &spec.cancel,
+            label: "sd-server",
+            args: |port: u16| {
+                vec![
+                    "-m".into(),
+                    model.as_os_str().to_owned(),
+                    "--listen-ip".into(),
+                    "127.0.0.1".into(),
+                    "--listen-port".into(),
+                    port.to_string().into(),
+                ]
+            },
+        })?;
         let bytes = std::fs::metadata(&model)
             .map(|metadata| metadata.len())
             .unwrap_or(0);
-        tracing::info!(model = %spec.manifest.id, port, "official sd-server ready");
+        tracing::info!(model = %spec.manifest.id, "official sd-server ready");
         Ok(Box::new(StableDiffusionSession {
             process,
             residency: Some(Residency {
@@ -191,35 +170,6 @@ impl InferenceEngine for StableDiffusionServerEngine {
                 ..Residency::default()
             }),
         }))
-    }
-}
-
-struct ServerProcess {
-    child: Mutex<Child>,
-    base: String,
-    client: Client,
-}
-
-impl ServerProcess {
-    fn kill(&self) {
-        if let Ok(mut child) = self.child.lock() {
-            let _ = child.kill();
-            let _ = child.wait();
-        }
-    }
-
-    fn is_alive(&self) -> bool {
-        self.child
-            .lock()
-            .ok()
-            .and_then(|mut child| child.try_wait().ok().flatten())
-            .is_none()
-    }
-}
-
-impl Drop for ServerProcess {
-    fn drop(&mut self) {
-        self.kill();
     }
 }
 
@@ -367,42 +317,6 @@ fn model_path(spec: &EngineLoadSpec) -> Result<PathBuf> {
                 .unwrap_or(0)
         })
         .ok_or_else(|| EngineError::ManifestInvalid("no diffusion model file for sd-server".into()))
-}
-
-fn free_port() -> Result<u16> {
-    TcpListener::bind(("127.0.0.1", 0))
-        .and_then(|listener| listener.local_addr())
-        .map(|address| address.port())
-        .map_err(|error| EngineError::LoadFailed(format!("reserve sd-server port: {error}")))
-}
-
-fn wait_ready(process: &ServerProcess, cancel: &CancelToken) -> Result<()> {
-    let deadline = Instant::now() + Duration::from_secs(600);
-    loop {
-        if cancel.is_cancelled() {
-            process.kill();
-            return Err(EngineError::Cancelled);
-        }
-        if !process.is_alive() {
-            return Err(EngineError::LoadFailed(
-                "sd-server exited during startup".into(),
-            ));
-        }
-        if let Ok(response) = process
-            .client
-            .get(format!("{}/sdapi/v1/options", process.base))
-            .timeout(Duration::from_secs(2))
-            .send()
-            && response.status().is_success()
-        {
-            return Ok(());
-        }
-        if Instant::now() >= deadline {
-            process.kill();
-            return Err(EngineError::Timeout);
-        }
-        std::thread::sleep(Duration::from_millis(250));
-    }
 }
 
 fn map_request_error(error: reqwest::Error) -> EngineError {

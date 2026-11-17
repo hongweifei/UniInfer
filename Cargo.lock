@@ -3682,6 +3682,7 @@ dependencies = [
  "serde_json",
  "tracing",
  "uniinfer-core",
+ "uniinfer-engine-sidecar",
 ]
 
 [[package]]
@@ -3724,6 +3725,7 @@ dependencies = [
  "serde_json",
  "tracing",
  "uniinfer-core",
+ "uniinfer-engine-sidecar",
 ]
 
 [[package]]
@@ -3746,6 +3748,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "uniinfer-engine-sidecar"
+version = "0.0.0"
+dependencies = [
+ "reqwest",
+ "tracing",
+ "uniinfer-core",
+]
+
+[[package]]
 name = "uniinfer-engine-whisper"
 version = "0.0.0"
 dependencies = [
@@ -3762,6 +3773,7 @@ dependencies = [
  "serde_json",
  "tracing",
  "uniinfer-core",
+ "uniinfer-engine-sidecar",
 ]
 
 [[package]]

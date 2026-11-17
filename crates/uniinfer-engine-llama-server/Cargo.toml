@@ -9,6 +9,7 @@ publish.workspace = true
 description = "Official llama.cpp llama-server engine adapter"
 
 [dependencies]
+uniinfer-engine-sidecar.workspace = true
 uniinfer-core.workspace = true
 reqwest.workspace = true
 serde.workspace = true

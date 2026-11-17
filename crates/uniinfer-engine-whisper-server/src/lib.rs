@@ -20,7 +20,7 @@ use uniinfer_core::{
 
 mod server;
 
-use server::ServerProcess;
+use uniinfer_engine_sidecar::ServerProcess;
 
 const FORMATS: &[ModelFormat] = &[ModelFormat::Ggml];
 const QUANTIZATIONS: &[Quantization] = &[

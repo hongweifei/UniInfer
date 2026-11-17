@@ -9,6 +9,7 @@ publish.workspace = true
 description = "Official whisper.cpp whisper-server speech engine adapter"
 
 [dependencies]
+uniinfer-engine-sidecar.workspace = true
 uniinfer-core.workspace = true
 reqwest = { workspace = true, features = ["multipart"] }
 serde_json.workspace = true
