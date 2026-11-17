@@ -7,14 +7,7 @@ export function mountImages(root, ctx) {
   const imageModels = ctx.models().filter((model) => isImageModel(model) && !model.route_error);
   const state = ctx.state;
   if (!imageModels.length) {
-    root.append(h('div', { class: 'page' },
-      emptyState({
-        iconName: 'image',
-        title: '没有可用的图像模型',
-        description: '当前运行时只包含图像生成 fixture。导入真实图像模型后，这里会显示可用的生成参数。',
-        action: h('button', { class: 'btn', type: 'button', text: '打开模型页', onClick: () => ctx.navigate('models') }),
-      }),
-    ));
+    // Keep the media tab empty instead of showing a model-less empty state.
     return () => {};
   }
 
