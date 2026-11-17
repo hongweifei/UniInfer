@@ -9,6 +9,7 @@ use crate::error::{EngineError, Result};
 pub enum TensorDtype {
     F32,
     F16,
+    I32,
     I64,
     U8,
     Bool,
@@ -19,6 +20,7 @@ pub enum TensorDtype {
 pub enum TensorData {
     F32(Vec<f32>),
     F16(Vec<f16>),
+    I32(Vec<i32>),
     I64(Vec<i64>),
     U8(Vec<u8>),
     Bool(Vec<bool>),
@@ -30,6 +32,7 @@ impl TensorData {
         match self {
             Self::F32(values) => values.len(),
             Self::F16(values) => values.len(),
+            Self::I32(values) => values.len(),
             Self::I64(values) => values.len(),
             Self::U8(values) => values.len(),
             Self::Bool(values) => values.len(),
@@ -46,6 +49,7 @@ impl TensorData {
         match self {
             Self::F32(_) => TensorDtype::F32,
             Self::F16(_) => TensorDtype::F16,
+            Self::I32(_) => TensorDtype::I32,
             Self::I64(_) => TensorDtype::I64,
             Self::U8(_) => TensorDtype::U8,
             Self::Bool(_) => TensorDtype::Bool,

@@ -22,6 +22,7 @@ use uniinfer_core::{
 pub enum WireData {
     F32(Vec<f32>),
     F16(Vec<u16>),
+    I32(Vec<i32>),
     I64(Vec<i64>),
     U8(Vec<u8>),
     Bool(Vec<bool>),
@@ -109,6 +110,7 @@ impl WireTensor {
             TensorData::F16(values) => {
                 WireData::F16(values.into_iter().map(|v| v.to_bits()).collect())
             }
+            TensorData::I32(values) => WireData::I32(values),
             TensorData::I64(values) => WireData::I64(values),
             TensorData::U8(values) => WireData::U8(values),
             TensorData::Bool(values) => WireData::Bool(values),
@@ -126,6 +128,7 @@ impl WireTensor {
             WireData::F16(values) => {
                 TensorData::F16(values.into_iter().map(half::f16::from_bits).collect())
             }
+            WireData::I32(values) => TensorData::I32(values),
             WireData::I64(values) => TensorData::I64(values),
             WireData::U8(values) => TensorData::U8(values),
             WireData::Bool(values) => TensorData::Bool(values),
