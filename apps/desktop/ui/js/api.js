@@ -44,6 +44,7 @@ export class ApiClient {
   }
 
   models() { return this.request('/v1/models'); }
+  refreshModels() { return this.request('/v1/models/refresh', { method: 'POST' }); }
   devices() { return this.request('/v1/devices'); }
   config() { return this.request('/v1/config'); }
   saveConfig(config) { return this.request('/v1/config', { method: 'PUT', body: config }); }

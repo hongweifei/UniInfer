@@ -389,6 +389,9 @@ function watchDownloads() {
 
 async function refreshModels({ silent = false } = {}) {
   try {
+    // Downloads write manifest.toml directly to the model root; the API
+    // catalog is live, so rescan before listing.
+    await api.refreshModels();
     const [modelBody, deviceBody] = await Promise.all([api.models(), api.devices()]);
     models = sortModels((modelBody.data ?? []).filter((model) => !model.id.startsWith('tiny-')));
     devices = deviceBody.devices ?? [];
