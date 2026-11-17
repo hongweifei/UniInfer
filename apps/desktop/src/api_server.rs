@@ -121,7 +121,11 @@ pub(crate) fn backend_dir() -> std::path::PathBuf {
             && let Ok(config) = UniInferConfig::load(&path)
             && let Some(dir) = config.server.backend_dir
         {
-            return if dir.is_absolute() { dir } else { base.join(dir) };
+            return if dir.is_absolute() {
+                dir
+            } else {
+                base.join(dir)
+            };
         }
         return base.join("backends");
     }
