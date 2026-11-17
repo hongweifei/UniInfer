@@ -133,6 +133,26 @@ impl ModelRouter {
             .and_then(|slots| slots.get(id).cloned())
     }
 
+    /// Evict the least-recently-used cached model other than `except`.
+    /// The returned slot may still be alive through an in-flight request.
+    pub fn evict_lru_except(&self, except: Option<&str>) -> Option<String> {
+        let mut lru = self.lru.lock().ok()?;
+        loop {
+            let id = lru.pop_front()?;
+            if except.is_some_and(|except| except == id) {
+                continue;
+            }
+            let removed = self
+                .slots
+                .write()
+                .map(|mut slots| slots.remove(&id).is_some())
+                .unwrap_or(false);
+            if removed {
+                return Some(id);
+            }
+        }
+    }
+
     /// Drop a loaded slot from the cache. Existing request `Arc`s keep it alive.
     pub fn remove_slot(&self, id: &str) -> bool {
         let removed = self
@@ -219,6 +239,7 @@ impl ModelRouter {
         let slot = self
             .slot(model)
             .ok_or_else(|| RouterError::ModelNotFound(model.to_owned()))?;
+        self.touch(model);
         let prompt_tokens = slot.count_tokens(&prompt)?;
         let context_len = slot.manifest().context_len;
         if prompt_tokens >= context_len {

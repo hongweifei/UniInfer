@@ -76,6 +76,7 @@ async fn metrics(State(state): State<AppState>) -> Json<Value> {
         },
         "requests": state.router.metrics(),
         "residency": state.runtime.residency(),
+        "model_evictions": state.memory_evictions(),
     }))
 }
 

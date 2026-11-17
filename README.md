@@ -124,6 +124,7 @@ flowchart TB
 - `min_vram` 会在存在 GPU 空闲显存信息时参与路由；不满足则拒绝该引擎。
 - 每个 `SessionLease` 在加载后预留 VRAM/RAM，释放时归还；`/metrics` 和 `/v1/models` 输出 `residency`（VRAM、host、disk-backed、层数）。
 - Candle、ONNX 的层切分仍待实现；没有引擎统计时账本用 manifest 文件大小做保守估算。
+- 加载因预算不足失败时，会按 LRU 驱逐已缓存模型并重试；`/metrics.model_evictions` 记录次数。
 
 量化覆盖：
 

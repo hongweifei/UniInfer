@@ -10,6 +10,8 @@ use uniinfer_service::{AudioSlot, ImageSlot, ModelSlot, Runtime};
 
 use crate::api_config::ApiConfig;
 
+const MAX_MEMORY_LOAD_RETRIES: usize = 8;
+
 /// A configured model that has not necessarily been loaded yet.
 #[derive(Debug, Clone)]
 pub(crate) struct CatalogEntry {
@@ -36,6 +38,8 @@ pub struct AppState {
     pub(crate) catalog: Arc<RwLock<HashMap<String, CatalogEntry>>>,
     load_lock: Arc<AsyncMutex<()>>,
     audio_lru: Arc<Mutex<VecDeque<String>>>,
+    image_lru: Arc<Mutex<VecDeque<String>>>,
+    memory_evictions: Arc<AtomicU64>,
     max_loaded_models: Arc<AtomicUsize>,
 }
 
@@ -89,6 +93,8 @@ impl AppState {
             catalog: Arc::new(RwLock::new(catalog)),
             load_lock: Arc::new(AsyncMutex::new(())),
             audio_lru: Arc::new(Mutex::new(VecDeque::new())),
+            image_lru: Arc::new(Mutex::new(VecDeque::new())),
+            memory_evictions: Arc::new(AtomicU64::new(0)),
             max_loaded_models: Arc::new(AtomicUsize::new(config.max_loaded_models)),
         })
     }
@@ -298,14 +304,33 @@ impl AppState {
             || std::path::PathBuf::from("."),
             std::path::Path::to_path_buf,
         );
-        let slot =
-            tokio::task::spawn_blocking(move || runtime.load_image_manifest(manifest, &base))
-                .await
-                .map_err(|_| EngineError::Other("image load task panicked".into()))??;
+        let mut attempts = 0;
+        let slot = loop {
+            let runtime = Arc::clone(&runtime);
+            let manifest = manifest.clone();
+            let base = base.clone();
+            let loaded =
+                tokio::task::spawn_blocking(move || runtime.load_image_manifest(manifest, &base))
+                    .await
+                    .map_err(|_| EngineError::Other("image load task panicked".into()))?;
+            match loaded {
+                Ok(slot) => break slot,
+                Err(error)
+                    if is_memory_error(&error)
+                        && attempts < MAX_MEMORY_LOAD_RETRIES
+                        && self.evict_for_memory(id) =>
+                {
+                    attempts += 1;
+                }
+                Err(error) => return Err(error),
+            }
+        };
         self.image_slots
             .lock()
             .map_err(|_| EngineError::Other("image slots lock poisoned".into()))?
             .insert(id.to_owned(), Arc::clone(&slot));
+        self.touch_image(id);
+        self.evict_image();
         Ok(slot)
     }
 
@@ -327,11 +352,26 @@ impl AppState {
         }
         let runtime = Arc::clone(&self.runtime);
         let path = entry.path;
-        let cancel = CancelToken::new();
-        let task_cancel = cancel.clone();
-        let task =
-            tokio::task::spawn_blocking(move || runtime.load_cancellable(&path, task_cancel));
-        let slot = self.await_load(task, cancel).await?;
+        let mut attempts = 0;
+        let slot = loop {
+            let runtime = Arc::clone(&runtime);
+            let path = path.clone();
+            let cancel = CancelToken::new();
+            let task_cancel = cancel.clone();
+            let task =
+                tokio::task::spawn_blocking(move || runtime.load_cancellable(&path, task_cancel));
+            match self.await_load(task, cancel).await {
+                Ok(slot) => break slot,
+                Err(error)
+                    if is_memory_error(&error)
+                        && attempts < MAX_MEMORY_LOAD_RETRIES
+                        && self.evict_for_memory(id) =>
+                {
+                    attempts += 1;
+                }
+                Err(error) => return Err(error),
+            }
+        };
         self.router.insert_slot(id, Arc::clone(&slot))?;
         Ok(slot)
     }
@@ -364,11 +404,27 @@ impl AppState {
         }
         let runtime = Arc::clone(&self.runtime);
         let path = entry.path;
-        let cancel = CancelToken::new();
-        let task_cancel = cancel.clone();
-        let task =
-            tokio::task::spawn_blocking(move || runtime.load_audio_cancellable(&path, task_cancel));
-        let slot = self.await_load(task, cancel).await?;
+        let mut attempts = 0;
+        let slot = loop {
+            let runtime = Arc::clone(&runtime);
+            let path = path.clone();
+            let cancel = CancelToken::new();
+            let task_cancel = cancel.clone();
+            let task = tokio::task::spawn_blocking(move || {
+                runtime.load_audio_cancellable(&path, task_cancel)
+            });
+            match self.await_load(task, cancel).await {
+                Ok(slot) => break slot,
+                Err(error)
+                    if is_memory_error(&error)
+                        && attempts < MAX_MEMORY_LOAD_RETRIES
+                        && self.evict_for_memory(id) =>
+                {
+                    attempts += 1;
+                }
+                Err(error) => return Err(error),
+            }
+        };
         self.audio_slots
             .lock()
             .map_err(|_| EngineError::Other("audio catalog lock poisoned".into()))?
@@ -448,6 +504,70 @@ impl AppState {
         removed
     }
 
+    pub(crate) fn unload_image(&self, id: &str) -> bool {
+        let removed = self
+            .image_slots
+            .lock()
+            .map(|mut slots| slots.remove(id).is_some())
+            .unwrap_or(false);
+        if let Ok(mut lru) = self.image_lru.lock() {
+            lru.retain(|entry| entry != id);
+        }
+        removed
+    }
+
+    /// Evict one cached model to make room, never evicting the model being loaded.
+    pub(crate) fn evict_for_memory(&self, except: &str) -> bool {
+        if self.router.evict_lru_except(Some(except)).is_some() {
+            self.memory_evictions.fetch_add(1, Ordering::Relaxed);
+            return true;
+        }
+        if let Some(id) = pop_lru_except(&self.audio_lru, except) {
+            if let Ok(mut slots) = self.audio_slots.lock() {
+                slots.remove(&id);
+            }
+            self.memory_evictions.fetch_add(1, Ordering::Relaxed);
+            return true;
+        }
+        if let Some(id) = pop_lru_except(&self.image_lru, except) {
+            if let Ok(mut slots) = self.image_slots.lock() {
+                slots.remove(&id);
+            }
+            self.memory_evictions.fetch_add(1, Ordering::Relaxed);
+            return true;
+        }
+        false
+    }
+
+    pub(crate) fn memory_evictions(&self) -> u64 {
+        self.memory_evictions.load(Ordering::Relaxed)
+    }
+
+    fn touch_image(&self, id: &str) {
+        if let Ok(mut lru) = self.image_lru.lock() {
+            lru.retain(|entry| entry != id);
+            lru.push_back(id.to_owned());
+        }
+    }
+
+    fn evict_image(&self) {
+        let max_loaded = self.max_loaded_models.load(Ordering::SeqCst);
+        if max_loaded == 0 {
+            return;
+        }
+        let Ok(mut lru) = self.image_lru.lock() else {
+            return;
+        };
+        while lru.len() > max_loaded {
+            let Some(oldest) = lru.pop_front() else {
+                break;
+            };
+            if let Ok(mut slots) = self.image_slots.lock() {
+                slots.remove(&oldest);
+            }
+        }
+    }
+
     pub(crate) fn audio_catalog_ids(&self) -> Vec<String> {
         self.catalog
             .read()
@@ -459,6 +579,23 @@ impl AppState {
                     .collect()
             })
             .unwrap_or_default()
+    }
+}
+
+fn is_memory_error(error: &EngineError) -> bool {
+    matches!(
+        error,
+        EngineError::InsufficientVram { .. } | EngineError::InsufficientMemory { .. }
+    )
+}
+
+fn pop_lru_except(lru: &Mutex<VecDeque<String>>, except: &str) -> Option<String> {
+    let mut lru = lru.lock().ok()?;
+    loop {
+        let id = lru.pop_front()?;
+        if id != except {
+            return Some(id);
+        }
     }
 }
 

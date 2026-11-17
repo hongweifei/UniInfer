@@ -31,6 +31,8 @@ pub(crate) async fn unload(
     })?;
     let unloaded = if entry.audio_only {
         state.unload_audio(&id)
+    } else if entry.image_only {
+        state.unload_image(&id)
     } else {
         state.unload_text(&id)
     };
