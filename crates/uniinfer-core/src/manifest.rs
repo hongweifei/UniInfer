@@ -426,6 +426,115 @@ pub struct PipelineConfig {
 pub struct ImageConfig {
     pub width: u32,
     pub height: u32,
+    /// Optional component graph layout for a real diffusion model.
+    #[serde(default)]
+    pub diffusion: Option<DiffusionConfig>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DiffusionComponent {
+    pub path: String,
+    pub output: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DiffusionScheduler {
+    #[serde(default = "default_diffusion_train_steps")]
+    pub num_train_timesteps: u32,
+    #[serde(default = "default_diffusion_beta_start")]
+    pub beta_start: f32,
+    #[serde(default = "default_diffusion_beta_end")]
+    pub beta_end: f32,
+}
+
+impl Default for DiffusionScheduler {
+    fn default() -> Self {
+        Self {
+            num_train_timesteps: default_diffusion_train_steps(),
+            beta_start: default_diffusion_beta_start(),
+            beta_end: default_diffusion_beta_end(),
+        }
+    }
+}
+
+/// Standard diffusers component layout used by `onnx.diffusion`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DiffusionConfig {
+    pub text_encoder: DiffusionComponent,
+    pub unet: DiffusionComponent,
+    pub vae_decoder: DiffusionComponent,
+    #[serde(default = "default_text_encoder_input")]
+    pub text_encoder_input: String,
+    #[serde(default = "default_unet_sample_input")]
+    pub unet_sample_input: String,
+    #[serde(default = "default_unet_timestep_input")]
+    pub unet_timestep_input: String,
+    #[serde(default = "default_unet_encoder_input")]
+    pub unet_encoder_input: String,
+    #[serde(default = "default_unet_timestep_dtype")]
+    pub unet_timestep_dtype: String,
+    #[serde(default = "default_vae_input")]
+    pub vae_input: String,
+    #[serde(default = "default_diffusion_latent_channels")]
+    pub latent_channels: usize,
+    #[serde(default = "default_diffusion_max_length")]
+    pub max_length: usize,
+    #[serde(default)]
+    pub pad_token: u32,
+    #[serde(default = "default_diffusion_vae_scale")]
+    pub vae_scale: f32,
+    #[serde(default = "default_diffusion_steps")]
+    pub steps: usize,
+    #[serde(default = "default_diffusion_guidance")]
+    pub guidance: f32,
+    #[serde(default)]
+    pub scheduler: DiffusionScheduler,
+}
+
+fn default_text_encoder_input() -> String {
+    "input_ids".into()
+}
+fn default_unet_sample_input() -> String {
+    "sample".into()
+}
+fn default_unet_timestep_input() -> String {
+    "timestep".into()
+}
+fn default_unet_encoder_input() -> String {
+    "encoder_hidden_states".into()
+}
+fn default_unet_timestep_dtype() -> String {
+    "f32".into()
+}
+fn default_vae_input() -> String {
+    "latent_sample".into()
+}
+fn default_diffusion_latent_channels() -> usize {
+    4
+}
+fn default_diffusion_max_length() -> usize {
+    77
+}
+fn default_diffusion_vae_scale() -> f32 {
+    0.18215
+}
+fn default_diffusion_steps() -> usize {
+    1
+}
+fn default_diffusion_guidance() -> f32 {
+    1.0
+}
+fn default_diffusion_train_steps() -> u32 {
+    1000
+}
+fn default_diffusion_beta_start() -> f32 {
+    0.00085
+}
+fn default_diffusion_beta_end() -> f32 {
+    0.012
 }
 
 /// Audio preprocessing contract shared by every speech adapter.

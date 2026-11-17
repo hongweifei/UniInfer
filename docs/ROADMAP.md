@@ -30,7 +30,7 @@
 | :--- | :--- | :--- | :--- |
 | 文本聊天 | text (+image) | text | 已实现，支持多图 |
 | 语音转写 | audio | text | 已实现 |
-| 图像生成 | text | image | 管线已实现，真实扩散后端下一阶段 |
+| 图像生成 | text | image | `onnx.diffusion` 多组件管线已实现；真实 SD-Turbo 基线待硬件 runner |
 | 图像编辑 | image (+text) | image | 规划 |
 | 视频生成 | text / image (+text) | video | 规划 |
 | 视频编辑 | video (+text) | video | 规划 |
@@ -41,7 +41,7 @@
 
 | 里程碑 | 交付 | 前置 | 出口摘要 |
 | :--- | :--- | :--- | :--- |
-| M6 | ONNX 扩散：`onnx.diffusion` + SD-Turbo ONNX；SD1.5/SDXL/FLUX 随后 | 当前基线 | 固定 seed 可复现；CPU/GPU 延迟与显存入库 |
+| M6 | ONNX 扩散：`onnx.diffusion` + SD-Turbo ONNX；SD1.5/SDXL/FLUX 随后 | 当前基线 | 多组件管线与 synthetic fixture 已接入；真实 SD-Turbo 基线与固定 seed 待硬件 runner |
 | M7 | 图像编辑与视频生成：edits、LTX/AnimateDiff、异步 job | M6 | 图像编辑可用；2s 视频端到端；取消释放显存 |
 | M8 | 实时多通道：TTS、`output.audio/image/video`、预览帧 | M6、M7 | 首音频/首帧延迟入库；过载有界 |
 | M9 | 设备矩阵与混合推理：NPU EP、T1–T4、代价模型 | 当前基线 | 设备探测正确；NPU 数值达标；层卸载可用 |

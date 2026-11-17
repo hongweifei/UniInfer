@@ -14,14 +14,14 @@ pub use device::{
     ResidencySummary, parse_memory_size,
 };
 pub use engine::{
-    EngineCapabilities, EngineLoadSpec, EngineSession, InferenceEngine, NativeFinish,
-    NativeTextDecoder, NativeTextOutput, NativeTextRequest,
+    EngineCapabilities, EngineLoadSpec, EngineSession, ImageGenerationRequest, InferenceEngine,
+    NativeFinish, NativeTextDecoder, NativeTextOutput, NativeTextRequest,
 };
 pub use error::{EngineError, Result};
 pub use image_batch::{ImageBatch, MAX_IMAGES};
 pub use manifest::{
-    AudioConfig, Capability, CapabilityRequest, ImageConfig, Modality, Mode, ModelFile,
-    ModelFormat, ModelManifest, Operation, PipelineConfig, PipelineStep, PlacementConfig,
-    Quantization, Runtime, TextConfig,
+    AudioConfig, Capability, CapabilityRequest, DiffusionComponent, DiffusionConfig,
+    DiffusionScheduler, ImageConfig, Modality, Mode, ModelFile, ModelFormat, ModelManifest,
+    Operation, PipelineConfig, PipelineStep, PlacementConfig, Quantization, Runtime, TextConfig,
 };
 pub use tensor::{Tensor, TensorData, TensorDtype, TensorSpec};

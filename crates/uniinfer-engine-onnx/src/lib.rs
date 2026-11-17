@@ -11,6 +11,7 @@ use uniinfer_core::{
 };
 
 mod asr;
+mod diffusion;
 mod genai;
 mod graph;
 mod io;
@@ -145,7 +146,7 @@ impl InferenceEngine for OnnxEngine {
     }
 
     fn implementations(&self) -> &[&'static str] {
-        &["onnx.graph", "onnx.pipeline"]
+        &["onnx.graph", "onnx.pipeline", "onnx.diffusion"]
     }
 
     fn supported_formats(&self) -> &[ModelFormat] {
@@ -203,6 +204,9 @@ impl InferenceEngine for OnnxEngine {
 
         if spec.manifest.implementation == "onnx.pipeline" {
             return pipeline::load(&self.environment, &spec, class);
+        }
+        if spec.manifest.implementation == "onnx.diffusion" {
+            return diffusion::load(&self.environment, &spec, class);
         }
 
         let model_file = spec

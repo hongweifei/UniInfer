@@ -53,6 +53,19 @@ pub struct NativeTextRequest<'a> {
     pub cancel: &'a CancelToken,
 }
 
+/// Diffusion request after the service layer has tokenized both prompts.
+pub struct ImageGenerationRequest<'a> {
+    pub prompt_ids: &'a [i64],
+    pub negative_ids: &'a [i64],
+    pub width: u32,
+    pub height: u32,
+    pub steps: usize,
+    pub guidance: f32,
+    pub seed: Option<u64>,
+    pub cancel: &'a CancelToken,
+    pub progress: &'a mut dyn FnMut(usize, usize),
+}
+
 /// Bytes and accounting returned by native text generation.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NativeTextOutput {
@@ -78,6 +91,13 @@ pub trait EngineSession: Send + Sync {
     /// Bytes and layer placement actually committed by this session.
     fn residency(&self) -> Option<Residency> {
         None
+    }
+
+    /// Generate an image from tokenized prompts.
+    fn generate_image(&self, _request: &mut ImageGenerationRequest<'_>) -> Result<Tensor> {
+        Err(crate::EngineError::UnsupportedEngine(
+            "engine does not support image diffusion".into(),
+        ))
     }
 
     /// Run one forward pass.

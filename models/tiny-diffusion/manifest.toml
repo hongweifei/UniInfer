@@ -1,0 +1,49 @@
+id = "tiny-diffusion-onnx"
+runtime = "onnx"
+implementation = "onnx.diffusion"
+format = "onnx"
+quantization = "fp32"
+streaming_capable = false
+context_len = 77
+tokenizer = "bytes"
+min_vram = "0GiB"
+
+[placement]
+policy = "auto"
+prefer = ["npu", "gpu", "cpu"]
+allow_cpu_fallback = true
+
+[text]
+vocab_size = 256
+
+[image]
+width = 64
+height = 64
+
+[image.diffusion]
+max_length = 77
+pad_token = 0
+latent_channels = 4
+vae_scale = 1.0
+steps = 1
+guidance = 1.0
+text_encoder = { path = "text_encoder.onnx", output = "last_hidden_state" }
+unet = { path = "unet.onnx", output = "out_sample" }
+vae_decoder = { path = "vae_decoder.onnx", output = "sample" }
+
+[[files]]
+path = "text_encoder.onnx"
+sha256 = "1bec766657082833f1aed1523a839b4adf158ca259820c58181fda0f252ba46f"
+[[files]]
+path = "unet.onnx"
+sha256 = "4a4d5738cc1772ee5642b04d00882bc3e6b175bc9ae8cd6adf56d5f87490778d"
+[[files]]
+path = "vae_decoder.onnx"
+sha256 = "93dfe502e69ce761fc9ecdda40ed518c6ef65c700292aa4066902692519ab457"
+
+[[capabilities]]
+name = "text_to_image"
+operation = "generate"
+required_inputs = ["text"]
+outputs = ["image"]
+mode = "batch"

@@ -20,7 +20,7 @@ UniInfer 当前提供以下能力：
 
 - OpenAI 兼容的文本聊天与多图聊天，覆盖 ONNX、GGUF、Safetensors。
 - ONNX Whisper / CTC 与 GGML Whisper 批量语音转写。
-- `/v1/images/generations` 的图像生成管线，包含 capability 选择、PNG 编码与 `b64_json` 响应。
+- `/v1/images/generations` 的图像生成管线与 `onnx.diffusion` 多组件扩散，包含 capability 选择、PNG 编码与 `b64_json` 响应。
 - `/v1/realtime` 的文本与 16 kHz PCM16 音频输入、能量 VAD、ASR → 文本响应闭环。
 - `/v1/models`、`/v1/devices`、`/v1/config`、`/metrics`、会话取消与模型生命周期。
 - Tauri 2 桌面工作台：对话、多图、转写、图像生成、在线模型搜索/下载、模型管理与设置，与 HTTP API 共享同一运行时。
@@ -109,7 +109,7 @@ flowchart TB
 | ONNX | 文本生成 / GenAI KV cache | `onnx.graph` | 已实现 |
 | ONNX | 视觉语言 pipeline | `onnx.pipeline` + `smolvlm` profile | 已实现 |
 | ONNX | Whisper / CTC 语音转写 | `onnx.pipeline` + adapter step | 已实现 |
-| ONNX | 图像生成管线 | `onnx.graph` + `ImageSlot` | 已实现；真实扩散后端下一阶段接入 |
+| ONNX | 图像扩散 | `onnx.diffusion` + `ImageSlot` | 已实现；CLIP/UNet/VAE 组件布局，含 synthetic fixture |
 | GGUF | 文本生成 | `candle.text` / `llama.text` | 已实现 |
 | GGUF | 视觉语言 | `llama.mtmd` | 已实现 |
 | Safetensors | 文本生成 | `candle.text` | 已实现 |
@@ -266,7 +266,7 @@ curl http://127.0.0.1:11435/v1/images/generations \
   }'
 ```
 
-当前响应包含 `b64_json`、`mime_type`、`width`、`height`。`tiny-image-onnx` fixture 验证了完整 API 与 `ImageSlot` 管线；真实扩散后端通过同一个 `ImageSlot` 接入。
+当前响应包含 `b64_json`、`mime_type`、`width`、`height`。`tiny-image-onnx` 验证单图管线，`tiny-diffusion-onnx` 验证 CLIP/UNet/VAE 多组件扩散；真实 SD-Turbo 通过同一个 `ImageSlot` 接入。
 
 ### 采样与停止
 

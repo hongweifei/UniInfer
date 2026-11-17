@@ -103,8 +103,18 @@ pub(crate) async fn generate(
         negative_prompt: request.negative_prompt,
         width: if width == 0 { defaults.width } else { width },
         height: if height == 0 { defaults.height } else { height },
-        steps: request.steps.unwrap_or(1),
-        guidance: request.guidance.unwrap_or(0.0),
+        steps: request.steps.unwrap_or_else(|| {
+            defaults
+                .diffusion
+                .as_ref()
+                .map_or(1, |diffusion| diffusion.steps)
+        }),
+        guidance: request.guidance.unwrap_or_else(|| {
+            defaults
+                .diffusion
+                .as_ref()
+                .map_or(0.0, |diffusion| diffusion.guidance)
+        }),
         seed: request.seed,
     };
     let permit = slot
