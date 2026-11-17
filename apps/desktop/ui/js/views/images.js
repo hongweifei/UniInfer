@@ -1,17 +1,18 @@
 import { h } from '../dom.js';
 import { icon } from '../icons.js';
 import { errorMessage, isImageModel, downloadDataURL } from '../format.js';
-import { toast, emptyState } from '../components/ui.js';
+import { toast } from '../components/ui.js';
 
 export function mountImages(root, ctx) {
   const imageModels = ctx.models().filter((model) => isImageModel(model) && !model.route_error);
   const state = ctx.state;
+  const modelSelect = h('select', {
+    class: 'select',
+    disabled: !imageModels.length,
+  });
   if (!imageModels.length) {
-    // Keep the media tab empty instead of showing a model-less empty state.
-    return () => {};
+    modelSelect.append(h('option', { value: '', text: '选择模型' }));
   }
-
-  const modelSelect = h('select', { class: 'select' });
   for (const model of imageModels) modelSelect.append(h('option', { value: model.id, text: model.id }));
   const preferred = imageModels.find((model) => model.id === state.selectedModel) ?? imageModels[0];
   if (preferred) modelSelect.value = preferred.id;
@@ -40,13 +41,14 @@ export function mountImages(root, ctx) {
     preview.replaceChildren(h('div', { class: 'empty-state' },
       h('div', { class: 'empty-icon', html: icon('image', 24) }),
       h('h2', { text: '还没有生成图片' }),
-      h('p', { text: '输入提示词后点击生成。真实扩散后端尚未接入，当前使用 fixture 验证管线。' }),
+      h('p', { text: '输入提示词后点击生成，图片会显示在这里。' }),
     ));
   }
 
   async function run() {
     const model = modelSelect.value;
     const text = prompt.value.trim();
+    if (!model) { toast('当前没有可用的图像模型', 'error'); return; }
     if (!text) { toast('请先输入提示词', 'error'); prompt.focus(); return; }
     generate.disabled = true;
     generateLabel.textContent = '生成中…';
