@@ -2,7 +2,7 @@ use std::path::PathBuf;
 use std::time::Instant;
 
 use crate::cancel::CancelToken;
-use crate::device::{DeviceBudget, DeviceClass, PlacementPlan};
+use crate::device::{DeviceBudget, DeviceClass, PlacementPlan, Residency};
 use crate::error::Result;
 use crate::manifest::{Modality, ModelFormat, ModelManifest, Quantization, Runtime};
 use crate::tensor::{Tensor, TensorSpec};
@@ -74,6 +74,11 @@ pub trait NativeTextDecoder: Send + Sync {
 pub trait EngineSession: Send + Sync {
     fn inputs(&self) -> &[TensorSpec];
     fn outputs(&self) -> &[TensorSpec];
+
+    /// Bytes and layer placement actually committed by this session.
+    fn residency(&self) -> Option<Residency> {
+        None
+    }
 
     /// Run one forward pass.
     fn run(&self, inputs: Vec<Tensor>) -> Result<Vec<Tensor>>;

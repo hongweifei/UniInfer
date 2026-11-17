@@ -27,6 +27,8 @@ pub enum EngineError {
     MissingEp(String),
     #[error("insufficient memory: required {required}, available {available}")]
     InsufficientVram { required: String, available: String },
+    #[error("insufficient host memory: required {required}, available {available}")]
+    InsufficientMemory { required: String, available: String },
     #[error("invalid manifest: {0}")]
     ManifestInvalid(String),
     #[error("model load failed: {0}")]
@@ -64,6 +66,7 @@ impl EngineError {
             Self::InputTooLong { .. } => "input_too_long",
             Self::MissingEp(_) => "missing_ep",
             Self::InsufficientVram { .. } => "insufficient_vram",
+            Self::InsufficientMemory { .. } => "insufficient_memory",
             Self::ManifestInvalid(_) => "manifest_invalid",
             Self::LoadFailed(_) => "load_failed",
             Self::Cancelled => "cancelled",

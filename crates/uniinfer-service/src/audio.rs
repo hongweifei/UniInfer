@@ -6,8 +6,8 @@ use std::time::Duration;
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use uniinfer_backends::{ModelEvent, ModelOutput};
 use uniinfer_core::{
-    AudioConfig, EngineError, EngineSession, ModelManifest, PlacementPlan, Result, Tensor,
-    TensorData, TensorDtype,
+    AudioConfig, EngineError, EngineSession, ModelManifest, PlacementPlan, Residency, Result,
+    Tensor, TensorData, TensorDtype,
 };
 use uniinfer_registry::SessionLease;
 
@@ -31,6 +31,10 @@ impl ModelView for AudioSlot {
 
     fn engine_name(&self) -> &str {
         AudioSlot::engine_name(self)
+    }
+
+    fn residency(&self) -> Option<Residency> {
+        self.lease.residency()
     }
 }
 

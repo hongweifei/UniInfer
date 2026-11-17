@@ -29,6 +29,8 @@ fn qwen2_5_vl_gguf_describes_image() {
             cancel: CancelToken::new(),
         })
         .expect("load");
+    let residency = session.residency().expect("residency");
+    assert!(residency.disk_bytes > 0);
 
     let mut image = image::RgbImage::new(64, 64);
     for pixel in image.pixels_mut() {
@@ -78,6 +80,8 @@ fn smolvlm_gguf_describes_image() {
             cancel: CancelToken::new(),
         })
         .expect("load");
+    let residency = session.residency().expect("residency");
+    assert!(residency.disk_bytes > 0);
 
     let mut image = image::RgbImage::new(64, 64);
     for pixel in image.pixels_mut() {

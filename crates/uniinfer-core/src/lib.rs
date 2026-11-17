@@ -10,8 +10,8 @@ pub mod tensor;
 
 pub use cancel::CancelToken;
 pub use device::{
-    Device, DeviceBudget, DeviceClass, KvCachePlacement, PlacementPlan, PlacementPolicy,
-    parse_memory_size,
+    Device, DeviceBudget, DeviceClass, KvCachePlacement, PlacementPlan, PlacementPolicy, Residency,
+    ResidencySummary, parse_memory_size,
 };
 pub use engine::{
     EngineCapabilities, EngineLoadSpec, EngineSession, InferenceEngine, NativeFinish,

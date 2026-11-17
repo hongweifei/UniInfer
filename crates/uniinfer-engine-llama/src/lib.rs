@@ -213,7 +213,7 @@ impl InferenceEngine for LlamaEngine {
             .ok_or_else(|| EngineError::ManifestInvalid("files is empty".into()))?;
         let path = spec.base_dir.join(&model_file.path);
 
-        let offload = offload::plan(&spec, &path, &self.backend)?;
+        let offload = offload::plan(&spec, &path)?;
         let model = Arc::new(
             LlamaModel::load_from_file(&self.backend, &path, &offload.params).map_err(|error| {
                 if spec.cancel.is_cancelled() {
@@ -256,6 +256,7 @@ impl InferenceEngine for LlamaEngine {
             &self.backend,
             spec.manifest.context_len,
             offload.offload_kqv,
+            offload.residency,
             inputs,
             outputs,
         )?))

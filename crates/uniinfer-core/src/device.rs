@@ -88,6 +88,39 @@ pub struct PlacementPlan {
     pub fallback_reason: Option<String>,
 }
 
+/// Bytes accounted to each residency tier for a loaded session.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Residency {
+    pub vram_bytes: u64,
+    pub host_bytes: u64,
+    /// Backing bytes mapped or read from disk.
+    pub disk_bytes: u64,
+    /// Layers placed on the accelerator.
+    pub offload_layers: usize,
+    pub total_layers: Option<usize>,
+    /// True when the engine could not report exact residency.
+    #[serde(default)]
+    pub estimated: bool,
+}
+
+impl Residency {
+    #[must_use]
+    pub fn total_bytes(self) -> u64 {
+        self.vram_bytes
+            .saturating_add(self.host_bytes)
+            .saturating_add(self.disk_bytes)
+    }
+}
+
+/// Aggregate ledger view exposed by `/metrics`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ResidencySummary {
+    pub sessions: usize,
+    pub vram_bytes: u64,
+    pub host_bytes: u64,
+    pub disk_bytes: u64,
+}
+
 /// Parse `min_vram` values such as `6GiB`, `512MiB`, `8GB`, or a raw byte count.
 #[must_use]
 pub fn parse_memory_size(value: &str) -> Option<u64> {

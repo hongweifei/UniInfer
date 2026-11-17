@@ -7,8 +7,8 @@ use image::{ImageFormat, RgbImage};
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use uniinfer_backends::{ByteTokenizer, HuggingFaceTokenizer, ModelEvent, ModelOutput, Tokenizer};
 use uniinfer_core::{
-    EngineError, EngineSession, ImageConfig, ModelManifest, PlacementPlan, Result, Tensor,
-    TensorData, TensorDtype,
+    EngineError, EngineSession, ImageConfig, ModelManifest, PlacementPlan, Residency, Result,
+    Tensor, TensorData, TensorDtype,
 };
 use uniinfer_registry::SessionLease;
 
@@ -32,6 +32,10 @@ impl ModelView for ImageSlot {
 
     fn engine_name(&self) -> &str {
         ImageSlot::engine_name(self)
+    }
+
+    fn residency(&self) -> Option<Residency> {
+        self.lease.residency()
     }
 }
 

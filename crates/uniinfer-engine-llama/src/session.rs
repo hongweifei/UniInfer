@@ -11,7 +11,7 @@ use llama_cpp_2::model::LlamaModel;
 use llama_cpp_2::token::LlamaToken;
 use self_cell::self_cell;
 use uniinfer_core::{
-    EngineError, EngineSession, Result, Tensor as CoreTensor, TensorData, TensorSpec,
+    EngineError, EngineSession, Residency, Result, Tensor as CoreTensor, TensorData, TensorSpec,
 };
 
 use crate::BATCH_TOKENS;
@@ -32,6 +32,7 @@ struct LlamaState {
 pub(crate) struct LlamaSession {
     state: Mutex<LlamaState>,
     cancelled: AtomicBool,
+    residency: Residency,
     inputs: Vec<TensorSpec>,
     outputs: Vec<TensorSpec>,
 }
@@ -43,6 +44,10 @@ impl EngineSession for LlamaSession {
 
     fn outputs(&self) -> &[TensorSpec] {
         &self.outputs
+    }
+
+    fn residency(&self) -> Option<Residency> {
+        Some(self.residency)
     }
 
     fn run(&self, inputs: Vec<CoreTensor>) -> Result<Vec<CoreTensor>> {
@@ -142,6 +147,7 @@ impl LlamaSession {
         backend: &LlamaBackend,
         context_len: usize,
         offload_kqv: bool,
+        residency: Residency,
         inputs: Vec<TensorSpec>,
         outputs: Vec<TensorSpec>,
     ) -> Result<Self> {
@@ -163,6 +169,7 @@ impl LlamaSession {
                 cached_ids: Vec::new(),
             }),
             cancelled: AtomicBool::new(false),
+            residency,
             inputs,
             outputs,
         })

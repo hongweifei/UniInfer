@@ -2,41 +2,78 @@
 
 use std::path::Path;
 
-use llama_cpp_2::llama_backend::LlamaBackend;
-use llama_cpp_2::model::LlamaModel;
+use llama_cpp_2::gguf::GgufContext;
 use llama_cpp_2::model::params::LlamaModelParams;
-use uniinfer_core::{DeviceClass, EngineError, EngineLoadSpec, KvCachePlacement, Result};
+use uniinfer_core::{
+    DeviceClass, EngineError, EngineLoadSpec, KvCachePlacement, Residency, Result,
+};
 
 const AUTO_RESERVE: u64 = 256 * 1024 * 1024;
 
 pub(super) struct LlamaOffload {
     pub(super) params: LlamaModelParams,
     pub(super) offload_kqv: bool,
+    pub(super) residency: Residency,
 }
 
-pub(super) fn plan(
-    spec: &EngineLoadSpec,
-    path: &Path,
-    backend: &LlamaBackend,
-) -> Result<LlamaOffload> {
+struct ModelMeta {
+    layers: u64,
+    bytes: u64,
+    n_embd: u64,
+    n_head: u64,
+    n_head_kv: u64,
+}
+
+pub(super) fn plan(spec: &EngineLoadSpec, path: &Path) -> Result<LlamaOffload> {
     let class = spec
         .placement
         .devices
         .first()
         .map(|device| device.class)
         .unwrap_or(DeviceClass::Cpu);
+    let (meta, estimated) = match read_metadata(path) {
+        Some(meta) if meta.layers > 0 => (meta, false),
+        Some(meta) if !spec.placement.auto_offload => (meta, true),
+        Some(_) | None if spec.placement.auto_offload => {
+            return Err(EngineError::LoadFailed(format!(
+                "GGUF metadata missing layer count: {}",
+                path.display()
+            )));
+        }
+        _ => {
+            let fallback = ModelMeta {
+                layers: u64::try_from(spec.placement.offload_layers.max(1)).unwrap_or(1),
+                bytes: std::fs::metadata(path).map_or(0, |metadata| metadata.len()),
+                n_embd: 0,
+                n_head: 1,
+                n_head_kv: 0,
+            };
+            (fallback, true)
+        }
+    };
     let kv_on_gpu = class == DeviceClass::Gpu && spec.placement.kv_cache != KvCachePlacement::Ram;
-    let mut params = LlamaModelParams::default().with_use_mmap(true);
     let n_gpu_layers = if class == DeviceClass::Gpu {
-        if spec.placement.auto_offload {
-            auto_layers(spec, path, backend, kv_on_gpu)?
+        let requested = if spec.placement.auto_offload {
+            auto_layers(spec, &meta, kv_on_gpu)?
         } else {
             u32::try_from(spec.placement.offload_layers).unwrap_or(u32::MAX)
-        }
+        };
+        requested.min(u32::try_from(meta.layers).unwrap_or(u32::MAX))
     } else {
         0
     };
     let offload_kqv = kv_on_gpu && n_gpu_layers > 0;
+    let kv_bytes = estimate_kv(spec.manifest.context_len, &meta);
+    let weights_on_gpu = meta.bytes.saturating_mul(u64::from(n_gpu_layers)) / meta.layers.max(1);
+    let residency = Residency {
+        vram_bytes: weights_on_gpu + if offload_kqv { kv_bytes } else { 0 },
+        host_bytes: if offload_kqv { 0 } else { kv_bytes },
+        disk_bytes: meta.bytes,
+        offload_layers: usize::try_from(n_gpu_layers).unwrap_or(usize::MAX),
+        total_layers: Some(usize::try_from(meta.layers).unwrap_or(usize::MAX)),
+        estimated,
+    };
+    let mut params = LlamaModelParams::default().with_use_mmap(true);
     if n_gpu_layers > 0 {
         params = params.with_n_gpu_layers(n_gpu_layers);
     }
@@ -50,47 +87,55 @@ pub(super) fn plan(
             .map_or(0, |device| device.available_memory_bytes),
         n_gpu_layers,
         offload_kqv,
+        vram = residency.vram_bytes,
+        host = residency.host_bytes,
+        disk = residency.disk_bytes,
+        estimated,
         "llama.cpp offload plan"
     );
     Ok(LlamaOffload {
         params,
         offload_kqv,
+        residency,
     })
 }
 
-fn auto_layers(
-    spec: &EngineLoadSpec,
-    path: &Path,
-    backend: &LlamaBackend,
-    offload_kqv: bool,
-) -> Result<u32> {
-    let probe_params = LlamaModelParams::default()
-        .with_vocab_only(true)
-        .with_use_mmap(true);
-    let probe = LlamaModel::load_from_file(backend, path, &probe_params).map_err(|error| {
-        if spec.cancel.is_cancelled() {
-            EngineError::Cancelled
-        } else {
-            EngineError::LoadFailed(format!("llama metadata {}: {error}", path.display()))
-        }
-    })?;
-    let layers = u64::from(probe.n_layer());
-    if layers == 0 {
-        return Ok(0);
-    }
-    let model_bytes = match probe.size() {
-        0 => std::fs::metadata(path).map_or(0, |metadata| metadata.len()),
-        bytes => bytes,
-    };
-    let n_embd = u64::try_from(probe.n_embd()).unwrap_or(0);
-    let n_head = u64::from(probe.n_head()).max(1);
-    let n_head_kv = u64::from(probe.n_head_kv());
-    let context = u64::try_from(spec.manifest.context_len.max(1)).unwrap_or(u64::MAX);
-    drop(probe);
-    if model_bytes == 0 {
-        return Ok(0);
-    }
+fn read_metadata(path: &Path) -> Option<ModelMeta> {
+    let context = GgufContext::from_file(path)?;
+    let architecture = get_string(&context, "general.architecture").unwrap_or("llama");
+    let layers = get_u64(&context, &format!("{architecture}.block_count"))?;
+    let n_embd = get_u64(&context, &format!("{architecture}.embedding_length")).unwrap_or(0);
+    let n_head = get_u64(&context, &format!("{architecture}.attention.head_count"))
+        .unwrap_or(1)
+        .max(1);
+    let n_head_kv =
+        get_u64(&context, &format!("{architecture}.attention.head_count_kv")).unwrap_or(n_head);
+    Some(ModelMeta {
+        layers,
+        bytes: std::fs::metadata(path).map_or(0, |metadata| metadata.len()),
+        n_embd,
+        n_head,
+        n_head_kv,
+    })
+}
 
+fn get_u64(context: &GgufContext, key: &str) -> Option<u64> {
+    let index = context.find_key(key);
+    if index < 0 {
+        return None;
+    }
+    Some(u64::from(context.val_u32(index)))
+}
+
+fn get_string<'a>(context: &'a GgufContext, key: &str) -> Option<&'a str> {
+    let index = context.find_key(key);
+    if index < 0 {
+        return None;
+    }
+    context.val_str(index)
+}
+
+fn auto_layers(spec: &EngineLoadSpec, meta: &ModelMeta, offload_kqv: bool) -> Result<u32> {
     let Some(gpu) = spec
         .placement
         .devices
@@ -124,24 +169,28 @@ fn auto_layers(
         );
         return Ok(0);
     }
-
     let kv_bytes = if offload_kqv {
-        let head_dim = n_embd / n_head;
-        // K and V, f16 elements, for the configured context.
-        4u64.saturating_mul(layers)
-            .saturating_mul(context)
-            .saturating_mul(n_head_kv.max(1))
-            .saturating_mul(head_dim)
+        estimate_kv(spec.manifest.context_len, meta)
     } else {
         0
     };
     Ok(layers_for_budget(
-        model_bytes,
-        layers,
+        meta.bytes,
+        meta.layers,
         available,
         kv_bytes,
         AUTO_RESERVE,
     ))
+}
+
+fn estimate_kv(context_len: usize, meta: &ModelMeta) -> u64 {
+    let context = u64::try_from(context_len.max(1)).unwrap_or(u64::MAX);
+    let head_dim = meta.n_embd.checked_div(meta.n_head).unwrap_or(0);
+    // K and V, f16 elements, for the configured context.
+    4u64.saturating_mul(meta.layers)
+        .saturating_mul(context)
+        .saturating_mul(meta.n_head_kv.max(1))
+        .saturating_mul(head_dim)
 }
 
 fn layers_for_budget(

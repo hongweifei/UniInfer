@@ -11,7 +11,7 @@ use uniinfer_backends::{
 };
 use uniinfer_core::{
     Device, EngineError, EngineSession, ModelManifest, NativeFinish, NativeTextRequest,
-    PlacementPlan, Result,
+    PlacementPlan, Residency, Result,
 };
 use uniinfer_registry::{EngineRegistry, EngineRoute, SessionLease};
 
@@ -76,6 +76,9 @@ pub trait ModelView: Send + Sync {
     fn manifest(&self) -> &ModelManifest;
     fn placement(&self) -> &PlacementPlan;
     fn engine_name(&self) -> &str;
+    fn residency(&self) -> Option<Residency> {
+        None
+    }
 }
 
 /// Owns the engine registry and the device inventory.
@@ -104,6 +107,11 @@ impl Runtime {
     #[must_use]
     pub fn active_sessions(&self) -> usize {
         self.registry.active_sessions()
+    }
+
+    #[must_use]
+    pub fn residency(&self) -> uniinfer_core::ResidencySummary {
+        self.registry.residency()
     }
 
     /// Resolve engine and device placement without loading weights.
@@ -308,6 +316,10 @@ impl ModelView for ModelSlot {
 
     fn engine_name(&self) -> &str {
         self.lease.engine_name()
+    }
+
+    fn residency(&self) -> Option<Residency> {
+        self.lease.residency()
     }
 }
 

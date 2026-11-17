@@ -122,7 +122,8 @@ flowchart TB
 - llama.cpp 默认使用 mmap，并在 GPU 上按空闲显存自动选择 `n_gpu_layers`；`placement.offload_layers = "auto"` 显式启用，数字值固定层数。
 - `placement.kv_cache = "ram"` 会把 llama.cpp 的 KV cache 留在主机内存。
 - `min_vram` 会在存在 GPU 空闲显存信息时参与路由；不满足则拒绝该引擎。
-- Candle、ONNX 的层切分和显存账本仍在后续里程碑。
+- 每个 `SessionLease` 在加载后预留 VRAM/RAM，释放时归还；`/metrics` 和 `/v1/models` 输出 `residency`（VRAM、host、disk-backed、层数）。
+- Candle、ONNX 的层切分仍待实现；没有引擎统计时账本用 manifest 文件大小做保守估算。
 
 量化覆盖：
 

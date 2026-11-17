@@ -94,9 +94,9 @@ impl From<uniinfer_core::EngineError> for ApiError {
             | EngineError::InvalidSampling(_) => StatusCode::BAD_REQUEST,
             EngineError::InputTooLong { .. } => StatusCode::PAYLOAD_TOO_LARGE,
             EngineError::MissingEp(_) => StatusCode::NOT_IMPLEMENTED,
-            EngineError::InsufficientVram { .. } | EngineError::PlacementUnsatisfiable(_) => {
-                StatusCode::CONFLICT
-            }
+            EngineError::InsufficientVram { .. }
+            | EngineError::InsufficientMemory { .. }
+            | EngineError::PlacementUnsatisfiable(_) => StatusCode::CONFLICT,
             EngineError::Busy => StatusCode::TOO_MANY_REQUESTS,
             EngineError::Cancelled => StatusCode::from_u16(499).unwrap_or(StatusCode::BAD_REQUEST),
             EngineError::Timeout => StatusCode::GATEWAY_TIMEOUT,

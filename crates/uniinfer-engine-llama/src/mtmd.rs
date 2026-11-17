@@ -13,7 +13,7 @@ use self_cell::self_cell;
 use uniinfer_core::{
     DeviceClass, EngineError, EngineLoadSpec, EngineSession, InferenceEngine, Modality,
     ModelFormat, NativeFinish, NativeTextDecoder, NativeTextOutput, NativeTextRequest,
-    Quantization, Result, Runtime, Tensor as CoreTensor, TensorData, TensorSpec,
+    Quantization, Residency, Result, Runtime, Tensor as CoreTensor, TensorData, TensorSpec,
 };
 
 const FORMATS: &[ModelFormat] = &[ModelFormat::Gguf];
@@ -151,7 +151,7 @@ impl InferenceEngine for LlamaMtmdEngine {
         let mmproj_path = spec.base_dir.join(mmproj);
         spec.manifest.verify_files(&spec.base_dir)?;
 
-        let offload = super::offload::plan(&spec, &model_path, &self.backend)?;
+        let offload = super::offload::plan(&spec, &model_path)?;
         let model = Arc::new(
             LlamaModel::load_from_file(&self.backend, &model_path, &offload.params)
                 .map_err(|error| EngineError::LoadFailed(format!("llama mtmd model: {error}")))?,
@@ -182,6 +182,7 @@ impl InferenceEngine for LlamaMtmdEngine {
                 context,
                 mtmd,
             }),
+            residency: offload.residency,
             inputs: vec![
                 TensorSpec {
                     name: "text".into(),
@@ -211,6 +212,7 @@ struct MtmdState {
 
 struct LlamaMtmdSession {
     state: Mutex<MtmdState>,
+    residency: Residency,
     inputs: Vec<TensorSpec>,
     outputs: Vec<TensorSpec>,
 }
@@ -222,6 +224,10 @@ impl EngineSession for LlamaMtmdSession {
 
     fn outputs(&self) -> &[TensorSpec] {
         &self.outputs
+    }
+
+    fn residency(&self) -> Option<Residency> {
+        Some(self.residency)
     }
 
     fn run(&self, inputs: Vec<CoreTensor>) -> Result<Vec<CoreTensor>> {

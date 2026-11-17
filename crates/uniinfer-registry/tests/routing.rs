@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use uniinfer_core::{
     Capability, Device, DeviceClass, EngineError, EngineLoadSpec, EngineSession, InferenceEngine,
     Modality, Mode, ModelFormat, ModelManifest, Operation, PlacementConfig, PlacementPolicy,
-    Quantization, Result, Runtime, Tensor, TensorData, TensorSpec,
+    Quantization, Residency, Result, Runtime, Tensor, TensorData, TensorSpec,
 };
 use uniinfer_devices::DeviceInventory;
 use uniinfer_registry::EngineRegistry;
@@ -90,8 +90,41 @@ impl InferenceEngine for GpuOffloadEngine {
     }
 
     fn load_session(&self, _spec: EngineLoadSpec) -> Result<Box<dyn EngineSession>> {
-        Ok(Box::new(Noop))
+        Ok(Box::new(Resident))
     }
+}
+
+struct Resident;
+
+impl EngineSession for Resident {
+    fn inputs(&self) -> &[TensorSpec] {
+        &[]
+    }
+
+    fn outputs(&self) -> &[TensorSpec] {
+        &[]
+    }
+
+    fn residency(&self) -> Option<Residency> {
+        Some(Residency {
+            vram_bytes: 600,
+            host_bytes: 10,
+            disk_bytes: 5,
+            offload_layers: 2,
+            total_layers: Some(4),
+            estimated: false,
+        })
+    }
+
+    fn run(&self, _inputs: Vec<Tensor>) -> Result<Vec<Tensor>> {
+        Ok(vec![Tensor::new(
+            "out",
+            vec![1],
+            TensorData::F32(vec![0.0]),
+        )?])
+    }
+
+    fn cancel(&self) {}
 }
 
 struct Noop;
@@ -305,4 +338,54 @@ fn rejects_min_vram_when_full_gpu_load_does_not_fit() {
         panic!("must reject");
     };
     assert!(matches!(error, EngineError::PlacementUnsatisfiable(_)));
+}
+
+fn gpu_budget() -> DeviceInventory {
+    DeviceInventory::from(vec![
+        Device {
+            id: "cpu:0".into(),
+            class: DeviceClass::Cpu,
+            backend: "cpu".into(),
+            memory_bytes: 16 * 1024,
+            available_memory_bytes: 16 * 1024,
+        },
+        Device {
+            id: "gpu:0".into(),
+            class: DeviceClass::Gpu,
+            backend: "fake".into(),
+            memory_bytes: 1_000,
+            available_memory_bytes: 1_000,
+        },
+    ])
+}
+
+#[test]
+fn ledger_reserves_and_releases_session_residency() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let mut manifest = manifest();
+    manifest.implementation = "onnx.offload".into();
+    let path = write_manifest(temp.path(), &manifest);
+    let mut registry = EngineRegistry::new(gpu_budget());
+    registry.register(std::sync::Arc::new(GpuOffloadEngine));
+
+    let lease = registry.load(&path).expect("first load");
+    let summary = registry.residency();
+    assert_eq!(summary.sessions, 1);
+    assert_eq!(summary.vram_bytes, 600);
+    assert_eq!(summary.host_bytes, 10);
+    assert_eq!(summary.disk_bytes, 5);
+
+    let error = match registry.load(&path) {
+        Ok(_) => panic!("second load must exceed budget"),
+        Err(error) => error,
+    };
+    assert!(matches!(error, EngineError::InsufficientVram { .. }));
+
+    drop(lease);
+    let summary = registry.residency();
+    assert_eq!(summary.sessions, 0);
+    assert_eq!(summary.vram_bytes, 0);
+
+    let lease = registry.load(&path).expect("reload after release");
+    drop(lease);
 }

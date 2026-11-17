@@ -1,12 +1,13 @@
 //! Engine routing, preflight checks and session leases.
 
+use std::collections::HashMap;
 use std::path::Path;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex};
 
 use uniinfer_core::{
-    CancelToken, EngineError, EngineLoadSpec, EngineSession, InferenceEngine, ModelManifest,
-    PlacementPlan, Result,
+    CancelToken, DeviceBudget, DeviceClass, EngineError, EngineLoadSpec, EngineSession,
+    InferenceEngine, ModelManifest, PlacementPlan, Residency, ResidencySummary, Result,
 };
 use uniinfer_devices::DeviceInventory;
 
@@ -17,11 +18,164 @@ pub struct EngineRoute {
     pub placement: PlacementPlan,
 }
 
+#[derive(Default)]
+struct LedgerState {
+    vram: HashMap<String, u64>,
+    host_bytes: u64,
+    disk_bytes: u64,
+    sessions: usize,
+}
+
+#[derive(Clone, Default)]
+struct ResidencyLedger {
+    inner: Arc<Mutex<LedgerState>>,
+}
+
+struct Reservation {
+    ledger: Arc<Mutex<LedgerState>>,
+    device: Option<String>,
+    vram_bytes: u64,
+    host_bytes: u64,
+    disk_bytes: u64,
+}
+
+impl Drop for Reservation {
+    fn drop(&mut self) {
+        if let Ok(mut state) = self.ledger.lock() {
+            if let Some(device) = &self.device
+                && self.vram_bytes > 0
+                && let Some(used) = state.vram.get_mut(device)
+            {
+                *used = used.saturating_sub(self.vram_bytes);
+                if *used == 0 {
+                    state.vram.remove(device);
+                }
+            }
+            state.host_bytes = state.host_bytes.saturating_sub(self.host_bytes);
+            state.disk_bytes = state.disk_bytes.saturating_sub(self.disk_bytes);
+            state.sessions = state.sessions.saturating_sub(1);
+        }
+    }
+}
+
+impl ResidencyLedger {
+    fn check(
+        &self,
+        inventory: &DeviceInventory,
+        placement: &PlacementPlan,
+        residency: Residency,
+    ) -> Result<()> {
+        let state = self
+            .inner
+            .lock()
+            .map_err(|_| EngineError::Other("residency ledger lock poisoned".into()))?;
+        check_limits(&state, inventory, placement, residency)
+    }
+
+    fn reserved(&self) -> (HashMap<String, u64>, u64) {
+        self.inner.lock().map_or_else(
+            |_| (HashMap::new(), 0),
+            |state| (state.vram.clone(), state.host_bytes),
+        )
+    }
+
+    fn reserve(
+        &self,
+        inventory: &DeviceInventory,
+        placement: &PlacementPlan,
+        residency: Residency,
+    ) -> Result<Reservation> {
+        let mut state = self
+            .inner
+            .lock()
+            .map_err(|_| EngineError::Other("residency ledger lock poisoned".into()))?;
+        check_limits(&state, inventory, placement, residency)?;
+        let gpu = placement
+            .devices
+            .iter()
+            .find(|device| device.class == DeviceClass::Gpu);
+        let device = gpu.map(|device| device.id.clone());
+        if residency.vram_bytes > 0
+            && let Some(device) = &device
+        {
+            let used = state.vram.entry(device.clone()).or_default();
+            *used = used.saturating_add(residency.vram_bytes);
+        }
+        state.host_bytes = state.host_bytes.saturating_add(residency.host_bytes);
+        state.disk_bytes = state.disk_bytes.saturating_add(residency.disk_bytes);
+        state.sessions += 1;
+        Ok(Reservation {
+            ledger: Arc::clone(&self.inner),
+            device,
+            vram_bytes: residency.vram_bytes,
+            host_bytes: residency.host_bytes,
+            disk_bytes: residency.disk_bytes,
+        })
+    }
+
+    fn summary(&self) -> ResidencySummary {
+        let Ok(state) = self.inner.lock() else {
+            return ResidencySummary::default();
+        };
+        ResidencySummary {
+            sessions: state.sessions,
+            vram_bytes: state.vram.values().copied().sum(),
+            host_bytes: state.host_bytes,
+            disk_bytes: state.disk_bytes,
+        }
+    }
+}
+
+fn check_limits(
+    state: &LedgerState,
+    inventory: &DeviceInventory,
+    placement: &PlacementPlan,
+    residency: Residency,
+) -> Result<()> {
+    let gpu = placement
+        .devices
+        .iter()
+        .find(|device| device.class == DeviceClass::Gpu);
+    if residency.vram_bytes > 0 {
+        let Some(gpu) = gpu else {
+            return Err(EngineError::InsufficientVram {
+                required: format!("{} bytes", residency.vram_bytes),
+                available: "no GPU selected".into(),
+            });
+        };
+        let used = state.vram.get(&gpu.id).copied().unwrap_or(0);
+        let available = gpu.available_memory_bytes;
+        if available > 0 && used.saturating_add(residency.vram_bytes) > available {
+            return Err(EngineError::InsufficientVram {
+                required: format!("{} bytes", residency.vram_bytes),
+                available: format!("{} bytes", available.saturating_sub(used)),
+            });
+        }
+    }
+    if residency.host_bytes > 0
+        && let Some(cpu) = inventory
+            .devices()
+            .iter()
+            .find(|device| device.class == DeviceClass::Cpu)
+    {
+        let available = cpu.available_memory_bytes;
+        if available > 0 && state.host_bytes.saturating_add(residency.host_bytes) > available {
+            return Err(EngineError::InsufficientMemory {
+                required: format!("{} bytes", residency.host_bytes),
+                available: format!("{} bytes", available.saturating_sub(state.host_bytes)),
+            });
+        }
+    }
+    Ok(())
+}
+
 /// Owns registered engines and hands out leases.
 pub struct EngineRegistry {
     engines: Vec<Arc<dyn InferenceEngine>>,
     inventory: DeviceInventory,
     active: Arc<AtomicUsize>,
+    ledger: ResidencyLedger,
+    load_gate: Mutex<()>,
 }
 
 impl EngineRegistry {
@@ -31,6 +185,8 @@ impl EngineRegistry {
             engines: Vec::new(),
             inventory,
             active: Arc::new(AtomicUsize::new(0)),
+            ledger: ResidencyLedger::default(),
+            load_gate: Mutex::new(()),
         }
     }
 
@@ -46,6 +202,26 @@ impl EngineRegistry {
     #[must_use]
     pub fn active_sessions(&self) -> usize {
         self.active.load(Ordering::SeqCst)
+    }
+
+    /// Aggregate bytes currently reserved by loaded sessions.
+    #[must_use]
+    pub fn residency(&self) -> ResidencySummary {
+        self.ledger.summary()
+    }
+
+    fn budget(&self) -> DeviceBudget {
+        let (reserved_vram, reserved_host) = self.ledger.reserved();
+        let mut devices = self.inventory.devices().to_vec();
+        for device in &mut devices {
+            let used = match device.class {
+                DeviceClass::Cpu => reserved_host,
+                DeviceClass::Gpu => reserved_vram.get(&device.id).copied().unwrap_or(0),
+                DeviceClass::Npu => 0,
+            };
+            device.available_memory_bytes = device.available_memory_bytes.saturating_sub(used);
+        }
+        DeviceBudget { devices }
     }
 
     /// Resolve engine and placement without allocating or loading weights.
@@ -104,17 +280,33 @@ impl EngineRegistry {
     ) -> Result<SessionLease> {
         let (engine, placement) = self.resolve(&manifest)?;
         let lease_placement = placement.clone();
+        let estimated = estimate_residency(&manifest, base_dir, &lease_placement);
+        let _load_gate = self
+            .load_gate
+            .lock()
+            .map_err(|_| EngineError::Other("load gate poisoned".into()))?;
+        if let Some(estimate) = estimated
+            && !lease_placement.auto_offload
+            && lease_placement.offload_layers == 0
+        {
+            self.ledger
+                .check(&self.inventory, &lease_placement, estimate)?;
+        }
         let spec = EngineLoadSpec {
             manifest,
             base_dir: base_dir.to_path_buf(),
             manifest_path,
             placement,
-            budget: self.inventory.budget(),
+            budget: self.budget(),
             cancel,
         };
         let engine_name = engine.engine_name().to_owned();
         let manifest = spec.manifest.clone();
         let session = engine.load_session(spec)?;
+        let residency = session.residency().or(estimated).unwrap_or_default();
+        let reservation = self
+            .ledger
+            .reserve(&self.inventory, &lease_placement, residency)?;
 
         self.active.fetch_add(1, Ordering::SeqCst);
         Ok(SessionLease {
@@ -122,6 +314,8 @@ impl EngineRegistry {
             engine_name,
             manifest,
             placement: lease_placement,
+            residency: Some(residency),
+            _reservation: reservation,
             active: Arc::clone(&self.active),
         })
     }
@@ -213,32 +407,31 @@ impl EngineRegistry {
                     {
                         placement.auto_offload = true;
                     }
+                    let min_vram = if let Some(value) = manifest.min_vram.as_deref() {
+                        Some(uniinfer_core::parse_memory_size(value).ok_or_else(|| {
+                            EngineError::ManifestInvalid(format!("invalid min_vram: {value}"))
+                        })?)
+                    } else {
+                        None
+                    };
                     if placement.offload_layers == 0
                         && !placement.auto_offload
-                        && let Some(min_vram) = manifest.min_vram.as_deref()
-                    {
-                        let required =
-                            uniinfer_core::parse_memory_size(min_vram).ok_or_else(|| {
-                                EngineError::ManifestInvalid(format!(
-                                    "invalid min_vram: {min_vram}"
-                                ))
-                            })?;
-                        if let Some(gpu) = placement
+                        && let Some(required) = min_vram
+                        && let Some(gpu) = placement
                             .devices
                             .iter()
                             .find(|device| device.class == uniinfer_core::DeviceClass::Gpu)
-                            && gpu.available_memory_bytes > 0
-                            && required > gpu.available_memory_bytes
-                        {
-                            saw_device = true;
-                            tracing::debug!(
-                                engine = engine.engine_name(),
-                                required,
-                                available = gpu.available_memory_bytes,
-                                "min_vram does not fit free GPU memory"
-                            );
-                            continue;
-                        }
+                        && gpu.available_memory_bytes > 0
+                        && required > gpu.available_memory_bytes
+                    {
+                        saw_device = true;
+                        tracing::debug!(
+                            engine = engine.engine_name(),
+                            required,
+                            available = gpu.available_memory_bytes,
+                            "min_vram does not fit free GPU memory"
+                        );
+                        continue;
                     }
                     return Ok((Arc::clone(engine), placement));
                 }
@@ -289,12 +482,46 @@ impl EngineRegistry {
     }
 }
 
+/// Estimate a session footprint when the engine cannot report exact residency.
+fn estimate_residency(
+    manifest: &ModelManifest,
+    base_dir: &Path,
+    placement: &PlacementPlan,
+) -> Option<Residency> {
+    let bytes = manifest
+        .files
+        .iter()
+        .filter_map(|file| std::fs::metadata(base_dir.join(&file.path)).ok())
+        .map(|metadata| metadata.len())
+        .sum::<u64>();
+    if bytes == 0 {
+        return None;
+    }
+    let full_gpu = placement
+        .devices
+        .first()
+        .is_some_and(|device| device.class == DeviceClass::Gpu)
+        && placement.offload_layers == 0
+        && !placement.auto_offload;
+    Some(Residency {
+        vram_bytes: if full_gpu { bytes } else { 0 },
+        // Mmap-backed weights are accounted as disk, not resident host bytes.
+        host_bytes: 0,
+        disk_bytes: bytes,
+        offload_layers: placement.offload_layers,
+        total_layers: None,
+        estimated: true,
+    })
+}
+
 /// RAII session holder; releasing it updates the active-session gauge.
 pub struct SessionLease {
     session: Box<dyn EngineSession>,
     engine_name: String,
     manifest: ModelManifest,
     placement: PlacementPlan,
+    residency: Option<Residency>,
+    _reservation: Reservation,
     active: Arc<AtomicUsize>,
 }
 
@@ -317,6 +544,11 @@ impl SessionLease {
     #[must_use]
     pub fn placement(&self) -> &PlacementPlan {
         &self.placement
+    }
+
+    #[must_use]
+    pub fn residency(&self) -> Option<Residency> {
+        self.residency
     }
 }
 

@@ -75,6 +75,7 @@ async fn metrics(State(state): State<AppState>) -> Json<Value> {
             "image": state.image_slots.lock().map(|slots| slots.len()).unwrap_or(0),
         },
         "requests": state.router.metrics(),
+        "residency": state.runtime.residency(),
     }))
 }
 
@@ -97,6 +98,7 @@ fn model_json(slot: &dyn ModelView) -> Value {
         "engine": slot.engine_name(),
         "devices": slot.placement().devices.iter().map(|device| device.class).collect::<Vec<_>>(),
         "placement": slot.placement(),
+        "residency": slot.residency(),
     })
 }
 
@@ -106,6 +108,7 @@ fn placement_json(slot: &dyn ModelView) -> Value {
         "engine": slot.engine_name(),
         "placement": slot.placement(),
         "fallback_reason": slot.placement().fallback_reason,
+        "residency": slot.residency(),
     })
 }
 
