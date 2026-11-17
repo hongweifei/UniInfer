@@ -159,11 +159,13 @@
 
 .app-shell[data-view="transcribe"],
 .app-shell[data-view="images"],
+.app-shell[data-view="backends"],
 .app-shell[data-view="settings"] {
   grid-template-columns: minmax(0, 1fr);
 }
 .app-shell[data-view="transcribe"] .sidebar,
 .app-shell[data-view="images"] .sidebar,
+.app-shell[data-view="backends"] .sidebar,
 .app-shell[data-view="settings"] .sidebar { display: none; }
 
 .workspace { grid-row: 2; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
