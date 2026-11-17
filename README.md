@@ -123,7 +123,8 @@ flowchart TB
 - `placement.kv_cache = "ram"` 会把 llama.cpp 的 KV cache 留在主机内存。
 - `min_vram` 会在存在 GPU 空闲显存信息时参与路由；不满足则拒绝该引擎。
 - 每个 `SessionLease` 在加载后预留 VRAM/RAM，释放时归还；`/metrics` 和 `/v1/models` 输出 `residency`（VRAM、host、disk-backed、层数）。
-- ONNX pipeline 的 `[[pipeline.steps]]` 和 `image.diffusion` 组件可用 `device = "cpu" | "gpu" | "npu"` 做阶段级异构执行；单一 ONNX graph 仍受 ORT 会话级 EP 限制。
+- ONNX pipeline 的 `[[pipeline.steps]]` 和 `image.diffusion` 组件可用 `device = "cpu" | "gpu" | "npu"` 做阶段级异构执行。
+- 单图 ONNX 文本模型可用 `implementation = "onnx.layered"`：按 `layers.N` 节点名拆成多个 ORT session，`offload_layers` 指定前 N 层放 GPU（`"auto"` 按空闲显存估算），KV 在阶段间复用。
 - Candle、ONNX 的层切分仍待实现；没有引擎统计时账本用 manifest 文件大小做保守估算。
 - 加载因预算不足失败时，会按 LRU 驱逐已缓存模型并重试；`/metrics.model_evictions` 记录次数。
 

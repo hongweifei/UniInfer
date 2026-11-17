@@ -229,7 +229,7 @@ impl EngineRegistry {
             match self.inventory.plan(manifest, engine.supported_devices()) {
                 Ok(mut placement) => {
                     if (placement.offload_layers > 0 || placement.auto_offload)
-                        && !engine.supports_layer_offload()
+                        && !engine.supports_layer_offload_for(&manifest.implementation)
                     {
                         saw_device = true;
                         tracing::debug!(
@@ -250,7 +250,7 @@ impl EngineRegistry {
                     }
                     // Offload-capable engines use auto tiering when the manifest
                     // does not force a fixed layer count or CPU-only execution.
-                    if engine.supports_layer_offload()
+                    if engine.supports_layer_offload_for(&manifest.implementation)
                         && manifest.placement.offload_layers.is_none()
                         && placement
                             .devices

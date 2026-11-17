@@ -15,6 +15,8 @@ mod diffusion;
 mod genai;
 mod graph;
 mod io;
+mod layered;
+mod partition;
 mod pipeline;
 mod session;
 
@@ -146,7 +148,12 @@ impl InferenceEngine for OnnxEngine {
     }
 
     fn implementations(&self) -> &[&'static str] {
-        &["onnx.graph", "onnx.pipeline", "onnx.diffusion"]
+        &[
+            "onnx.graph",
+            "onnx.pipeline",
+            "onnx.diffusion",
+            "onnx.layered",
+        ]
     }
 
     fn supported_formats(&self) -> &[ModelFormat] {
@@ -169,6 +176,14 @@ impl InferenceEngine for OnnxEngine {
 
     fn supported_devices(&self) -> &[DeviceClass] {
         &DEVICES
+    }
+
+    fn supports_layer_offload(&self) -> bool {
+        true
+    }
+
+    fn supports_layer_offload_for(&self, implementation: &str) -> bool {
+        implementation == "onnx.layered"
     }
 
     fn load_session(&self, spec: EngineLoadSpec) -> Result<Box<dyn EngineSession>> {
@@ -207,6 +222,9 @@ impl InferenceEngine for OnnxEngine {
         }
         if spec.manifest.implementation == "onnx.diffusion" {
             return diffusion::load(&self.environment, &spec, class);
+        }
+        if spec.manifest.implementation == "onnx.layered" {
+            return layered::load(&self.environment, &spec, class);
         }
 
         let model_file = spec
@@ -257,6 +275,27 @@ impl InferenceEngine for OnnxEngine {
         }
         Ok(Box::new(PlainOnnxSession::new(graph)))
     }
+}
+
+pub(crate) fn build_session_from_memory(
+    environment: &Environment,
+    class: DeviceClass,
+    bytes: &[u8],
+) -> Result<Session> {
+    let builder = Session::builder(environment)
+        .map_err(|error| EngineError::LoadFailed(format!("session builder: {error}")))?;
+    let mut builder = if class == DeviceClass::Cpu {
+        builder
+            .with_no_environment_execution_providers()
+            .map_err(|error| {
+                EngineError::LoadFailed(format!("cpu-only session options: {error}"))
+            })?
+    } else {
+        builder
+    };
+    builder
+        .commit_from_memory(bytes)
+        .map_err(|error| EngineError::LoadFailed(format!("cannot load ONNX stage: {error}")))
 }
 
 pub(crate) fn build_session(

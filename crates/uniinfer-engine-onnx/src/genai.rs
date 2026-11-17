@@ -13,36 +13,36 @@ use crate::graph::Graph;
 
 #[derive(Debug, Deserialize)]
 pub(crate) struct GenaiConfig {
-    model: GenaiModel,
+    pub(crate) model: GenaiModel,
 }
 
 #[derive(Debug, Deserialize)]
 pub(crate) struct GenaiModel {
-    decoder: GenaiDecoder,
+    pub(crate) decoder: GenaiDecoder,
 }
 
 #[derive(Debug, Deserialize)]
 pub(crate) struct GenaiDecoder {
-    inputs: GenaiInputs,
-    outputs: GenaiOutputs,
-    num_hidden_layers: usize,
-    num_key_value_heads: usize,
-    head_size: usize,
+    pub(crate) inputs: GenaiInputs,
+    pub(crate) outputs: GenaiOutputs,
+    pub(crate) num_hidden_layers: usize,
+    pub(crate) num_key_value_heads: usize,
+    pub(crate) head_size: usize,
 }
 
 #[derive(Debug, Deserialize)]
 pub(crate) struct GenaiInputs {
-    input_ids: String,
-    attention_mask: String,
-    past_key_names: String,
-    past_value_names: String,
+    pub(crate) input_ids: String,
+    pub(crate) attention_mask: String,
+    pub(crate) past_key_names: String,
+    pub(crate) past_value_names: String,
 }
 
 #[derive(Debug, Deserialize)]
 pub(crate) struct GenaiOutputs {
-    logits: String,
-    present_key_names: String,
-    present_value_names: String,
+    pub(crate) logits: String,
+    pub(crate) present_key_names: String,
+    pub(crate) present_value_names: String,
 }
 
 #[derive(Debug, Clone)]

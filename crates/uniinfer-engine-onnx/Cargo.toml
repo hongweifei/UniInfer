@@ -19,6 +19,8 @@ half.workspace = true
 tokenizers.workspace = true
 rustfft.workspace = true
 image.workspace = true
+onnx-protobuf = "0.2.3"
+protobuf = "=3.4.0"
 
 [features]
 default = []

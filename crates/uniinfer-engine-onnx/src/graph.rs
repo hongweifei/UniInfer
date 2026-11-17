@@ -49,6 +49,16 @@ impl Graph {
         Self::from_session(session, label)
     }
 
+    pub(crate) fn from_bytes(
+        environment: &Environment,
+        class: DeviceClass,
+        bytes: &[u8],
+        label: &str,
+    ) -> Result<Self> {
+        let session = crate::build_session_from_memory(environment, class, bytes)?;
+        Self::from_session(session, label)
+    }
+
     pub(crate) fn from_session(session: Session, label: &str) -> Result<Self> {
         let inputs = convert_specs(session.inputs(), &format!("{label} input"))?;
         let outputs = convert_specs(session.outputs(), &format!("{label} output"))?;

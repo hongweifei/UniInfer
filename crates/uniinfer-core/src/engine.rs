@@ -163,6 +163,11 @@ pub trait InferenceEngine: Send + Sync {
         false
     }
 
+    /// Whether a specific implementation supports layer offload.
+    fn supports_layer_offload_for(&self, _implementation: &str) -> bool {
+        self.supports_layer_offload()
+    }
+
     /// Whether the engine can keep KV cache in host memory.
     fn supports_kv_cache_offload(&self) -> bool {
         false
