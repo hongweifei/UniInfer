@@ -5,6 +5,7 @@ use uniinfer_core::{
     PipelineConfig, PipelineStep, PlacementConfig, Quantization, Runtime,
 };
 
+use crate::diffusion;
 use crate::error::{InspectError, Result};
 use crate::files::{
     choose_primary, collect_files, extension, file_name, looks_like_whisper, model_id, relative,
@@ -87,6 +88,9 @@ pub fn inspect(root: &Path, options: &InspectOptions) -> Result<Inspection> {
         None
     });
     let format = detected_format.ok_or_else(|| InspectError::Unsupported(root.to_path_buf()))?;
+    let diffusion = (format == ModelFormat::Onnx)
+        .then(|| diffusion::detect(root, &onnx))
+        .flatten();
     let gguf_meta = if format == ModelFormat::Gguf {
         gguf.first().map(|path| read_gguf(path)).transpose()?
     } else {
@@ -130,12 +134,21 @@ pub fn inspect(root: &Path, options: &InspectOptions) -> Result<Inspection> {
                 },
                 &mut warnings,
             )?;
-            (
-                layout.modalities,
-                layout.text,
-                layout.audio,
-                layout.selected,
-            )
+            if let Some(diffusion) = &diffusion {
+                (
+                    vec![Modality::Text],
+                    layout.text,
+                    None,
+                    diffusion.selected.clone(),
+                )
+            } else {
+                (
+                    layout.modalities,
+                    layout.text,
+                    layout.audio,
+                    layout.selected,
+                )
+            }
         }
         ModelFormat::Gguf => {
             let primary = choose_primary(&gguf, "model.gguf");
@@ -189,10 +202,14 @@ pub fn inspect(root: &Path, options: &InspectOptions) -> Result<Inspection> {
         }
     };
 
-    let context_len = gguf_meta
-        .as_ref()
-        .and_then(|meta| meta.context_len)
-        .unwrap_or_else(|| context_len(config.as_ref(), &modalities));
+    let context_len = if diffusion.is_some() {
+        77
+    } else {
+        gguf_meta
+            .as_ref()
+            .and_then(|meta| meta.context_len)
+            .unwrap_or_else(|| context_len(config.as_ref(), &modalities))
+    };
     let id = options.id.clone().unwrap_or_else(|| model_id(root));
     let files = selected
         .into_iter()
@@ -204,6 +221,7 @@ pub fn inspect(root: &Path, options: &InspectOptions) -> Result<Inspection> {
         })
         .collect::<Result<Vec<_>>>()?;
     let (runtime, implementation) = match format {
+        ModelFormat::Onnx if diffusion.is_some() => ("onnx", "onnx.diffusion"),
         ModelFormat::Onnx if audio.is_some() => ("onnx", "onnx.pipeline"),
         ModelFormat::Onnx => ("onnx", "onnx.graph"),
         ModelFormat::Gguf | ModelFormat::Safetensors => ("candle", "candle.text"),
@@ -220,7 +238,18 @@ pub fn inspect(root: &Path, options: &InspectOptions) -> Result<Inspection> {
             mode: Mode::Batch,
         });
     }
-    if modalities.contains(&Modality::Text) {
+    if let Some(diffusion) = &diffusion {
+        capabilities.push(Capability {
+            name: "text_to_image".into(),
+            operation: Operation::Generate,
+            required_inputs: vec![Modality::Text],
+            optional_inputs: Vec::new(),
+            outputs: vec![Modality::Image],
+            mode: Mode::Batch,
+        });
+        let _ = diffusion;
+    }
+    if modalities.contains(&Modality::Text) && diffusion.is_none() {
         capabilities.push(Capability {
             name: "text_chat".into(),
             operation: Operation::Generate,
@@ -277,7 +306,7 @@ pub fn inspect(root: &Path, options: &InspectOptions) -> Result<Inspection> {
         audio,
         vision: None,
         pipeline,
-        image: None,
+        image: diffusion.map(|layout| layout.image),
     };
     manifest
         .validate()

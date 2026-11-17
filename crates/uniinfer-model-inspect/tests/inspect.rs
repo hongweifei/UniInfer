@@ -94,3 +94,52 @@ fn reads_gguf_metadata() {
     assert_eq!(text.vocab_size, 3);
     assert_eq!(text.family.as_deref(), Some("qwen3"));
 }
+
+#[test]
+fn detects_multicomponent_diffusion_layout() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    for path in [
+        "text_encoder/model.onnx",
+        "unet/model.onnx",
+        "vae_decoder/model.onnx",
+    ] {
+        let path = dir.path().join(path);
+        fs::create_dir_all(path.parent().unwrap()).expect("component dir");
+        fs::write(path, b"onnx").expect("component");
+    }
+    fs::create_dir_all(dir.path().join("scheduler")).expect("scheduler dir");
+    fs::write(dir.path().join("scheduler/scheduler_config.json"), b"{}").expect("scheduler");
+    fs::write(
+        dir.path().join("text_encoder/config.json"),
+        r#"{"architectures":["CLIPTextModel"],"vocab_size":100}"#,
+    )
+    .expect("config");
+    fs::write(dir.path().join("tokenizer.json"), b"{}").expect("tokenizer");
+
+    let inspection = inspect(dir.path(), &InspectOptions::default()).expect("inspect");
+    assert_eq!(inspection.manifest.implementation, "onnx.diffusion");
+    assert_eq!(inspection.manifest.capabilities[0].name, "text_to_image");
+    assert_eq!(
+        inspection.manifest.capabilities[0].outputs,
+        vec![Modality::Image]
+    );
+    let image = inspection.manifest.image.expect("image config");
+    let diffusion = image.diffusion.expect("diffusion config");
+    assert_eq!(diffusion.text_encoder.path, "text_encoder/model.onnx");
+    assert_eq!(diffusion.unet.path, "unet/model.onnx");
+    assert_eq!(diffusion.vae_decoder.path, "vae_decoder/model.onnx");
+}
+
+#[test]
+#[ignore = "requires local amd/sd-turbo-amdnpu-onnx download"]
+fn inspects_amd_diffusion_download() {
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../models/amd-sd-turbo-amdnpu-onnx");
+    if !dir.is_dir() {
+        return;
+    }
+    let inspection = inspect(&dir, &InspectOptions::default()).expect("inspect");
+    assert_eq!(inspection.manifest.implementation, "onnx.diffusion");
+    assert_eq!(inspection.manifest.capabilities[0].name, "text_to_image");
+    assert!(inspection.manifest.image.is_some());
+}

@@ -3,6 +3,7 @@
 //! This is intentionally engine-neutral: it reads files and metadata, then
 //! emits a `ModelManifest` draft. GUI/CLI can show the draft before writing.
 
+mod diffusion;
 mod error;
 mod files;
 mod gguf;
