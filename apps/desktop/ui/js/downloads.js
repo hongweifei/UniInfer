@@ -12,20 +12,8 @@ export function subscribeDownloads(listener) {
   return () => listeners.delete(listener);
 }
 
-export function downloadTasks() {
-  return tasks;
-}
-
-export function activeDownloads() {
-  return tasks.filter((task) => !terminalStatuses.has(task.status));
-}
-
 export function findDownload(repo, source) {
   return tasks.find((task) => task.repo === repo && task.source === source) ?? null;
-}
-
-export function taskById(id) {
-  return tasks.find((task) => task.id === id) ?? null;
 }
 
 export function isTerminalStatus(status) {
@@ -78,11 +66,6 @@ export async function clearFinishedDownloads() {
   tasks = (await invoke('clear_downloads')) ?? [];
   notify();
   return tasks;
-}
-
-export function disposeDownloads() {
-  if (unlisten) unlisten();
-  unlisten = null;
 }
 
 function upsertTask(task) {

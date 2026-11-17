@@ -47,6 +47,7 @@ export function loadState() {
       merged.mediaTab = merged.view;
       merged.view = 'media';
     }
+    if (merged.subview === 'downloads') merged.subview = 'installed';
     return merged;
   } catch {
     return base;

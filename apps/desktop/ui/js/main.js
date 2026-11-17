@@ -5,7 +5,8 @@ import { loadState, saveState, newConversation, deleteConversation, recentConver
 import { isAudioModel, isChatModel, isImageModel, modelTitle, errorMessage } from './format.js';
 import { toast, themeIcon, confirmDialog } from './components/ui.js';
 import { deleteMedia } from './media-store.js';
-import { initDownloads, subscribeDownloads, activeDownloads } from './downloads.js';
+import { initDownloads, subscribeDownloads } from './downloads.js';
+import { createDownloadPopover } from './components/download-popover.js';
 import { mountChat } from './views/chat.js';
 import { mountModels } from './views/models.js';
 import { mountMedia, mediaTools } from './views/media.js';
@@ -35,6 +36,7 @@ let models = [];
 let devices = [];
 let graphics = [];
 let currentCleanup = null;
+let downloadPopover = null;
 
 function applyTheme() {
   if (state.theme === 'system') delete document.documentElement.dataset.theme;
@@ -94,6 +96,10 @@ function chooseModelForView(view) {
   if (candidates.some((model) => model.id === state.selectedModel)) return;
   state.selectedModel = candidates[0].id;
   persist();
+}
+
+function ctxOpenDownloads() {
+  downloadPopover?.open();
 }
 
 function sidebar() {
@@ -179,14 +185,12 @@ function sidebar() {
     }
     nav.append(h('button', {
       class: 'nav-item', type: 'button',
-      onClick: () => { state.subview = 'downloads'; navigate('models'); },
-    }, h('span', { html: icon('download', 16) }), h('span', { text: '下载任务' }),
-      activeDownloads().length ? h('span', { class: 'filter-count', text: String(activeDownloads().length) }) : null));
+      onClick: () => ctxOpenDownloads(),
+    }, h('span', { html: icon('download', 16) }), h('span', { text: '下载任务' })));
     context.push(nav);
   } else if (state.view === 'models') {
     const links = [
       ['online', '在线模型', 'cloud'],
-      ['downloads', '下载', 'download'],
       ['installed', '已安装', 'models'],
       ['import', '导入', 'folder'],
       ['devices', '设备', 'cpu'],
@@ -194,12 +198,10 @@ function sidebar() {
     const nav = h('div', { class: 'sidebar-section' });
     nav.append(h('div', { class: 'sidebar-heading' }, h('span', { text: '模型分类' })));
     for (const [id, label, iconName] of links) {
-      const count = id === 'downloads' ? activeDownloads().length : 0;
       nav.append(h('button', {
         class: `nav-item ${state.subview === id ? 'active' : ''}`, type: 'button',
         onClick: () => setSubview(id),
-      }, h('span', { html: icon(iconName, 16) }), h('span', { text: label }),
-        count ? h('span', { class: 'filter-count', text: String(count) }) : null));
+      }, h('span', { html: icon(iconName, 16) }), h('span', { text: label })));
     }
     context.push(nav);
   }
@@ -229,6 +231,7 @@ function titlebar() {
     attrs: { 'data-theme-toggle': '' }, onClick: () => cycleTheme(),
     html: icon(themeIcon(state.theme), 16),
   }));
+  actions.append(h('div', { class: 'download-slot' }));
   const controls = h('div', { class: 'window-controls' },
     h('button', { class: 'window-btn', type: 'button', title: '最小化', onClick: () => windowCommand('window_minimize'), html: icon('minus', 14) }),
     h('button', { class: 'window-btn', type: 'button', title: '最大化', onClick: () => windowCommand('window_toggle_maximize'), html: icon('square', 12) }),
@@ -239,11 +242,11 @@ function titlebar() {
     attrs: { 'data-tauri-drag-region': '' },
     onMousedown: (event) => {
       if (event.button !== 0) return;
-      if (event.target.closest('button, select, input, a, .window-controls')) return;
+      if (event.target.closest('button, select, input, a, .window-controls, .download-popover')) return;
       windowCommand('window_start_dragging');
     },
     onDblclick: (event) => {
-      if (event.target.closest('button, select, input, a, .window-controls')) return;
+      if (event.target.closest('button, select, input, a, .window-controls, .download-popover')) return;
       windowCommand('window_toggle_maximize');
     },
   },
@@ -270,6 +273,7 @@ function renderShell() {
   app.dataset.view = state.view;
   const main = h('main', { class: 'main', id: 'view' });
   app.replaceChildren(titlebar(), sidebar(), h('div', { class: 'workspace' }, main));
+  if (downloadPopover) app.querySelector('.download-slot')?.append(downloadPopover.element);
 }
 
 function renderView() {
@@ -300,6 +304,7 @@ function createContext() {
     subview: () => state.subview,
     setSubview,
     refreshModels,
+    openDownloads: () => downloadPopover?.open(),
     persist,
     setTheme,
     restart: () => window.__TAURI__?.core?.invoke('restart_app'),
@@ -357,7 +362,7 @@ function navigate(view) {
   if (!views[view]) return;
   state.view = view;
   if (view === 'media') state.mediaTab = mediaTab();
-  if (view === 'models' && !['online', 'downloads', 'installed', 'devices', 'import'].includes(state.subview)) state.subview = 'online';
+  if (view === 'models' && !['online', 'installed', 'devices', 'import'].includes(state.subview)) state.subview = 'online';
   persist();
   chooseModelForView(view);
   renderShell();
@@ -373,13 +378,7 @@ function setSubview(subview) {
 
 function watchDownloads() {
   const previous = new Map();
-  let activeCount = -1;
   subscribeDownloads((tasks) => {
-    const active = tasks.filter((task) => !['done', 'failed', 'cancelled'].includes(task.status));
-    if (active.length !== activeCount) {
-      activeCount = active.length;
-      renderSidebarOnly();
-    }
     for (const task of tasks) {
       const before = previous.get(task.id);
       previous.set(task.id, task.status);
@@ -445,6 +444,7 @@ async function boot() {
     return;
   }
   api = new ApiClient(desktop.info);
+  downloadPopover = createDownloadPopover();
   await initDownloads();
   watchDownloads();
   try {

@@ -47,10 +47,7 @@ export function mountBackends(root, ctx) {
   }, h('span', { html: icon('refresh', 14) }));
   const downloadButton = h('button', {
     class: 'btn sm ghost', type: 'button',
-    onClick: () => {
-      ctx.state.subview = 'downloads';
-      ctx.navigate('models');
-    },
+    onClick: () => ctx.openDownloads(),
   }, h('span', { html: icon('download', 14) }), h('span', { text: '下载任务' }));
 
 

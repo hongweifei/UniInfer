@@ -5,7 +5,6 @@ import { modelCategories, modelTags, MODEL_CATEGORIES, unsupportedUseReason } fr
 import { filterModels, modelTagOptions } from '../model-filters.js';
 import { toast, emptyState, chip, setBusy, openModal, confirmDialog } from '../components/ui.js';
 import { mountCatalog } from '../components/catalog.js';
-import { mountDownloads } from './downloads.js';
 import { backendChoices, preferredVariant, variantOptions, variantSupport } from '../model-backend.js';
 
 export function mountModels(root, ctx) {
@@ -498,7 +497,6 @@ export function mountModels(root, ctx) {
   const subview = ctx.subview?.() ?? 'online';
   const headings = {
     online: ['在线模型', '搜索 ModelScope 或 Hugging Face，下载后自动生成默认运行配置。'],
-    downloads: ['下载任务', '查看队列、进度、速度；支持取消、重试和清理。'],
     installed: ['已安装模型', '管理本地模型、加载状态与运行配置。'],
     devices: ['设备', '查看运行时探测到的 CPU、GPU、NPU 与放置结果。'],
     import: ['导入模型', '从已有目录动态探测并生成运行配置；适合离线模型。'],
@@ -506,8 +504,6 @@ export function mountModels(root, ctx) {
   const [heading, description] = headings[subview] ?? headings.online;
   const onlineHost = h('div', { attrs: { id: 'online-models' }, hidden: subview !== 'online' });
   const onlineCleanup = mountCatalog(onlineHost, ctx);
-  const downloadHost = h('div', { attrs: { id: 'download-models' }, hidden: subview !== 'downloads' });
-  const downloadCleanup = mountDownloads(downloadHost, ctx);
 
   root.append(h('div', { class: 'models-view' }, h('div', { class: 'page' },
     h('div', { class: 'page-head' },
@@ -515,7 +511,6 @@ export function mountModels(root, ctx) {
       h('p', { text: description }),
     ),
     onlineHost,
-    downloadHost,
     h('div', { class: 'card', attrs: { id: 'installed-models' }, hidden: subview !== 'installed' },
       h('div', { class: 'section-title' }, h('h2', { text: '已安装模型' }), h('span', { class: 'spacer' }), count,
         h('button', { class: 'btn sm ghost', type: 'button', onClick: () => void ctx.refreshModels(), html: `${icon('refresh', 14)} 刷新` }),
@@ -542,6 +537,5 @@ export function mountModels(root, ctx) {
   return () => {
     document.removeEventListener('uniinfer:model', onModel);
     onlineCleanup?.();
-    downloadCleanup?.();
   };
 }
