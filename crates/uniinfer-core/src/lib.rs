@@ -15,7 +15,8 @@ pub use device::{
 };
 pub use engine::{
     EngineCapabilities, EngineLoadSpec, EngineSession, ImageGenerationRequest, InferenceEngine,
-    NativeFinish, NativeTextDecoder, NativeTextOutput, NativeTextRequest,
+    NativeFinish, NativeImageGenerator, NativeImageOutput, NativeImageRequest, NativeTextDecoder,
+    NativeTextOutput, NativeTextRequest,
 };
 pub use error::{EngineError, Result};
 pub use image_batch::{ImageBatch, MAX_IMAGES};

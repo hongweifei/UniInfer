@@ -6,7 +6,7 @@ UniInfer 把内置引擎与下载后端统一管理：每个内置引擎（ONNX 
 
 桌面端「后端」页面支持：
 
-- 自动从 `llama.cpp` 官方 release 发现 Windows CPU、Vulkan、CUDA 引擎。
+- 自动从 `llama.cpp` 和 `stable-diffusion.cpp` 官方 release 发现 Windows CPU、Vulkan、CUDA 引擎。
 - 按官方项目、版本和加速变体下载并校验，安装到 `<配置文件目录>/backends/<id>/<version>/`。
 - 激活、卸载引擎；激活后重启应用生效。
 - 选择内置引擎组作为回退。
@@ -56,6 +56,7 @@ sha256 = "..."
 ## 官方引擎
 
 - `llama.cpp`：下载官方 release 的 `llama-server` 压缩包，设置 `launcher = "llama-server"`。UniInfer 启动官方 server，通过 `/completion` 流式协议适配。
+- `stable-diffusion.cpp`：下载官方 `sd-server` 压缩包，设置 `launcher = "stable-diffusion-server"`。UniInfer 启动官方 server，通过 A1111兼容的 `/sdapi/v1/txt2img` 生成图像；模型 manifest 需要提供完整 checkpoint 文件。
 - `ONNX Runtime`：官方 DLL 仍需 `ort/load-dynamic` 适配，当前由内置 ONNX Runtime 提供。
 - `whisper.cpp`：官方 server/CLI 需要 ASR 适配器，当前由内置 whisper.cpp 提供。
 - `Candle`：上游不提供官方二进制，只能作为内置 Rust 引擎。

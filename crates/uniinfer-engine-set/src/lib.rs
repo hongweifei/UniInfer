@@ -16,6 +16,7 @@ use uniinfer_engine_llama::LlamaMtmdEngine;
 use uniinfer_engine_llama_server::LlamaServerEngine;
 use uniinfer_engine_onnx::OnnxEngine;
 use uniinfer_engine_process::ProcessEngine;
+use uniinfer_engine_sd_server::StableDiffusionServerEngine;
 #[cfg(feature = "whisper")]
 use uniinfer_engine_whisper::WhisperEngine;
 use uniinfer_registry::EngineRegistry;
@@ -75,6 +76,12 @@ pub fn build_with_backend(isolate_models: bool, backend: BackendRuntime) -> Resu
             }
             BackendLauncher::LlamaServer => {
                 registry.register(Arc::new(LlamaServerEngine::new(
+                    backend.worker,
+                    backend.devices,
+                )));
+            }
+            BackendLauncher::StableDiffusionServer => {
+                registry.register(Arc::new(StableDiffusionServerEngine::new(
                     backend.worker,
                     backend.devices,
                 )));

@@ -38,6 +38,7 @@ uniinfer-backend-store.workspace = true
 uniinfer-engine-onnx.workspace = true
 uniinfer-engine-process.workspace = true
 uniinfer-engine-llama-server.workspace = true
+uniinfer-engine-sd-server.workspace = true
 uniinfer-engine-candle.workspace = true
 uniinfer-engine-llama = { workspace = true, optional = true }
 uniinfer-engine-whisper = { workspace = true, optional = true }

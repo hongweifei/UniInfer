@@ -282,11 +282,20 @@ impl EngineRegistry {
             if let Some(missing) = manifest
                 .input_modalities()
                 .iter()
-                .chain(manifest.output_modalities().iter())
                 .find(|modality| !modalities.contains(modality))
             {
                 saw_modality = true;
-                tracing::debug!(?missing, "engine does not support modality");
+                tracing::debug!(?missing, "engine does not support input modality");
+                continue;
+            }
+            let outputs = engine.supported_output_modalities(manifest.format);
+            if let Some(missing) = manifest
+                .output_modalities()
+                .iter()
+                .find(|modality| !outputs.contains(modality))
+            {
+                saw_modality = true;
+                tracing::debug!(?missing, "engine does not support output modality");
                 continue;
             }
 

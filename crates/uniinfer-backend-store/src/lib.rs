@@ -165,6 +165,8 @@ pub enum BackendLauncher {
     Worker,
     /// Official llama.cpp `llama-server`.
     LlamaServer,
+    /// Official stable-diffusion.cpp `sd-server`.
+    StableDiffusionServer,
 }
 
 /// The subset needed by the engine registry to launch a sidecar.

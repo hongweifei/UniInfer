@@ -8,7 +8,8 @@ use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use uniinfer_backends::{ByteTokenizer, HuggingFaceTokenizer, ModelEvent, ModelOutput, Tokenizer};
 use uniinfer_core::{
     DiffusionConfig, EngineError, EngineSession, ImageConfig, ImageGenerationRequest,
-    ModelManifest, PlacementPlan, Residency, Result, Tensor, TensorData, TensorDtype,
+    ModelManifest, NativeImageRequest, PlacementPlan, Residency, Result, Tensor, TensorData,
+    TensorDtype,
 };
 use uniinfer_registry::SessionLease;
 
@@ -16,7 +17,7 @@ use crate::{ImageGenerationSpec, ModelExecutor, ModelRequest, ModelView};
 
 pub struct ImageSlot {
     lease: Arc<SessionLease>,
-    tokenizer: Arc<dyn Tokenizer>,
+    tokenizer: Option<Arc<dyn Tokenizer>>,
     image: ImageConfig,
     diffusion: Option<DiffusionConfig>,
     permit: Arc<Semaphore>,
@@ -43,32 +44,38 @@ impl ModelView for ImageSlot {
 impl ImageSlot {
     pub(crate) fn new(lease: Arc<SessionLease>, base_dir: &std::path::Path) -> Result<Self> {
         let manifest = lease.manifest();
-        let text = manifest
-            .text
-            .as_ref()
-            .ok_or_else(|| EngineError::ManifestInvalid("image model requires [text]".into()))?;
-        let tokenizer: Arc<dyn Tokenizer> = match manifest.tokenizer.as_deref().unwrap_or_default()
-        {
-            "bytes" => Arc::new(ByteTokenizer::new(text.vocab_size)?),
-            "hf" => {
-                let file = text.tokenizer_file.as_ref().ok_or_else(|| {
-                    EngineError::ManifestInvalid("text.tokenizer_file is required".into())
-                })?;
-                Arc::new(HuggingFaceTokenizer::from_file(base_dir.join(file))?)
-            }
-            other => {
-                return Err(EngineError::UnsupportedEngine(format!(
-                    "tokenizer {other:?}"
-                )));
-            }
-        };
         let image = manifest
             .image
             .clone()
             .ok_or_else(|| EngineError::ManifestInvalid("image config required".into()))?;
         let diffusion = image.diffusion.clone();
         let session = lease.session();
-        if diffusion.is_none() {
+        let native_image = session.native_image_generator().is_some();
+        let tokenizer = if native_image {
+            None
+        } else {
+            let text = manifest.text.as_ref().ok_or_else(|| {
+                EngineError::ManifestInvalid("image model requires [text]".into())
+            })?;
+            Some(match manifest.tokenizer.as_deref().unwrap_or_default() {
+                "bytes" => Arc::new(ByteTokenizer::new(text.vocab_size)?) as Arc<dyn Tokenizer>,
+                "hf" => {
+                    let file = text.tokenizer_file.as_ref().ok_or_else(|| {
+                        EngineError::ManifestInvalid(
+                            "text.tokenizer_file is required for hf".into(),
+                        )
+                    })?;
+                    Arc::new(HuggingFaceTokenizer::from_file(base_dir.join(file))?)
+                        as Arc<dyn Tokenizer>
+                }
+                other => {
+                    return Err(EngineError::UnsupportedEngine(format!(
+                        "tokenizer {other:?}"
+                    )));
+                }
+            })
+        };
+        if !native_image && diffusion.is_none() {
             if !session
                 .inputs()
                 .iter()
@@ -127,6 +134,31 @@ impl ImageSlot {
         cancel: &uniinfer_core::CancelToken,
         on_event: &mut dyn FnMut(ModelEvent),
     ) -> Result<ModelOutput> {
+        if let Some(generator) = self.session().native_image_generator() {
+            let mut request = NativeImageRequest {
+                prompt: if spec.prompt.is_empty() {
+                    " "
+                } else {
+                    &spec.prompt
+                },
+                negative_prompt: spec.negative_prompt.as_deref(),
+                width: spec.width.max(64),
+                height: spec.height.max(64),
+                steps: spec.steps,
+                guidance: spec.guidance,
+                seed: spec.seed,
+                deadline: None,
+                cancel,
+                progress: &mut |step, total| on_event(ModelEvent::Progress { step, total }),
+            };
+            let image = generator.generate_image(&mut request)?;
+            return Ok(ModelOutput::Image(uniinfer_backends::ImageOutput {
+                mime: image.mime,
+                bytes: image.bytes,
+                width: image.width,
+                height: image.height,
+            }));
+        }
         if let Some(diffusion) = &self.diffusion {
             let prompt = if spec.prompt.is_empty() {
                 " "
@@ -161,6 +193,8 @@ impl ImageSlot {
         };
         let ids = self
             .tokenizer
+            .as_ref()
+            .ok_or_else(|| EngineError::Other("image tokenizer unavailable".into()))?
             .encode(prompt)?
             .into_iter()
             .map(i64::from)
@@ -180,6 +214,8 @@ impl ImageSlot {
     fn padded(&self, prompt: &str, max_length: usize, pad: u32) -> Result<Vec<i64>> {
         let mut ids = self
             .tokenizer
+            .as_ref()
+            .ok_or_else(|| EngineError::Other("image tokenizer unavailable".into()))?
             .encode(prompt)?
             .into_iter()
             .map(i64::from)

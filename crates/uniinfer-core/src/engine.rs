@@ -74,6 +74,33 @@ pub struct NativeTextOutput {
     pub finish: NativeFinish,
 }
 
+/// Image request for engines that own prompting and decoding.
+pub struct NativeImageRequest<'a> {
+    pub prompt: &'a str,
+    pub negative_prompt: Option<&'a str>,
+    pub width: u32,
+    pub height: u32,
+    pub steps: usize,
+    pub guidance: f32,
+    pub seed: Option<u64>,
+    pub deadline: Option<Instant>,
+    pub cancel: &'a CancelToken,
+    pub progress: &'a mut dyn FnMut(usize, usize),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NativeImageOutput {
+    pub mime: String,
+    pub bytes: Vec<u8>,
+    pub width: u32,
+    pub height: u32,
+}
+
+/// Optional capability for engines that own image prompting and decoding.
+pub trait NativeImageGenerator: Send + Sync {
+    fn generate_image(&self, request: &mut NativeImageRequest<'_>) -> Result<NativeImageOutput>;
+}
+
 /// Optional capability for engines that own tokenization and decoding.
 pub trait NativeTextDecoder: Send + Sync {
     fn generate_text(
@@ -131,6 +158,11 @@ pub trait EngineSession: Send + Sync {
         None
     }
 
+    /// Optional image server capability.
+    fn native_image_generator(&self) -> Option<&dyn NativeImageGenerator> {
+        None
+    }
+
     /// Idempotent cancellation. Pending and subsequent runs return `Cancelled`.
     fn cancel(&self);
 }
@@ -153,6 +185,12 @@ pub trait InferenceEngine: Send + Sync {
     fn supported_formats(&self) -> &[ModelFormat];
 
     fn supported_modalities(&self, format: ModelFormat) -> &[Modality];
+
+    /// Format modalities this engine can produce. Engines that support both
+    /// input and output modalities default to the input capability matrix.
+    fn supported_output_modalities(&self, format: ModelFormat) -> &[Modality] {
+        self.supported_modalities(format)
+    }
 
     fn supported_quantizations(&self, format: ModelFormat) -> &[Quantization];
 

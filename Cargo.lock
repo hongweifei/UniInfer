@@ -3698,6 +3698,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "uniinfer-engine-sd-server"
+version = "0.0.0"
+dependencies = [
+ "base64 0.22.1",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "tracing",
+ "uniinfer-core",
+]
+
+[[package]]
 name = "uniinfer-engine-set"
 version = "0.0.0"
 dependencies = [
@@ -3709,6 +3721,7 @@ dependencies = [
  "uniinfer-engine-llama-server",
  "uniinfer-engine-onnx",
  "uniinfer-engine-process",
+ "uniinfer-engine-sd-server",
  "uniinfer-engine-whisper",
  "uniinfer-registry",
 ]
