@@ -907,7 +907,10 @@ async fn request_timeout_returns_gateway_timeout() {
     assert_eq!(body["code"], "timeout");
 }
 
-#[tokio::test]
+// Paused time makes the 1ms budget expire while the real load is still running.
+// Without it the assertion races the loader: the tiny fixture can load in under
+// a millisecond on fast machines, which correctly returns 200.
+#[tokio::test(start_paused = true)]
 async fn model_load_timeout_returns_gateway_timeout() {
     let manifest =
         Path::new(env!("CARGO_MANIFEST_DIR")).join("../../models/tiny-onnx/manifest.toml");
