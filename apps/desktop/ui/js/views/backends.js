@@ -27,7 +27,7 @@ const ENGINE_SUMMARIES = {
 const TAG_LABELS = { ...FORMAT_LABELS, ...MODALITY_LABELS };
 
 export function mountBackends(root, ctx) {
-  let state = { backends: [], active: null, running: null, directory: '' };
+  let state = { backends: [], directory: '' };
   let catalog = null;
   let loading = true;
   let busy = false;
@@ -35,21 +35,14 @@ export function mountBackends(root, ctx) {
   const builtinHost = h('div', { class: 'backend-grid' });
   const sidecarHost = h('div', { class: 'backend-grid' });
   const availableHost = h('div', { class: 'backend-grid' });
-  const runningName = h('strong', { text: '读取中…' });
-  const runningVersion = h('span', { class: 'faint', text: '' });
   const builtinCount = h('span', { class: 'filter-count', text: '' });
   const sidecarCount = h('span', { class: 'filter-count', text: '' });
   const availableCount = h('span', { class: 'filter-count', text: '' });
   const errorBanner = h('div', { class: 'notice error', hidden: true });
-  const restartBanner = h('div', { class: 'backend-restart', hidden: true });
   const refreshButton = h('button', {
     class: 'btn btn-icon ghost sm', type: 'button', title: '重新读取后端列表',
     onClick: () => void refresh(),
   }, h('span', { html: icon('refresh', 14) }));
-  const useBuiltinButton = h('button', {
-    class: 'btn sm', type: 'button', hidden: true,
-    onClick: () => void useBuiltin(),
-  }, h('span', { html: icon('cpu', 14) }), h('span', { text: '切回内置引擎' }));
 
 
   function showError(message) {
@@ -60,19 +53,6 @@ export function mountBackends(root, ctx) {
     }
     errorBanner.hidden = false;
     errorBanner.textContent = message;
-  }
-
-  function showRestart() {
-    const restart = h('button', {
-      class: 'btn sm primary', type: 'button',
-      onClick: () => ctx.restart(),
-    }, h('span', { html: icon('refresh', 14) }), h('span', { text: '重启应用' }));
-    restartBanner.replaceChildren(
-      h('span', { html: icon('alert', 15) }),
-      h('span', { text: '后端选择已保存，重启后生效。' }),
-      restart,
-    );
-    restartBanner.hidden = false;
   }
 
   async function refresh({ reloadCatalog = true } = {}) {
@@ -103,10 +83,9 @@ export function mountBackends(root, ctx) {
     busy = true;
     render();
     try {
-      const result = await invoke('install_backend', { package: packageInfo });
+      await invoke('install_backend', { package: packageInfo });
       toast(`已安装 ${packageInfo.name} ${packageInfo.version}`, 'success');
       await refresh({ reloadCatalog: false });
-      if (result?.restart_required) showRestart();
     } catch (error) {
       toast(errorMessage(error), 'error');
     } finally {
@@ -115,32 +94,10 @@ export function mountBackends(root, ctx) {
     }
   }
 
-  async function activate(backend) {
-    try {
-      await ctx.api.activateBackend(backend.id, backend.version);
-      await refresh({ reloadCatalog: false });
-      toast(`已选择 ${backend.name}，重启后生效`, 'success');
-      showRestart();
-    } catch (error) {
-      toast(errorMessage(error), 'error');
-    }
-  }
-
-  async function useBuiltin() {
-    try {
-      await ctx.api.activateBackend('builtin');
-      await refresh({ reloadCatalog: false });
-      toast('已切回内置引擎组，重启后生效', 'success');
-      showRestart();
-    } catch (error) {
-      toast(errorMessage(error), 'error');
-    }
-  }
-
   async function remove(backend) {
     const ok = await confirmDialog({
       title: '删除后端？',
-      message: `${backend.name} ${backend.version} 会从磁盘移除；如果它正在使用，请先重启应用。`,
+      message: `${backend.name} ${backend.version} 会从磁盘移除；正在加载它的模型需要卸载或重启后释放。`,
       confirmLabel: '删除', danger: true,
     });
     if (!ok) return;
@@ -148,24 +105,9 @@ export function mountBackends(root, ctx) {
       await ctx.api.removeBackend(backend.id);
       await refresh({ reloadCatalog: false });
       toast('后端已删除', 'success');
-      showRestart();
     } catch (error) {
       toast(errorMessage(error), 'error');
     }
-  }
-
-  function isRunning(backend) {
-    return state.running?.id === backend.id && state.running?.version === backend.version;
-  }
-
-  function isSelected(backend) {
-    return state.active?.id === backend.id && state.active?.version === backend.version;
-  }
-
-  function sidecarStatus(backend) {
-    if (isRunning(backend)) return chip('运行中', 'success');
-    if (isSelected(backend)) return chip('待重启', 'warn');
-    return chip('已安装', 'muted');
   }
 
   function capabilityRows(engine) {
@@ -244,15 +186,14 @@ export function mountBackends(root, ctx) {
   }
 
   function builtinCard(backend) {
-    const running = state.running?.kind === 'builtin';
-    return h('div', { class: `card backend-card builtin ${running ? 'running' : ''}` },
+    return h('div', { class: 'card backend-card builtin' },
       h('div', { class: 'backend-card-head' },
         h('div', { class: 'backend-icon builtin' }, h('span', { html: icon('cpu', 20) })),
         h('div', { class: 'backend-card-title' },
           h('strong', { text: backend.name }),
           h('span', { class: 'backend-card-id', text: backendSubtitle(backend) }),
         ),
-        running ? chip('运行中', 'success') : chip('可用', 'muted'),
+        chip('可用', 'muted'),
       ),
       h('p', { class: 'backend-description', text: backendSummary(backend) }),
       engineList(backend),
@@ -260,33 +201,33 @@ export function mountBackends(root, ctx) {
     );
   }
 
-  function sidecarCard(backend) {
-    const selected = isSelected(backend);
-    const running = isRunning(backend);
-    const actionLabel = running ? '正在运行' : selected ? '等待重启' : '使用此后端';
-    return h('div', { class: `card backend-card ${selected ? 'selected' : ''}` },
+  function sidecarCard(packages) {
+    const first = packages[0];
+    const totalSize = packages.reduce((sum, item) => sum + (item.size_bytes ?? 0), 0);
+    return h('div', { class: 'card backend-card' },
       h('div', { class: 'backend-card-head' },
         h('div', { class: 'backend-icon' }, h('span', { html: icon('box', 20) })),
         h('div', { class: 'backend-card-title' },
-          h('strong', { text: backend.name }),
-          h('span', { class: 'backend-card-id', text: backendSubtitle(backend) }),
+          h('strong', { text: first.name }),
+          h('span', { class: 'backend-card-id', text: `${packages.length} 个变体 · ${formatBytes(totalSize)}` }),
         ),
-        sidecarStatus(backend),
+        chip('已安装', 'muted'),
       ),
-      h('p', { class: 'backend-description', text: backendSummary(backend) }),
-      engineList(backend),
-      backendMeta(backend, 'installed'),
-      h('div', { class: 'backend-card-actions' },
-        h('button', {
-          class: `btn sm ${selected ? 'ghost' : 'primary'}`, type: 'button',
-          disabled: selected || busy, onClick: () => void activate(backend),
-        }, selected ? h('span', { html: icon('check', 13) }) : null, h('span', { text: actionLabel })),
-        h('span', { class: 'spacer' }),
-        h('button', {
-          class: 'btn btn-icon ghost sm danger', type: 'button', title: '删除后端',
-          onClick: () => void remove(backend),
-        }, h('span', { html: icon('trash', 14) })),
+      h('p', { class: 'backend-description', text: backendSummary(first) }),
+      engineList(first),
+      h('div', { class: 'backend-engine-list' },
+        ...packages.map((backend) => h('div', { class: 'backend-engine' },
+          h('div', { class: 'backend-engine-main' },
+            h('strong', { text: backend.engines?.[0]?.variant || backend.version }),
+            h('span', { class: 'faint', text: `版本 ${backend.version}` }),
+          ),
+          h('button', {
+            class: 'btn btn-icon ghost sm danger', type: 'button', title: '删除这个变体',
+            onClick: () => void remove(backend),
+          }, h('span', { html: icon('trash', 14) })),
+        )),
       ),
+      backendMeta(first, 'installed'),
     );
   }
 
@@ -329,21 +270,21 @@ export function mountBackends(root, ctx) {
     const all = state.backends ?? [];
     const builtins = all.filter((backend) => backend.kind === 'builtin');
     const sidecars = all.filter((backend) => backend.kind !== 'builtin');
-    const runningBuiltin = state.running?.kind === 'builtin';
-    runningName.textContent = runningBuiltin ? '内置引擎组' : state.running?.id ?? '未运行';
-    runningVersion.textContent = runningBuiltin
-      ? `${builtins.length} 个引擎`
-      : state.running?.version ? `版本 ${state.running.version}` : '';
+    const sidecarGroups = new Map();
+    for (const backend of sidecars) {
+      const group = sidecarGroups.get(backend.name) ?? [];
+      group.push(backend);
+      sidecarGroups.set(backend.name, group);
+    }
     builtinCount.textContent = `${builtins.length} 个`;
-    sidecarCount.textContent = `${sidecars.length} 个`;
-    useBuiltinButton.hidden = state.active?.id === 'builtin';
+    sidecarCount.textContent = `${sidecarGroups.size} 个`;
 
     if (loading) {
       builtinHost.append(h('div', { class: 'backend-loading', text: '正在读取内置引擎…' }));
       sidecarHost.append(h('div', { class: 'backend-loading', text: '正在读取外置后端…' }));
     } else {
       for (const backend of builtins) builtinHost.append(builtinCard(backend));
-      for (const backend of sidecars) sidecarHost.append(sidecarCard(backend));
+      for (const group of sidecarGroups.values()) sidecarHost.append(sidecarCard(group));
       if (!builtins.length) {
         builtinHost.append(emptyBackend('没有内置引擎', '当前构建未启用任何内置推理引擎。', 'cpu'));
       }
@@ -381,21 +322,12 @@ export function mountBackends(root, ctx) {
         h('div', { class: 'backend-hero-text' },
           h('span', { class: 'backend-eyebrow', text: 'RUNTIME' }),
           h('h2', { text: '推理后端' }),
-          h('p', { text: '内置引擎与外置 Sidecar 统一管理。选择一个后端，重启后切换推理运行时。' }),
+          h('p', { text: '后端安装后即可被模型选用；模型各自配置后端与设备变体。' }),
         ),
         h('div', { class: 'backend-hero-side' },
-          h('div', { class: 'backend-running' },
-            h('div', { class: 'backend-running-label' },
-              h('span', { class: 'status-dot' }),
-              h('span', { text: '当前运行' }),
-            ),
-            runningName,
-            runningVersion,
-          ),
           refreshButton,
         ),
       ),
-      restartBanner,
       errorBanner,
       h('section', { class: 'backend-section' },
         h('div', { class: 'backend-section-head' },
@@ -404,7 +336,6 @@ export function mountBackends(root, ctx) {
             h('p', { text: '随主程序编译分发，始终作为可用能力。' }),
           ),
           h('span', { class: 'spacer' }),
-          useBuiltinButton,
           builtinCount,
         ),
         builtinHost,
@@ -413,7 +344,7 @@ export function mountBackends(root, ctx) {
         h('div', { class: 'backend-section-head' },
           h('div', {},
             h('h2', { text: '外置后端' }),
-            h('p', { text: '独立下载的官方推理引擎，激活后用于对应模型。' }),
+            h('p', { text: '独立下载的官方推理引擎；是否使用由模型的运行配置决定。' }),
           ),
           h('span', { class: 'spacer' }),
           sidecarCount,

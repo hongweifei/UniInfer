@@ -20,7 +20,6 @@ pub(crate) struct InstallResult {
     id: String,
     version: String,
     path: PathBuf,
-    restart_required: bool,
 }
 
 #[tauri::command]
@@ -79,7 +78,6 @@ fn finalize_package(
         id: package.id.clone(),
         version: package.version.clone(),
         path: destination,
-        restart_required: true,
     })
 }
 

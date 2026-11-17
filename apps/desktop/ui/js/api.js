@@ -48,12 +48,6 @@ export class ApiClient {
   config() { return this.request('/v1/config'); }
   saveConfig(config) { return this.request('/v1/config', { method: 'PUT', body: config }); }
   backends() { return this.request('/v1/backends'); }
-  activateBackend(id, version) {
-    return this.request(`/v1/backends/${encodeURIComponent(id)}/activate`, {
-      method: 'POST', body: { version: version ?? null },
-    });
-  }
-  deactivateBackend() { return this.request('/v1/backends/deactivate', { method: 'POST' }); }
   removeBackend(id) {
     return this.request(`/v1/backends/${encodeURIComponent(id)}`, { method: 'DELETE' });
   }

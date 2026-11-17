@@ -6,6 +6,7 @@ import { filterModels, modelTagOptions } from '../model-filters.js';
 import { toast, emptyState, chip, setBusy, openModal, confirmDialog } from '../components/ui.js';
 import { mountCatalog } from '../components/catalog.js';
 import { mountDownloads } from './downloads.js';
+import { backendChoices, preferredVariant, variantOptions } from '../model-backend.js';
 
 export function mountModels(root, ctx) {
   let filter = 'all';
@@ -181,6 +182,7 @@ export function mountModels(root, ctx) {
       h('div', { class: 'model-kv' },
         h('strong', { text: '能力' }), h('span', { text: capabilitySummary(model) }),
         h('strong', { text: '上下文' }), h('span', { text: model.context_len ? `${model.context_len} tokens` : '—' }),
+        h('strong', { text: '后端' }), h('span', { text: model.backend?.id ? `${model.backend.id}${model.backend.variant && model.backend.variant !== 'auto' ? ` · ${model.backend.variant}` : ''}` : '自动' }),
         h('strong', { text: '设备' }), h('span', { text: (model.devices ?? []).join(' / ') || '待放置' }),
       ),
       routeError ? h('div', { class: 'notice warn', text: friendlyRouteError(routeError.message) }) : null,
@@ -283,6 +285,62 @@ export function mountModels(root, ctx) {
       toast(errorMessage(error), 'error');
       return;
     }
+    let installedBackends = [];
+    try {
+      installedBackends = (await ctx.api.backends()).backends ?? [];
+    } catch (error) {
+      toast(`读取后端列表失败：${errorMessage(error)}`, 'error');
+    }
+    const configuredBackend = manifest.backend ?? {};
+    let backendId = configuredBackend.id || 'builtin';
+    const choices = backendChoices(installedBackends);
+    const builtinChoice = choices.find((choice) => choice.id === 'builtin');
+    if (builtinChoice) {
+      const engine = model.engine ? ` · ${model.engine}` : '';
+      builtinChoice.label = `内置引擎${engine}`;
+    }
+    if (!choices.some((choice) => choice.id === backendId)) {
+      choices.push({
+        id: backendId,
+        label: `${backendId}（未安装）`,
+        variants: configuredBackend.variant && configuredBackend.variant !== 'auto'
+          ? [configuredBackend.variant]
+          : [],
+      });
+    }
+    const backendSelect = h('select', { class: 'select', attrs: { 'aria-label': '推理后端' } });
+    for (const choice of choices) {
+      backendSelect.append(h('option', { value: choice.id, text: choice.label }));
+    }
+    backendSelect.value = backendId;
+    const variantSelect = h('select', { class: 'select', attrs: { 'aria-label': '后端变体' } });
+    const variantHint = h('div', { class: 'notice faint' });
+    const recommended = preferredVariant(ctx.devices());
+    function rebuildVariants() {
+      const choice = choices.find((item) => item.id === backendSelect.value);
+      clear(variantSelect);
+      variantSelect.replaceChildren();
+      if (!choice || choice.id === 'builtin') {
+        variantSelect.append(h('option', { value: 'auto', text: '内置' }));
+        variantSelect.disabled = true;
+        variantHint.textContent = '内置引擎由模型运行时自动选择。';
+        return;
+      }
+      variantSelect.disabled = false;
+      variantSelect.append(h('option', { value: 'auto', text: `自动（${recommended}）` }));
+      for (const variant of variantOptions(choice, configuredBackend.variant)) {
+        variantSelect.append(h('option', { value: variant, text: variant }));
+      }
+      const wanted = configuredBackend.variant || 'auto';
+      variantSelect.value = [...variantSelect.options].some((option) => option.value === wanted)
+        ? wanted
+        : 'auto';
+      variantHint.textContent = choice.variants.length
+        ? `自动会按当前设备优先选择 ${recommended}；可选变体来自已安装包。`
+        : '该后端尚未安装，保存后模型在该后端安装前不可用。';
+    }
+    backendSelect.addEventListener('change', rebuildVariants);
+    rebuildVariants();
     const placement = manifest.placement ?? {};
     const policy = h('select', { class: 'select' },
       ['auto', 'pinned', 'strict'].map((value) => h('option', { value, text: { auto: '自动', pinned: '固定', strict: '严格' }[value] })),
@@ -339,6 +397,9 @@ export function mountModels(root, ctx) {
     const body = h('div', { style: 'display:grid;gap:12px' },
       h('div', { class: 'notice', text: '这里是模型的默认运行配置，保存后即时应用；不同大小、不同格式的模型应分别配置。' }),
       h('div', { class: 'notice faint', text: recommendation }),
+      h('div', { class: 'field' }, h('label', { text: '推理后端' }), backendSelect),
+      h('div', { class: 'field' }, h('label', { text: '后端变体' }), variantSelect),
+      variantHint,
       h('div', { class: 'field' }, h('label', { text: '设备放置策略' }), policy),
       h('div', { class: 'field' }, h('label', { text: '优先设备' }), prefRow),
       h('label', { class: 'row', style: 'gap:7px;font-size:13px' }, fallback, h('span', { text: '允许回退到 CPU' })),
@@ -372,6 +433,9 @@ export function mountModels(root, ctx) {
             if (offload.value) nextPlacement.offload_layers = offload.value;
             else delete nextPlacement.offload_layers;
             manifest.placement = nextPlacement;
+            manifest.backend = backendSelect.value === 'builtin'
+              ? { id: 'builtin' }
+              : { id: backendSelect.value, variant: variantSelect.value || 'auto' };
             manifest.context_len = Math.max(1, Number(context.value) || 2048);
             try {
               const result = await ctx.api.request(`/v1/models/${encodeURIComponent(model.id)}/manifest`, {
