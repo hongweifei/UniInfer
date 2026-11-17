@@ -1,5 +1,18 @@
 const BUILTIN = { id: 'builtin', label: '内置引擎', variants: [] };
 
+const normalize = (value) => String(value ?? '').toLowerCase();
+const tokens = (value) => normalize(value).split(/[^a-z0-9]+/).filter(Boolean);
+
+function backendMatches(variant, backend) {
+  const variantTokens = tokens(variant);
+  const backendTokens = tokens(backend);
+  return variantTokens.some((variantToken) =>
+    backendTokens.some((backendToken) =>
+      backendToken.includes(variantToken) || variantToken.includes(backendToken)
+    )
+  );
+}
+
 export function backendChoices(backends = []) {
   const groups = new Map();
   for (const backend of backends) {
@@ -19,36 +32,41 @@ export function backendChoices(backends = []) {
   return [BUILTIN, ...groups.values()];
 }
 
-export function preferredVariant(devices = []) {
-  const gpu = devices.find((device) => device.class === 'gpu');
-  if (!gpu) return 'CPU';
-  const backend = String(gpu.backend ?? '').toLowerCase();
-  if (backend.includes('cuda') || backend.includes('nvidia')) return 'CUDA';
-  if (backend.includes('rocm') || backend.includes('amd')) return 'ROCm';
-  return 'Vulkan';
+export function preferredVariant(devices = [], variants = []) {
+  const list = variants.filter(Boolean);
+  const supported = list.filter((variant) => variantSupport(variant, devices).supported);
+  const acceleratorBackends = devices
+    .filter((device) => device.class !== 'cpu')
+    .map((device) => String(device.backend ?? ''))
+    .filter(Boolean);
+  for (const backend of acceleratorBackends) {
+    const match = supported.find((variant) =>
+      !tokens(variant).includes('cpu') && backendMatches(variant, backend)
+    );
+    if (match) return match;
+  }
+  return supported.find((variant) => tokens(variant).includes('cpu')) ?? supported[0] ?? 'auto';
 }
 
 export function variantSupport(variant, devices = []) {
-  const value = String(variant ?? '').toLowerCase();
-  const gpus = devices.filter((device) => device.class === 'gpu');
-  const backends = gpus.map((device) => String(device.backend ?? '').toLowerCase());
-  if (value === 'cpu') return { supported: true, reason: 'CPU 始终可用' };
-  if (value === 'cuda') {
-    return backends.some((backend) => backend.includes('cuda') || backend.includes('nvidia'))
-      ? { supported: true, reason: '检测到 NVIDIA CUDA 设备' }
-      : { supported: false, reason: '需要 NVIDIA CUDA 设备' };
+  const variantTokens = tokens(variant);
+  if (!variantTokens.length) return { supported: false, reason: '变体名称未知' };
+  const cpu = devices.find((device) => device.class === 'cpu');
+  if (variantTokens.includes('cpu')) {
+    return cpu
+      ? { supported: true, reason: '检测到 CPU' }
+      : { supported: false, reason: '需要 CPU' };
   }
-  if (value === 'rocm') {
-    return backends.some((backend) => backend.includes('rocm') || backend.includes('amd'))
-      ? { supported: true, reason: '检测到 AMD ROCm 设备' }
-      : { supported: false, reason: '需要 AMD ROCm 设备' };
+  const accelerators = devices.filter((device) => device.class !== 'cpu');
+  if (!accelerators.length) return { supported: false, reason: '需要加速设备' };
+  const matches = accelerators.filter((device) => backendMatches(variant, device.backend));
+  if (matches.length) {
+    return {
+      supported: true,
+      reason: `检测到 ${matches.map((device) => device.backend).filter(Boolean).join(' / ')} 设备`,
+    };
   }
-  if (value === 'vulkan') {
-    return gpus.length
-      ? { supported: true, reason: '检测到 GPU，可使用 Vulkan' }
-      : { supported: false, reason: '需要 GPU' };
-  }
-  return { supported: false, reason: '当前设备无法识别这个变体' };
+  return { supported: false, reason: `未检测到与 ${variant} 匹配的设备后端` };
 }
 
 export function variantOptions(choice, configured) {

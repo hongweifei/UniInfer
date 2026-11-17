@@ -1,47 +1,52 @@
-//! Official GitHub release discovery for llama.cpp and stable-diffusion.cpp.
+use uniinfer_backend_store::{BackendCatalog, validate_manifest};
 
-use std::time::Duration;
+mod github;
+mod manifests;
+mod variants;
 
-use uniinfer_backend_store::{
-    BackendCatalog, BackendEngine, BackendFile, BackendLauncher, BackendManifest, validate_manifest,
-};
-
-const GITHUB_MIRROR: &str = "https://gh-proxy.com/";
+pub(super) const GITHUB_MIRROR: &str = "https://gh-proxy.com/";
 
 #[derive(serde::Deserialize)]
-struct GithubRelease {
-    tag_name: String,
-    html_url: String,
-    assets: Vec<GithubAsset>,
+pub(super) struct GithubRelease {
+    pub(super) tag_name: String,
+    pub(super) html_url: String,
+    pub(super) assets: Vec<GithubAsset>,
 }
 
 #[derive(Clone, serde::Deserialize)]
-struct GithubAsset {
-    name: String,
-    browser_download_url: String,
-    size: u64,
+pub(super) struct GithubAsset {
+    pub(super) name: String,
+    pub(super) browser_download_url: String,
+    pub(super) size: u64,
     #[serde(default)]
-    digest: Option<String>,
+    pub(super) digest: Option<String>,
 }
 
 pub(super) async fn fetch() -> Result<BackendCatalog, String> {
     let client = reqwest::Client::new();
     let mut catalog = BackendCatalog::default();
     let mut errors = Vec::new();
-    match github_releases(&client, "ggml-org/llama.cpp").await {
+    match github::github_releases(&client, "ggml-org/llama.cpp").await {
         Ok((releases, mirrored)) => {
-            if let Some(release) = releases.into_iter().find(has_llama_windows_assets) {
-                catalog.backends.extend(llama_catalog(&release, mirrored));
+            if let Some(release) = releases
+                .into_iter()
+                .find(variants::has_llama_windows_assets)
+            {
+                catalog
+                    .backends
+                    .extend(manifests::llama_catalog(&release, mirrored));
             } else {
                 errors.push("llama.cpp: 最近的 release 没有 Windows 构建".into());
             }
         }
         Err(error) => errors.push(format!("llama.cpp: {error}")),
     }
-    match github_releases(&client, "leejet/stable-diffusion.cpp").await {
+    match github::github_releases(&client, "leejet/stable-diffusion.cpp").await {
         Ok((releases, mirrored)) => {
-            if let Some(release) = releases.into_iter().find(has_sd_windows_assets) {
-                catalog.backends.extend(sd_catalog(&release, mirrored));
+            if let Some(release) = releases.into_iter().find(variants::has_sd_windows_assets) {
+                catalog
+                    .backends
+                    .extend(manifests::sd_catalog(&release, mirrored));
             } else {
                 errors.push("stable-diffusion.cpp: 最近的 release 没有 Windows 构建".into());
             }
@@ -61,282 +66,11 @@ pub(super) async fn fetch() -> Result<BackendCatalog, String> {
     Ok(catalog)
 }
 
-async fn github_releases(
-    client: &reqwest::Client,
-    repo: &str,
-) -> Result<(Vec<GithubRelease>, bool), String> {
-    let direct = format!("https://api.github.com/repos/{repo}/releases?per_page=20");
-    let api_error = match fetch_releases(client, &direct).await {
-        Ok(releases) => return Ok((releases, false)),
-        Err(error) => format!("直连：{error}"),
-    };
-    let mirrored = format!("{GITHUB_MIRROR}{direct}");
-    let api_error = match fetch_releases(client, &mirrored).await {
-        Ok(releases) => return Ok((releases, true)),
-        Err(error) => format!("{api_error}；镜像：{error}"),
-    };
-    github_atom_releases(client, repo)
-        .await
-        .map_err(|atom_error| {
-            format!(
-                "无法访问 GitHub（{api_error}；Atom：{atom_error}）。请检查网络或代理，也可以稍后重试。"
-            )
-        })
-}
-
-fn has_llama_windows_assets(release: &GithubRelease) -> bool {
-    find_windows_asset(&release.assets, "llama", "CPU").is_some()
-}
-
-fn has_sd_windows_assets(release: &GithubRelease) -> bool {
-    find_windows_asset(&release.assets, "sd-", "CPU").is_some()
-}
-
-async fn fetch_releases(client: &reqwest::Client, url: &str) -> Result<Vec<GithubRelease>, String> {
-    let response = client
-        .get(url)
-        .timeout(Duration::from_secs(90))
-        .header(reqwest::header::USER_AGENT, "UniInfer")
-        .send()
-        .await
-        .map_err(|error| format!("{error}"))?;
-    if !response.status().is_success() {
-        return Err(format!("HTTP {}", response.status()));
-    }
-    response
-        .json()
-        .await
-        .map_err(|error| format!("解析响应失败：{error}"))
-}
-
-async fn github_atom_releases(
-    client: &reqwest::Client,
-    repo: &str,
-) -> Result<(Vec<GithubRelease>, bool), String> {
-    let direct = format!("https://github.com/{repo}/releases.atom");
-    let (body, mirrored) = match fetch_text(client, &direct).await {
-        Ok(body) => (body, false),
-        Err(direct_error) => {
-            let mirrored = format!("{GITHUB_MIRROR}{direct}");
-            let body = fetch_text(client, &mirrored)
-                .await
-                .map_err(|mirror_error| format!("直连：{direct_error}；镜像：{mirror_error}"))?;
-            (body, true)
-        }
-    };
-    let releases = parse_atom_releases(&body, repo);
-    if releases.is_empty() {
-        return Err("Atom feed 没有可解析的 release".into());
-    }
-    Ok((releases, mirrored))
-}
-
-async fn fetch_text(client: &reqwest::Client, url: &str) -> Result<String, String> {
-    let response = client
-        .get(url)
-        .timeout(Duration::from_secs(90))
-        .header(reqwest::header::USER_AGENT, "UniInfer")
-        .send()
-        .await
-        .map_err(|error| error.to_string())?;
-    if !response.status().is_success() {
-        return Err(format!("HTTP {}", response.status()));
-    }
-    response.text().await.map_err(|error| error.to_string())
-}
-
-fn parse_atom_releases(body: &str, repo: &str) -> Vec<GithubRelease> {
-    let mut releases = Vec::new();
-    for entry in body.split("<entry>").skip(1) {
-        let Some(end) = entry.find("</entry>") else {
-            continue;
-        };
-        let entry = &entry[..end];
-        let Some(tag) = between(entry, "<title>", "</title>") else {
-            continue;
-        };
-        let tag = tag.trim();
-        if tag.is_empty() {
-            continue;
-        }
-        let prefix = format!("https://github.com/{repo}/releases/download/{tag}/");
-        let mut assets = Vec::new();
-        let mut seen = std::collections::HashSet::new();
-        let mut rest = entry;
-        while let Some(index) = rest.find(&prefix) {
-            let candidate = &rest[index..];
-            let end = candidate
-                .find(|character: char| {
-                    character.is_whitespace() || matches!(character, '"' | '<' | '>' | '&')
-                })
-                .unwrap_or(candidate.len());
-            let url = &candidate[..end];
-            let name = url.rsplit('/').next().unwrap_or_default();
-            if name.ends_with(".zip") && seen.insert(name.to_owned()) {
-                assets.push(GithubAsset {
-                    name: name.to_owned(),
-                    browser_download_url: url.to_owned(),
-                    size: 0,
-                    digest: None,
-                });
-            }
-            rest = &candidate[end..];
-        }
-        if !assets.is_empty() {
-            releases.push(GithubRelease {
-                tag_name: tag.to_owned(),
-                html_url: format!("https://github.com/{repo}/releases/tag/{tag}"),
-                assets,
-            });
-        }
-    }
-    releases
-}
-
-fn between<'a>(value: &'a str, start: &str, end: &str) -> Option<&'a str> {
-    let from = value.find(start)? + start.len();
-    let to = value[from..].find(end)? + from;
-    Some(&value[from..to])
-}
-
-fn asset_url(url: &str, mirrored: bool) -> String {
-    if mirrored {
-        format!("{GITHUB_MIRROR}{url}")
-    } else {
-        url.to_owned()
-    }
-}
-
-fn asset_file(asset: &GithubAsset, mirrored: bool) -> BackendFile {
-    BackendFile {
-        path: asset.name.clone(),
-        url: asset_url(&asset.browser_download_url, mirrored),
-        sha256: asset
-            .digest
-            .as_deref()
-            .and_then(|digest| digest.strip_prefix("sha256:"))
-            .map(str::to_owned),
-        size: asset.size,
-    }
-}
-
-fn llama_catalog(release: &GithubRelease, mirrored: bool) -> Vec<BackendManifest> {
-    let mut backends = Vec::new();
-    for (variant, label, devices) in [
-        ("Vulkan", "Vulkan", vec![uniinfer_core::DeviceClass::Gpu]),
-        ("CUDA", "CUDA", vec![uniinfer_core::DeviceClass::Gpu]),
-        ("ROCm", "ROCm", vec![uniinfer_core::DeviceClass::Gpu]),
-        ("CPU", "CPU", vec![uniinfer_core::DeviceClass::Cpu]),
-    ] {
-        let Some(asset) = find_windows_asset(&release.assets, "llama", variant) else {
-            continue;
-        };
-        let id = format!("llama-cpp-{}", variant.to_ascii_lowercase());
-        let mut files = vec![asset_file(asset, mirrored)];
-        if variant == "CUDA"
-            && let Some(cudart) = find_windows_asset(&release.assets, "cudart", "cuda")
-        {
-            files.push(asset_file(cudart, mirrored));
-        }
-        backends.push(BackendManifest {
-            id: id.clone(),
-            name: "llama.cpp".into(),
-            version: release.tag_name.clone(),
-            description: format!("官方 llama.cpp Windows {label} 构建"),
-            homepage: Some(release.html_url.clone()),
-            license: Some("MIT".into()),
-            platform: "windows-x86_64".into(),
-            worker: "llama-server.exe".into(),
-            launcher: BackendLauncher::LlamaServer,
-            devices: devices.clone(),
-            engines: vec![BackendEngine {
-                id: id.clone(),
-                name: "llama.cpp".into(),
-                runtime: "llama".into(),
-                description: format!("官方 llama.cpp {label} 构建"),
-                vendor: "llama.cpp".into(),
-                variant: label.into(),
-                category: "language".into(),
-                homepage: Some(release.html_url.clone()),
-                implementations: vec!["llama.text".into()],
-                formats: vec!["gguf".into()],
-                modalities: vec!["text".into()],
-                devices,
-            }],
-            files,
-        });
-    }
-    backends
-}
-
-fn sd_catalog(release: &GithubRelease, mirrored: bool) -> Vec<BackendManifest> {
-    let mut backends = Vec::new();
-    for (variant, label, devices) in [
-        ("Vulkan", "Vulkan", vec![uniinfer_core::DeviceClass::Gpu]),
-        ("CUDA", "CUDA", vec![uniinfer_core::DeviceClass::Gpu]),
-        ("ROCm", "ROCm", vec![uniinfer_core::DeviceClass::Gpu]),
-        ("CPU", "CPU", vec![uniinfer_core::DeviceClass::Cpu]),
-    ] {
-        let Some(asset) = find_windows_asset(&release.assets, "sd-", variant) else {
-            continue;
-        };
-        let id = format!("stable-diffusion-{}", variant.to_ascii_lowercase());
-        let mut files = vec![asset_file(asset, mirrored)];
-        if variant == "CUDA"
-            && let Some(cudart) = find_windows_asset(&release.assets, "cudart", "cuda")
-        {
-            files.push(asset_file(cudart, mirrored));
-        }
-        backends.push(BackendManifest {
-            id: id.clone(),
-            name: "stable-diffusion.cpp".into(),
-            version: release.tag_name.clone(),
-            description: format!("官方 stable-diffusion.cpp Windows {label} 构建"),
-            homepage: Some(release.html_url.clone()),
-            license: Some("MIT".into()),
-            platform: "windows-x86_64".into(),
-            worker: "sd-server.exe".into(),
-            launcher: BackendLauncher::StableDiffusionServer,
-            devices: devices.clone(),
-            engines: vec![BackendEngine {
-                id: id.clone(),
-                name: "stable-diffusion.cpp".into(),
-                runtime: "stable-diffusion.cpp".into(),
-                description: format!("官方 stable-diffusion.cpp {label} 构建"),
-                vendor: "stable-diffusion.cpp".into(),
-                variant: label.into(),
-                category: "image".into(),
-                homepage: Some(release.html_url.clone()),
-                implementations: vec!["sd.txt2img".into()],
-                formats: vec!["safetensors".into(), "gguf".into()],
-                modalities: vec!["text".into(), "image".into()],
-                devices,
-            }],
-            files,
-        });
-    }
-    backends
-}
-
-fn find_windows_asset<'a>(
-    assets: &'a [GithubAsset],
-    prefix: &str,
-    variant: &str,
-) -> Option<&'a GithubAsset> {
-    let variant = variant.to_ascii_lowercase();
-    assets.iter().find(|asset| {
-        let name = asset.name.to_ascii_lowercase();
-        name.starts_with(prefix)
-            && name.ends_with(".zip")
-            && name.contains("bin-win")
-            && name.contains(&variant)
-            && (prefix == "cudart" || !name.contains("cudart"))
-            && !name.contains("arm64")
-    })
-}
-
 #[cfg(test)]
 mod tests {
+    use super::github::{parse_atom_releases, parse_expanded_assets};
+    use super::manifests::{llama_catalog, sd_catalog};
+    use super::variants::{cudart_asset, windows_variants};
     use super::*;
 
     fn asset(name: &str) -> GithubAsset {
@@ -349,31 +83,72 @@ mod tests {
     }
 
     #[test]
-    fn selects_official_windows_variants() {
+    fn discovers_every_x64_variant_without_an_allowlist() {
         let assets = vec![
             asset("llama-b1-bin-win-vulkan-x64.zip"),
             asset("llama-b1-bin-win-cuda-12.4-x64.zip"),
+            asset("llama-b1-bin-win-cuda-13.5-x64.zip"),
             asset("llama-b1-bin-win-rocm-10.0-x64.zip"),
+            asset("llama-b1-bin-win-sycl-x64.zip"),
+            asset("llama-b1-bin-win-openvino-2026.4.1-x64.zip"),
             asset("cudart-llama-bin-win-cu12.4-x64.zip"),
             asset("llama-b1-bin-win-cpu-x64.zip"),
-            asset("llama-b1-bin-win-arm64.zip"),
+            asset("llama-b1-bin-win-vulkan-arm64.zip"),
+            asset("llama-b1-xcframework.zip"),
+        ];
+        let variants = windows_variants(&assets, "llama-");
+        let labels = variants
+            .iter()
+            .map(|variant| variant.label.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            labels,
+            vec![
+                "Vulkan",
+                "CUDA 12.4",
+                "CUDA 13.5",
+                "ROCm 10.0",
+                "SYCL",
+                "OpenVINO 2026.4.1",
+                "CPU"
+            ]
+        );
+        assert_eq!(variants[6].devices, vec![uniinfer_core::DeviceClass::Cpu]);
+        assert_eq!(variants[0].devices, vec![uniinfer_core::DeviceClass::Gpu]);
+    }
+
+    #[test]
+    fn pairs_cudart_with_each_cuda_version() {
+        let assets = vec![
+            asset("cudart-llama-bin-win-cu12.4-x64.zip"),
+            asset("cudart-llama-bin-win-cu13.5-x64.zip"),
         ];
         assert_eq!(
-            find_windows_asset(&assets, "llama", "Vulkan").map(|asset| asset.name.as_str()),
-            Some("llama-b1-bin-win-vulkan-x64.zip")
+            cudart_asset(&assets, "cuda-12.4").map(|asset| asset.name.as_str()),
+            Some("cudart-llama-bin-win-cu12.4-x64.zip")
         );
         assert_eq!(
-            find_windows_asset(&assets, "llama", "CUDA").map(|asset| asset.name.as_str()),
-            Some("llama-b1-bin-win-cuda-12.4-x64.zip")
+            cudart_asset(&assets, "cuda-13.5").map(|asset| asset.name.as_str()),
+            Some("cudart-llama-bin-win-cu13.5-x64.zip")
         );
+    }
+
+    #[test]
+    fn parses_assets_from_expanded_release_html() {
+        let html = r#"<ul><li class="Box-row">
+            <a href="/leejet/stable-diffusion.cpp/releases/download/tag/sd-tag-bin-win-cuda12-x64.zip">sd</a>
+            <span>sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa</span>
+        </li><li class="Box-row">
+            <a href="/leejet/stable-diffusion.cpp/releases/download/tag/sd-tag-bin-win-vulkan-x64.zip">sd</a>
+        </li></ul>"#;
+        let assets = parse_expanded_assets(html, "leejet/stable-diffusion.cpp", "tag");
+        assert_eq!(assets.len(), 2);
+        assert_eq!(assets[0].name, "sd-tag-bin-win-cuda12-x64.zip");
         assert_eq!(
-            find_windows_asset(&assets, "llama", "CPU").map(|asset| asset.name.as_str()),
-            Some("llama-b1-bin-win-cpu-x64.zip")
+            assets[0].digest.as_deref(),
+            Some("sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
         );
-        assert_eq!(
-            find_windows_asset(&assets, "llama", "ROCm").map(|asset| asset.name.as_str()),
-            Some("llama-b1-bin-win-rocm-10.0-x64.zip")
-        );
+        assert_eq!(assets[1].name, "sd-tag-bin-win-vulkan-x64.zip");
     }
 
     #[test]
@@ -396,26 +171,53 @@ mod tests {
     }
 
     #[test]
-    fn builds_one_package_per_supported_variant() {
+    fn builds_packages_for_every_variant_and_companion_file() {
         let release = GithubRelease {
             tag_name: "b12466".into(),
             html_url: "https://example.com/llama".into(),
             assets: vec![
                 asset("llama-b12466-bin-win-vulkan-x64.zip"),
                 asset("llama-b12466-bin-win-cuda-12.4-x64.zip"),
+                asset("llama-b12466-bin-win-cuda-13.5-x64.zip"),
                 asset("llama-b12466-bin-win-rocm-10.0-x64.zip"),
+                asset("llama-b12466-bin-win-sycl-x64.zip"),
+                asset("llama-b12466-bin-win-openvino-2026.4.1-x64.zip"),
                 asset("llama-b12466-bin-win-cpu-x64.zip"),
+                asset("cudart-llama-bin-win-cu12.4-x64.zip"),
+                asset("cudart-llama-bin-win-cu13.5-x64.zip"),
                 asset("llama-b12466-bin-win-vulkan-arm64.zip"),
             ],
         };
         let packages = llama_catalog(&release, false);
-        assert_eq!(packages.len(), 4);
+        assert_eq!(packages.len(), 7);
+        assert!(packages.iter().all(|package| package.name == "llama.cpp"));
         assert!(
             packages
                 .iter()
-                .any(|package| package.id == "llama-cpp-rocm")
+                .any(|package| package.id == "llama-cpp-rocm-10.0")
         );
-        assert!(packages.iter().all(|package| package.name == "llama.cpp"));
+        assert!(
+            packages
+                .iter()
+                .any(|package| package.id == "llama-cpp-sycl")
+        );
+        assert!(
+            packages
+                .iter()
+                .any(|package| package.id == "llama-cpp-openvino-2026.4.1")
+        );
+        assert!(
+            packages
+                .iter()
+                .find(|package| package.id == "llama-cpp-cuda-12.4")
+                .is_some_and(|package| package.files.len() == 2)
+        );
+        assert!(
+            packages
+                .iter()
+                .find(|package| package.id == "llama-cpp-cuda-13.5")
+                .is_some_and(|package| package.files.len() == 2)
+        );
 
         let stable = GithubRelease {
             tag_name: "b1".into(),
@@ -425,6 +227,7 @@ mod tests {
                 asset("sd-b1-bin-win-cuda12-x64.zip"),
                 asset("sd-b1-bin-win-rocm-10.1.0-x64.zip"),
                 asset("sd-b1-bin-win-cpu-x64.zip"),
+                asset("cudart-sd-bin-win-cu12-x64.zip"),
             ],
         };
         let packages = sd_catalog(&stable, false);
@@ -432,34 +235,13 @@ mod tests {
         assert!(
             packages
                 .iter()
-                .any(|package| package.id == "stable-diffusion-rocm")
+                .any(|package| package.id == "stable-diffusion-rocm-10.1.0")
         );
-    }
-
-    #[test]
-    fn selects_stable_diffusion_assets() {
-        let assets = vec![
-            asset("sd-master-532d2c1-bin-win-vulkan-x64.zip"),
-            asset("sd-master-532d2c1-bin-win-cuda12-x64.zip"),
-            asset("sd-master-532d2c1-bin-win-rocm-10.1.0-x64.zip"),
-            asset("cudart-sd-bin-win-cu12-x64.zip"),
-            asset("sd-master-532d2c1-bin-win-cpu-x64.zip"),
-        ];
-        assert_eq!(
-            find_windows_asset(&assets, "sd-", "Vulkan").map(|asset| asset.name.as_str()),
-            Some("sd-master-532d2c1-bin-win-vulkan-x64.zip")
-        );
-        assert_eq!(
-            find_windows_asset(&assets, "sd-", "CPU").map(|asset| asset.name.as_str()),
-            Some("sd-master-532d2c1-bin-win-cpu-x64.zip")
-        );
-        assert_eq!(
-            find_windows_asset(&assets, "sd-", "ROCm").map(|asset| asset.name.as_str()),
-            Some("sd-master-532d2c1-bin-win-rocm-10.1.0-x64.zip")
-        );
-        assert_eq!(
-            find_windows_asset(&assets, "cudart", "cuda").map(|asset| asset.name.as_str()),
-            Some("cudart-sd-bin-win-cu12-x64.zip")
+        assert!(
+            packages
+                .iter()
+                .find(|package| package.id == "stable-diffusion-cuda12")
+                .is_some_and(|package| package.files.len() == 2)
         );
     }
 }

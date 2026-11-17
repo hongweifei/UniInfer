@@ -6,10 +6,10 @@ UniInfer 把内置引擎与下载后端统一管理：每个内置引擎（ONNX 
 
 桌面端「后端」页面支持：
 
-- 自动从 `llama.cpp` 和 `stable-diffusion.cpp` 官方 release 发现 Windows CPU、Vulkan、CUDA、ROCm 引擎。
+- 自动从 `llama.cpp` 和 `stable-diffusion.cpp` 官方 release 发现全部 Windows x64 变体，包括 CPU、Vulkan、CUDA、ROCm、SYCL、OpenVINO 等。
 - 按官方项目、版本和加速变体下载并校验，安装到 `<配置文件目录>/backends/<id>/<version>/`。
 - 卸载引擎；安装后后端即存在于列表中，供模型配置选择。
-- 同一项目的 CPU、Vulkan、CUDA、ROCm 等变体按项目分组展示；每个引擎只显示一张卡片，变体是独立下载项。
+- 同一项目的全部变体按项目分组展示；每个引擎只显示一张卡片，变体是独立下载项，CUDA 等带版本号的变体会分别保留。
 - 后端下载与在线模型下载共用「下载任务」队列，支持排队、进度、取消、失败重试和清除记录。
 
 ## 引擎清单
@@ -75,9 +75,10 @@ variant = "auto"
 ```
 
 - `id` 是后端族，对应桌面上按项目分组的 `name`，例如 `llama.cpp`、`stable-diffusion.cpp`；`builtin` 表示只使用内置引擎。
-- `variant` 是已安装变体，例如 `CPU`、`Vulkan`、`CUDA`；省略或 `auto` 时按设备选择：CUDA 设备优先 CUDA，其他 GPU 优先 Vulkan，没有 GPU 时使用 CPU。
+- `variant` 是已安装变体，例如 `CPU`、`Vulkan`、`CUDA 12.4`、`ROCm 10.0`、`SYCL`；省略或 `auto` 时用设备后端名称与变体名称做通用匹配，优先匹配的加速变体，没有匹配时回退 CPU。
 - 没有 `[backend]` 时保持默认路由：内置引擎优先，模型按 `runtime` 和 `implementation` 匹配。
 - 模型运行配置界面会读取已安装后端，按项目生成后端选项，并把设备推荐变体显示在“自动”选项上。
+- 变体支持不是白名单：桌面端用设备后端名称与变体名称做通用匹配；没有匹配后端的变体仍然展示，但禁用下载。
 
 ## 运行时语义
 

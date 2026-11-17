@@ -12,6 +12,7 @@ use uniinfer_core::{
 use uniinfer_devices::DeviceInventory;
 
 mod residency;
+mod selection;
 
 use residency::{Reservation, ResidencyLedger, effective_residency, estimate_residency};
 
@@ -278,39 +279,10 @@ impl EngineRegistry {
         })
     }
 
-    /// Prefer the installed variant that matches the live GPU backend.
+    /// Prefer the installed variant whose name matches a live GPU backend.
+    /// Matching is token-based so new variants do not need a registry update.
     fn variant_rank(&self, variant: &str) -> u8 {
-        let variant = variant.to_ascii_lowercase();
-        let gpus = self
-            .inventory
-            .devices()
-            .iter()
-            .filter(|device| device.class == DeviceClass::Gpu)
-            .collect::<Vec<_>>();
-        if gpus.is_empty() {
-            return if variant == "cpu" { 0 } else { 2 };
-        }
-        let has_cuda = gpus
-            .iter()
-            .any(|device| device.backend.to_ascii_lowercase().contains("cuda"));
-        let has_vulkan = gpus
-            .iter()
-            .any(|device| device.backend.to_ascii_lowercase().contains("vulkan"));
-        let has_rocm = gpus
-            .iter()
-            .any(|device| device.backend.to_ascii_lowercase().contains("rocm"));
-        match variant.as_str() {
-            "cuda" if has_cuda => 0,
-            "rocm" if has_rocm => 0,
-            "vulkan" if has_vulkan => 0,
-            "rocm" if has_vulkan => 1,
-            "vulkan" if has_cuda || has_rocm => 1,
-            "cuda" => 1,
-            "vulkan" => 2,
-            "rocm" => 2,
-            "cpu" => 3,
-            _ => 4,
-        }
+        selection::variant_rank(self.inventory.devices(), variant)
     }
 
     fn resolve(

@@ -248,6 +248,32 @@ fn automatic_variant_prefers_a_rocm_device() {
 }
 
 #[test]
+fn automatic_variant_rank_accepts_new_backend_names() {
+    let inventory = DeviceInventory::from(vec![
+        device("cpu:0", DeviceClass::Cpu, "cpu"),
+        device("gpu:0", DeviceClass::Gpu, "sycl"),
+    ]);
+    let registry = EngineRegistry::new(inventory);
+    for (name, variant) in [("alpha-cuda", "CUDA 12.4"), ("alpha-sycl", "SYCL")] {
+        registry.register_sidecar(std::sync::Arc::new(FakeEngine {
+            name,
+            backend: "alpha",
+            variant,
+            transport: true,
+        }));
+    }
+    let mut manifest = manifest();
+    manifest.backend = Some(BackendConfig {
+        id: Some("alpha".into()),
+        variant: Some("auto".into()),
+    });
+    assert_eq!(
+        registry.route(&manifest).expect("route").engine_name,
+        "alpha-sycl"
+    );
+}
+
+#[test]
 fn builtin_selection_rejects_transports() {
     let mut manifest = manifest();
     manifest.backend = Some(BackendConfig {

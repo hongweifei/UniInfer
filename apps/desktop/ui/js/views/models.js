@@ -315,7 +315,6 @@ export function mountModels(root, ctx) {
     backendSelect.value = backendId;
     const variantSelect = h('select', { class: 'select', attrs: { 'aria-label': '后端变体' } });
     const variantHint = h('div', { class: 'notice faint' });
-    const recommended = preferredVariant(ctx.devices());
     function rebuildVariants() {
       const choice = choices.find((item) => item.id === backendSelect.value);
       clear(variantSelect);
@@ -327,8 +326,10 @@ export function mountModels(root, ctx) {
         return;
       }
       variantSelect.disabled = false;
+      const variants = variantOptions(choice, configuredBackend.variant);
+      const recommended = preferredVariant(ctx.devices(), variants);
       variantSelect.append(h('option', { value: 'auto', text: `自动（${recommended}）` }));
-      for (const variant of variantOptions(choice, configuredBackend.variant)) {
+      for (const variant of variants) {
         const support = variantSupport(variant, ctx.devices());
         const option = h('option', {
           value: variant,
