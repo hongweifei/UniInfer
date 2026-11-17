@@ -325,7 +325,26 @@ impl InferenceEngine for ProcessEngine {
             .first()
             .map(|device| device.class)
             .ok_or_else(|| EngineError::PlacementUnsatisfiable("empty placement".into()))?;
-        let mut child = Command::new(&self.worker)
+        let mut command = Command::new(&self.worker);
+        if let Some(parent) = self.worker.parent() {
+            command.current_dir(parent);
+            command.env("UNIINFER_BACKEND_DIR", parent);
+            #[cfg(unix)]
+            {
+                let key = if cfg!(target_os = "macos") {
+                    "DYLD_LIBRARY_PATH"
+                } else {
+                    "LD_LIBRARY_PATH"
+                };
+                let existing = std::env::var_os(key).unwrap_or_default();
+                let mut paths = vec![parent.to_path_buf()];
+                paths.extend(std::env::split_paths(&existing));
+                if let Ok(joined) = std::env::join_paths(paths) {
+                    command.env(key, joined);
+                }
+            }
+        }
+        let mut child = command
             .arg(manifest_path)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())

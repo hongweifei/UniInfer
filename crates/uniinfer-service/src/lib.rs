@@ -95,8 +95,16 @@ impl Runtime {
 
     /// Assemble engines, optionally isolating text models in worker processes.
     pub fn new_with_process(isolate_models: bool) -> Result<Self> {
+        Self::new_with_backend(isolate_models, None)
+    }
+
+    /// Assemble engines with an optional downloaded sidecar backend.
+    pub fn new_with_backend(
+        isolate_models: bool,
+        backend: Option<uniinfer_backend_store::BackendLaunch>,
+    ) -> Result<Self> {
         Ok(Self {
-            registry: uniinfer_engine_set::build_with_process(isolate_models)?,
+            registry: uniinfer_engine_set::build_with_backend(isolate_models, backend)?,
         })
     }
 

@@ -3116,12 +3116,25 @@ dependencies = [
  "tower",
  "tower-http",
  "tracing",
+ "uniinfer-backend-store",
  "uniinfer-backends",
  "uniinfer-config",
  "uniinfer-core",
  "uniinfer-model-inspect",
  "uniinfer-router",
  "uniinfer-service",
+]
+
+[[package]]
+name = "uniinfer-backend-store"
+version = "0.0.0"
+dependencies = [
+ "serde",
+ "tempfile",
+ "thiserror 2.0.21",
+ "toml",
+ "tracing",
+ "uniinfer-core",
 ]
 
 [[package]]
@@ -3259,6 +3272,7 @@ dependencies = [
 name = "uniinfer-engine-set"
 version = "0.0.0"
 dependencies = [
+ "uniinfer-backend-store",
  "uniinfer-core",
  "uniinfer-devices",
  "uniinfer-engine-candle",
@@ -3324,6 +3338,7 @@ dependencies = [
  "serde_json",
  "tokio",
  "tracing",
+ "uniinfer-backend-store",
  "uniinfer-backends",
  "uniinfer-core",
  "uniinfer-engine-set",

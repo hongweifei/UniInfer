@@ -4,6 +4,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, RwLock};
 
 use tokio::sync::Mutex as AsyncMutex;
+use uniinfer_backend_store::BackendStore;
 use uniinfer_config::{ConfigHandle, ServerConfig};
 use uniinfer_core::{CancelToken, CapabilityRequest, EngineError, ModelManifest, Result};
 use uniinfer_service::{AudioSlot, ImageSlot, ModelSlot, Runtime};
@@ -34,12 +35,33 @@ pub struct AppState {
     request_timeout_ms: Arc<AtomicU64>,
     model_load_timeout_ms: Arc<AtomicU64>,
     pub(crate) catalog: Arc<RwLock<HashMap<String, CatalogEntry>>>,
+    pub(crate) backends: Arc<BackendStore>,
+    pub(crate) active_backend: Option<(String, String)>,
+    pub(crate) backend_catalog_url: Option<String>,
     load_lock: Arc<AsyncMutex<()>>,
 }
 
 impl AppState {
     pub fn new(config: &ApiConfig) -> Result<Self> {
-        let runtime = Arc::new(Runtime::new_with_process(config.isolate_models)?);
+        let backends = Arc::new(BackendStore::new(config.backend_dir.clone()));
+        let active = match backends.active() {
+            Ok(active) => active,
+            Err(error) => {
+                tracing::warn!(%error, "read backend store failed; using built-in engines");
+                None
+            }
+        };
+        let launch = match active.as_ref().map(|backend| backend.launch()).transpose() {
+            Ok(launch) => launch,
+            Err(error) => {
+                tracing::warn!(%error, "active backend is unusable; using built-in engines");
+                None
+            }
+        };
+        let active_backend = launch
+            .as_ref()
+            .map(|backend| (backend.id.clone(), backend.version.clone()));
+        let runtime = Arc::new(Runtime::new_with_backend(config.isolate_models, launch)?);
         runtime.set_reserves(
             config.vram_reserve_mb.saturating_mul(1024 * 1024),
             config.host_reserve_mb.saturating_mul(1024 * 1024),
@@ -88,6 +110,9 @@ impl AppState {
                 u64::try_from(config.model_load_timeout.as_millis()).unwrap_or(u64::MAX),
             )),
             catalog: Arc::new(RwLock::new(catalog)),
+            backends,
+            active_backend,
+            backend_catalog_url: config.backend_catalog_url.clone(),
             load_lock: Arc::new(AsyncMutex::new(())),
         })
     }

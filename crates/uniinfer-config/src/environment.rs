@@ -42,6 +42,16 @@ pub(crate) fn apply(config: &mut UniInferConfig) -> Result<()> {
             .parse()
             .map_err(|error| ConfigError::Invalid(format!("UNIINFER_HOST_RESERVE_MB: {error}")))?;
     }
+    if let Ok(value) = std::env::var("UNIINFER_BACKEND_DIR") {
+        config.server.backend_dir = if value.is_empty() {
+            None
+        } else {
+            Some(std::path::PathBuf::from(value))
+        };
+    }
+    if let Ok(value) = std::env::var("UNIINFER_BACKEND_CATALOG_URL") {
+        config.server.backend_catalog_url = if value.is_empty() { None } else { Some(value) };
+    }
     if let Ok(value) = std::env::var("UNIINFER_ISOLATE_MODELS") {
         config.server.isolate_models = matches!(value.as_str(), "1" | "true" | "yes");
     }

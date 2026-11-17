@@ -37,6 +37,7 @@ uniinfer-model-inspect.workspace = true
 uniinfer-service.workspace = true
 uniinfer-router.workspace = true
 uniinfer-backends.workspace = true
+uniinfer-backend-store.workspace = true
 axum.workspace = true
 tokio.workspace = true
 tokio-stream.workspace = true

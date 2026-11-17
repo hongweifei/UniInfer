@@ -34,6 +34,7 @@ whisper = ["dep:uniinfer-engine-whisper", "uniinfer-engine-whisper/whisper"]
 uniinfer-core.workspace = true
 uniinfer-devices.workspace = true
 uniinfer-registry.workspace = true
+uniinfer-backend-store.workspace = true
 uniinfer-engine-onnx.workspace = true
 uniinfer-engine-process.workspace = true
 uniinfer-engine-candle.workspace = true

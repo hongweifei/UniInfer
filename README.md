@@ -123,6 +123,12 @@ flowchart TB
 - 模型配置会显示模型体积与 GPU/统一内存可用量，并给出自动层卸载、KV 放 RAM/VRAM 的建议。
 - 统一内存与核显（Apple Silicon、Intel/AMD iGPU）按同一个主机内存池记账；CPU+GPU 混合推理不会把同一块内存重复算成 VRAM 和 RAM，GPU 预算自动继承主机预留。
 
+### 可下载后端
+
+- 桌面端「后端」页可读取远程后端目录，下载并校验 Sidecar worker 包，安装到配置目录下的 `backends/`。
+- 支持本地导入、激活、删除和切回内置引擎；激活后重启生效。
+- 后端包格式、目录 JSON 与构建方式见 [docs/BACKENDS.md](docs/BACKENDS.md)。
+
 ### 分层驻留
 
 - 设备探测会报告 `memory_bytes`、`available_memory_bytes` 与 `unified_memory`；CPU 来自系统内存，llama.cpp GPU 来自后端空闲显存，`IntegratedGpu` / Metal / CoreML 标记为统一内存。

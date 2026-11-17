@@ -42,6 +42,13 @@ pub struct ServerConfig {
     /// Memory held back from host scheduling, in MiB.
     #[serde(default)]
     pub host_reserve_mb: u64,
+    /// Directory containing downloadable sidecar backend packages.
+    /// Relative paths resolve against the config file directory.
+    #[serde(default)]
+    pub backend_dir: Option<std::path::PathBuf>,
+    /// Optional JSON catalog URL for available backends.
+    #[serde(default)]
+    pub backend_catalog_url: Option<String>,
 }
 
 fn default_addr() -> SocketAddr {
@@ -69,6 +76,8 @@ impl Default for ServerConfig {
             isolate_models: false,
             vram_reserve_mb: 0,
             host_reserve_mb: 0,
+            backend_dir: None,
+            backend_catalog_url: None,
         }
     }
 }

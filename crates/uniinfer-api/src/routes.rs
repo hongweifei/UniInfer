@@ -30,6 +30,16 @@ pub fn router(state: AppState) -> Router {
         .route("/v1/models/import", post(crate::models::import_model))
         .route("/v1/models/refresh", post(refresh_models))
         .route("/v1/devices", get(devices))
+        .route("/v1/backends", get(crate::backends::list))
+        .route("/v1/backends/deactivate", post(crate::backends::deactivate))
+        .route(
+            "/v1/backends/{id}/activate",
+            post(crate::backends::activate),
+        )
+        .route(
+            "/v1/backends/{id}",
+            axum::routing::delete(crate::backends::remove),
+        )
         .route("/v1/chat/completions", post(chat))
         .route(
             "/v1/config",

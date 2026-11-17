@@ -5,6 +5,7 @@
 
 use std::sync::Arc;
 
+use uniinfer_backend_store::BackendLaunch;
 use uniinfer_core::Result;
 use uniinfer_devices::DeviceInventory;
 use uniinfer_engine_candle::CandleEngine;
@@ -26,6 +27,16 @@ pub fn build() -> Result<EngineRegistry> {
 /// Build the engine registry, optionally routing text models through an
 /// isolated worker process.
 pub fn build_with_process(isolate_models: bool) -> Result<EngineRegistry> {
+    build_with_backend(isolate_models, None)
+}
+
+/// Build the engine registry with an optional downloaded sidecar backend.
+/// A selected backend owns text/audio inference; its worker is launched per
+/// model, while image and media engines remain in-process.
+pub fn build_with_backend(
+    isolate_models: bool,
+    backend: Option<BackendLaunch>,
+) -> Result<EngineRegistry> {
     let onnx = OnnxEngine::new()?;
     let candle = CandleEngine::new()?;
     #[cfg(feature = "llama")]
@@ -56,7 +67,12 @@ pub fn build_with_process(isolate_models: bool) -> Result<EngineRegistry> {
     }
 
     let mut registry = EngineRegistry::new(inventory);
-    if isolate_models {
+    if let Some(backend) = backend {
+        registry.register(Arc::new(ProcessEngine::with_worker_and_devices(
+            backend.worker,
+            backend.devices,
+        )));
+    } else if isolate_models {
         registry.register(Arc::new(ProcessEngine::new()));
     }
     registry.register(Arc::new(onnx));

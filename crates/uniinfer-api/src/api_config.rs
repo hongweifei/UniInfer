@@ -18,6 +18,8 @@ pub struct ApiConfig {
     pub isolate_models: bool,
     pub vram_reserve_mb: u64,
     pub host_reserve_mb: u64,
+    pub backend_dir: PathBuf,
+    pub backend_catalog_url: Option<String>,
     pub config: Option<Arc<ConfigHandle>>,
 }
 
@@ -40,6 +42,8 @@ impl ApiConfig {
             isolate_models: false,
             vram_reserve_mb: 0,
             host_reserve_mb: 0,
+            backend_dir: std::path::PathBuf::from("backends"),
+            backend_catalog_url: None,
             config: None,
         }
     }
@@ -48,6 +52,18 @@ impl ApiConfig {
     pub fn from_config(handle: Arc<ConfigHandle>) -> std::result::Result<Self, ConfigError> {
         let config = handle.snapshot()?;
         config.validate_for_serve()?;
+        let backend_dir = config
+            .server
+            .backend_dir
+            .clone()
+            .map(|path| {
+                if path.is_absolute() {
+                    path
+                } else {
+                    handle.base_dir().join(path)
+                }
+            })
+            .unwrap_or_else(|| handle.base_dir().join("backends"));
         Ok(Self {
             manifests: Vec::new(),
             model_roots: Vec::new(),
@@ -62,6 +78,8 @@ impl ApiConfig {
             isolate_models: config.server.isolate_models,
             vram_reserve_mb: config.server.vram_reserve_mb,
             host_reserve_mb: config.server.host_reserve_mb,
+            backend_dir,
+            backend_catalog_url: config.server.backend_catalog_url.clone(),
             config: Some(handle),
         })
     }
