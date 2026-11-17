@@ -1,6 +1,6 @@
 # 推理引擎
 
-UniInfer 把内置引擎与下载后端统一管理：每个内置引擎（ONNX Runtime、Candle、llama.cpp、whisper.cpp 等）单独展示 runtime、实现、格式、模态与设备；外置 Sidecar 后端逐项声明自己的引擎。后端没有全局激活状态，安装后由模型 manifest 的 `[backend]` 选择使用哪个后端和变体。
+UniInfer 把内置引擎与下载后端统一管理：每个内置引擎（ONNX Runtime、Candle、llama.cpp、whisper.cpp 等）单独展示 runtime、实现、格式、模态与设备；外置 Sidecar 后端逐项声明自己的引擎。除 ONNX Runtime 外，后端没有全局激活状态，安装后由模型 manifest 的 `[backend]` 选择使用哪个后端和变体；ONNX Runtime 是进程级运行时，安装并重启后全局生效。
 
 ## 目录
 
