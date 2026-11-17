@@ -237,6 +237,7 @@ impl EngineRegistry {
             if let Some(missing) = manifest
                 .input_modalities()
                 .iter()
+                .chain(manifest.output_modalities().iter())
                 .find(|modality| !modalities.contains(modality))
             {
                 saw_modality = true;
