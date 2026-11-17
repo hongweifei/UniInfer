@@ -157,12 +157,10 @@
 }
 .status-dot.bad { background: var(--error); box-shadow: 0 0 0 3px color-mix(in srgb, var(--error) 18%, transparent); }
 
-.app-shell[data-view="media"],
 .app-shell[data-view="backends"],
 .app-shell[data-view="settings"] {
   grid-template-columns: minmax(0, 1fr);
 }
-.app-shell[data-view="media"] .sidebar,
 .app-shell[data-view="backends"] .sidebar,
 .app-shell[data-view="settings"] .sidebar { display: none; }
 

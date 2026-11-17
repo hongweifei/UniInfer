@@ -8,7 +8,7 @@ import { deleteMedia } from './media-store.js';
 import { initDownloads, subscribeDownloads, activeDownloads } from './downloads.js';
 import { mountChat } from './views/chat.js';
 import { mountModels } from './views/models.js';
-import { mountMedia } from './views/media.js';
+import { mountMedia, mediaTools } from './views/media.js';
 import { mountBackends } from './views/backends.js';
 import { mountSettings } from './views/settings.js';
 
@@ -145,6 +145,25 @@ function sidebar() {
       h('div', { class: 'sidebar-heading' }, h('span', { text: '最近' }), h('span', { text: String(state.conversations.length) })),
       recent,
     ));
+  } else if (state.view === 'media') {
+    const nav = h('div', { class: 'sidebar-section' });
+    nav.append(h('div', { class: 'sidebar-heading' }, h('span', { text: '媒体工具' })));
+    for (const tool of mediaTools) {
+      const count = tool.id === 'transcribe'
+        ? models.filter(isAudioModel).length
+        : tool.id === 'images' ? models.filter(isImageModel).length : 0;
+      nav.append(h('button', {
+        class: `nav-item ${state.mediaTab === tool.id ? 'active' : ''}`, type: 'button',
+        onClick: () => openMedia(tool.id),
+      },
+        h('span', { html: icon(tool.icon, 16) }),
+        h('span', { text: tool.label }),
+        tool.planned
+          ? h('span', { class: 'nav-badge', text: '规划' })
+          : count ? h('span', { class: 'filter-count', text: String(count) }) : null,
+      ));
+    }
+    context.push(nav);
   } else if (state.view === 'models') {
     const links = [
       ['online', '在线模型', 'cloud'],
