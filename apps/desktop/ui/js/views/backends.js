@@ -6,7 +6,7 @@ import { toast, chip, setBusy, confirmDialog } from '../components/ui.js';
 const invoke = (command, args) => window.__TAURI__?.core?.invoke(command, args);
 
 export function mountBackends(root, ctx) {
-  let backends = { installed: [], active: null, directory: '' };
+  let backends = { backends: [], active: null, directory: '' };
   let catalog = null;
   let catalogUrl = '';
   let loading = true;
@@ -126,17 +126,6 @@ export function mountBackends(root, ctx) {
     }
   }
 
-  async function deactivate() {
-    try {
-      await ctx.api.deactivateBackend();
-      toast('已切回内置引擎，重启后生效', 'success');
-      await refresh({ reloadCatalog: false });
-      showRestart();
-    } catch (error) {
-      toast(errorMessage(error), 'error');
-    }
-  }
-
   async function remove(backend) {
     const ok = await confirmDialog({
       title: '删除后端？',
@@ -163,6 +152,7 @@ export function mountBackends(root, ctx) {
   }
 
   function installedCard(backend) {
+    const builtin = backend.kind === 'builtin';
     const active = backends.active?.id === backend.id && backends.active?.version === backend.version;
     return h('div', { class: 'card backend-card' },
       h('div', { class: 'row' },
@@ -171,20 +161,21 @@ export function mountBackends(root, ctx) {
           h('strong', { text: `${backend.name} ${backend.version}` }),
           h('div', { class: 'faint mono', text: backend.id }),
         ),
+        builtin ? chip('内置') : null,
         active ? chip('使用中') : null,
       ),
       backend.description ? h('p', { class: 'muted', text: backend.description }) : null,
       h('div', { class: 'backend-meta' },
         h('span', { text: backend.platform || '未标注平台' }),
         h('span', { text: (backend.devices ?? []).join(' / ') || '设备未知' }),
-        h('span', { text: formatBytes(backend.size_bytes ?? 0) }),
+        h('span', { text: builtin ? '随主程序' : formatBytes(backend.size_bytes ?? 0) }),
       ),
       h('div', { class: 'row' },
         h('button', {
           class: `btn sm ${active ? 'ghost' : 'primary'}`, type: 'button',
           disabled: active, onClick: () => void activate(backend),
         }, h('span', { text: active ? '当前后端' : '使用此后端' })),
-        h('button', {
+        builtin ? null : h('button', {
           class: 'btn sm danger ghost', type: 'button',
           onClick: () => void remove(backend),
         }, h('span', { html: icon('trash', 13) }), h('span', { text: '删除' })),
@@ -193,7 +184,7 @@ export function mountBackends(root, ctx) {
   }
 
   function availableCard(packageInfo) {
-    const already = backends.installed.some((item) => item.id === packageInfo.id && item.version === packageInfo.version);
+    const already = (backends.backends ?? []).some((item) => item.id === packageInfo.id && item.version === packageInfo.version);
     return h('div', { class: 'card backend-card' },
       h('div', { class: 'row' },
         h('span', { html: icon('cloud', 18) }),
@@ -221,9 +212,9 @@ export function mountBackends(root, ctx) {
     clear(installedHost);
     clear(availableHost);
     activeLabel.textContent = backends.active
-      ? `当前：${backends.active.id} ${backends.active.version}`
-      : '当前：内置引擎';
-    const installed = backends.installed ?? [];
+      ? (backends.active.kind === 'builtin' ? '当前：内置后端' : `当前：${backends.active.id} ${backends.active.version}`)
+      : '当前：内置后端';
+    const installed = backends.backends ?? [];
     if (!loading && !installed.length) {
       installedHost.append(h('div', { class: 'notice faint', text: '还没有下载后端；当前使用内置引擎。' }));
     }
@@ -233,6 +224,7 @@ export function mountBackends(root, ctx) {
       merged.set(`${packageInfo.id}@${packageInfo.version}`, packageInfo);
     }
     for (const backend of installed) {
+      if (backend.kind === 'builtin') continue;
       const key = `${backend.id}@${backend.version}`;
       if (!merged.has(key)) {
         merged.set(key, {
@@ -255,7 +247,7 @@ export function mountBackends(root, ctx) {
     return h('div', { class: 'page backend-view' },
       h('div', { class: 'page-head' },
         h('h2', { text: '推理后端' }),
-        h('p', { text: '按需下载 Sidecar 后端；主程序保留 CPU 内置引擎，重启后切换。' }),
+        h('p', { text: '内置与下载后端统一管理；激活后重启切换。' }),
       ),
       h('div', { class: 'card' },
         h('div', { class: 'section-title' },
@@ -274,13 +266,8 @@ export function mountBackends(root, ctx) {
         ),
         directoryLabel,
       ),
-      h('div', { class: 'section-title' }, h('h2', { text: '已安装' })),
-      h('div', { class: 'row', style: 'margin-bottom:10px' },
-        h('button', {
-          class: 'btn sm', type: 'button', onClick: () => void deactivate(),
-        }, h('span', { html: icon('cpu', 14) }), h('span', { text: '使用内置引擎' })),
-        activeLabel,
-      ),
+      h('div', { class: 'section-title' }, h('h2', { text: '后端' })),
+      h('div', { class: 'row', style: 'margin-bottom:10px' }, activeLabel),
       installedHost,
       h('div', { class: 'section-title', style: 'margin-top:22px' }, h('h2', { text: '可下载' })),
       availableHost,
