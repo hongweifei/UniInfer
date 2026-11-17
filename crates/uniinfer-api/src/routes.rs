@@ -31,11 +31,6 @@ pub fn router(state: AppState) -> Router {
         .route("/v1/models/refresh", post(refresh_models))
         .route("/v1/devices", get(devices))
         .route("/v1/backends", get(crate::backends::list))
-        .route("/v1/backends/deactivate", post(crate::backends::deactivate))
-        .route(
-            "/v1/backends/{id}/activate",
-            post(crate::backends::activate),
-        )
         .route(
             "/v1/backends/{id}",
             axum::routing::delete(crate::backends::remove),
@@ -98,6 +93,7 @@ fn model_json(slot: &dyn ModelView) -> Value {
         "owned_by": "uniinfer",
         "runtime": manifest.runtime,
         "implementation": manifest.implementation,
+        "backend": manifest.backend,
         "capabilities": manifest.capabilities,
         "format": manifest.format,
         "quantization": manifest.quantization,
@@ -139,6 +135,7 @@ fn catalog_model_json(state: &AppState, id: &str, entry: &crate::state::CatalogE
             "id": manifest.id,
             "object": "model",
             "owned_by": "uniinfer",
+            "backend": manifest.backend,
             "format": manifest.format,
             "quantization": manifest.quantization,
             "inputs": manifest.input_modalities(),
@@ -154,6 +151,7 @@ fn catalog_model_json(state: &AppState, id: &str, entry: &crate::state::CatalogE
             "id": manifest.id,
             "object": "model",
             "owned_by": "uniinfer",
+            "backend": manifest.backend,
             "format": manifest.format,
             "quantization": manifest.quantization,
             "inputs": manifest.input_modalities(),
@@ -201,6 +199,9 @@ async fn refresh_models(State(state): State<AppState>) -> Result<Json<Value>, Ap
 }
 
 async fn models(State(state): State<AppState>) -> Json<Value> {
+    if let Err(error) = state.sync_backends() {
+        tracing::warn!(%error, "sync backends while listing models");
+    }
     let data = state
         .catalog
         .read()

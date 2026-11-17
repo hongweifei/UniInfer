@@ -32,10 +32,23 @@ pub fn build_with_process(isolate_models: bool) -> Result<EngineRegistry> {
     build_with_backend(isolate_models, BackendRuntime::Builtin)
 }
 
-/// Build the engine registry with the selected backend. The built-in backend
-/// keeps all in-process engines; a sidecar backend is registered first and
-/// receives models whose modalities it declares.
+/// Build the engine registry with an explicit backend composition. Built-in
+/// engines are always registered; sidecars are selected per model manifest.
 pub fn build_with_backend(isolate_models: bool, backend: BackendRuntime) -> Result<EngineRegistry> {
+    let sidecars = match backend {
+        BackendRuntime::Builtin => Vec::new(),
+        BackendRuntime::Sidecar(backend) => vec![backend],
+        BackendRuntime::Sidecars(backends) => backends,
+    };
+    build_with_backends(isolate_models, &sidecars)
+}
+
+/// Build the registry with every installed sidecar variant. Built-in engines
+/// are registered first; a model manifest selects a sidecar explicitly.
+pub fn build_with_backends(
+    isolate_models: bool,
+    sidecars: &[uniinfer_backend_store::BackendLaunch],
+) -> Result<EngineRegistry> {
     let onnx = OnnxEngine::new()?;
     let candle = CandleEngine::new()?;
     #[cfg(feature = "llama")]
@@ -65,32 +78,9 @@ pub fn build_with_backend(isolate_models: bool, backend: BackendRuntime) -> Resu
         inventory.register(device);
     }
 
-    let mut registry = EngineRegistry::new(inventory);
-    match backend {
-        BackendRuntime::Sidecar(backend) => match backend.launcher {
-            BackendLauncher::Worker => {
-                registry.register(Arc::new(ProcessEngine::with_worker_and_devices(
-                    backend.worker,
-                    backend.devices,
-                )));
-            }
-            BackendLauncher::LlamaServer => {
-                registry.register(Arc::new(LlamaServerEngine::new(
-                    backend.worker,
-                    backend.devices,
-                )));
-            }
-            BackendLauncher::StableDiffusionServer => {
-                registry.register(Arc::new(StableDiffusionServerEngine::new(
-                    backend.worker,
-                    backend.devices,
-                )));
-            }
-        },
-        BackendRuntime::Builtin if isolate_models => {
-            registry.register(Arc::new(ProcessEngine::new()));
-        }
-        BackendRuntime::Builtin => {}
+    let registry = EngineRegistry::new(inventory);
+    if isolate_models {
+        registry.register(Arc::new(ProcessEngine::new()));
     }
     registry.register(Arc::new(onnx));
     #[cfg(feature = "llama-mtmd")]
@@ -100,5 +90,52 @@ pub fn build_with_backend(isolate_models: bool, backend: BackendRuntime) -> Resu
     #[cfg(feature = "whisper")]
     registry.register(Arc::new(whisper));
     registry.register(Arc::new(candle));
+
+    register_sidecars(&registry, sidecars);
     Ok(registry)
+}
+
+/// Register sidecars that appeared after the runtime was built. An existing
+/// family/variant pair is left untouched.
+pub fn register_sidecars(
+    registry: &EngineRegistry,
+    sidecars: &[uniinfer_backend_store::BackendLaunch],
+) {
+    let mut seen = std::collections::HashSet::new();
+    for backend in sidecars {
+        let key = (backend.family.clone(), backend.variant.to_ascii_lowercase());
+        if !seen.insert(key) {
+            continue;
+        }
+        register_sidecar(registry, backend);
+    }
+}
+
+fn register_sidecar(registry: &EngineRegistry, backend: &uniinfer_backend_store::BackendLaunch) {
+    match backend.launcher {
+        BackendLauncher::Worker => {
+            registry.register_sidecar(Arc::new(ProcessEngine::with_identity(
+                backend.worker.clone(),
+                backend.devices.clone(),
+                backend.family.clone(),
+                backend.variant.clone(),
+            )));
+        }
+        BackendLauncher::LlamaServer => {
+            registry.register_sidecar(Arc::new(LlamaServerEngine::with_identity(
+                backend.worker.clone(),
+                backend.devices.clone(),
+                backend.family.clone(),
+                backend.variant.clone(),
+            )));
+        }
+        BackendLauncher::StableDiffusionServer => {
+            registry.register_sidecar(Arc::new(StableDiffusionServerEngine::with_identity(
+                backend.worker.clone(),
+                backend.devices.clone(),
+                backend.family.clone(),
+                backend.variant.clone(),
+            )));
+        }
+    }
 }

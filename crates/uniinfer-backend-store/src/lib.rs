@@ -1,8 +1,8 @@
 //! Discovery and lifecycle for downloadable sidecar inference backends.
 //!
 //! A backend package is a directory containing `backend.toml` and the worker
-//! executable it names. Packages are versioned on disk; only one package is
-//! active at a time, and activation takes effect when the API runtime restarts.
+//! executable it names. Packages are versioned on disk and every installed
+//! variant is exposed to model manifests; there is no global active package.
 
 use std::fs;
 use std::path::{Component, Path, PathBuf};
@@ -96,11 +96,12 @@ impl BackendInfo {
     }
 }
 
-/// Runtime selection: both built-in and sidecar backends use this type.
+/// Runtime composition: built-ins, one sidecar, or every installed sidecar.
 #[derive(Debug, Clone)]
 pub enum BackendRuntime {
     Builtin,
     Sidecar(BackendLaunch),
+    Sidecars(Vec<BackendLaunch>),
 }
 
 /// A downloadable backend package.
@@ -174,6 +175,8 @@ pub enum BackendLauncher {
 pub struct BackendLaunch {
     pub id: String,
     pub version: String,
+    pub family: String,
+    pub variant: String,
     pub launcher: BackendLauncher,
     pub worker: PathBuf,
     pub devices: Vec<DeviceClass>,
@@ -219,9 +222,19 @@ impl InstalledBackend {
                 worker.display()
             )));
         }
+        let variant = self
+            .manifest
+            .engines
+            .first()
+            .map(|engine| engine.variant.trim())
+            .filter(|variant| !variant.is_empty())
+            .unwrap_or("auto")
+            .to_owned();
         Ok(BackendLaunch {
             id: self.manifest.id.clone(),
             version: self.manifest.version.clone(),
+            family: self.manifest.name.trim().to_owned(),
+            variant,
             launcher: self.manifest.launcher,
             worker,
             devices: self.manifest.devices.clone(),
@@ -257,7 +270,6 @@ impl BackendStore {
     }
 
     /// Return every valid installed package, newest package directory order
-    /// independent of the active marker.
     pub fn installed(&self) -> Result<Vec<InstalledBackend>> {
         if !self.root.is_dir() {
             return Ok(Vec::new());
@@ -290,73 +302,16 @@ impl BackendStore {
         Ok(packages)
     }
 
-    /// Read the active marker and resolve it to an installed package.
-    pub fn active(&self) -> Result<Option<InstalledBackend>> {
-        let marker = self.root.join("active");
-        let raw = match fs::read_to_string(&marker) {
-            Ok(raw) => raw,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-            Err(error) => return Err(error.into()),
-        };
-        let mut parts = raw.trim().splitn(2, '/');
-        let Some(id) = parts.next().filter(|value| !value.is_empty()) else {
-            return Ok(None);
-        };
-        let Some(version) = parts.next().filter(|value| !value.is_empty()) else {
-            return Ok(None);
-        };
-        let dir = self.root.join(id).join(version);
-        if !dir.is_dir() {
-            return Ok(None);
-        }
-        Ok(Some(load_installed(&dir)?))
-    }
-
-    /// Make one package active. The runtime must restart before it is used.
-    pub fn set_active(&self, id: &str, version: &str) -> Result<()> {
-        validate_component(id, "backend id")?;
-        validate_component(version, "backend version")?;
-        let dir = self.root.join(id).join(version);
-        if !dir.is_dir() {
-            return Err(BackendError::Invalid(format!(
-                "backend {id} {version} is not installed"
-            )));
-        }
-        load_installed(&dir)?;
-        self.ensure()?;
-        write_atomic(
-            &self.root.join("active"),
-            format!("{id}/{version}\n").as_bytes(),
-        )?;
-        Ok(())
-    }
-
-    pub fn clear_active(&self) -> Result<()> {
-        self.ensure()?;
-        match fs::remove_file(self.root.join("active")) {
-            Ok(()) => Ok(()),
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
-            Err(error) => Err(error.into()),
-        }
-    }
-
-    /// Remove all versions of a backend and clear the active marker if needed.
+    /// Remove every installed version of a backend.
     pub fn remove(&self, id: &str) -> Result<bool> {
         validate_component(id, "backend id")?;
         let dir = self.root.join(id);
-        let marker = self.root.join("active");
-        let was_active = fs::read_to_string(&marker)
-            .ok()
-            .is_some_and(|raw| raw.trim().split('/').next() == Some(id));
         let removed = if dir.is_dir() {
             fs::remove_dir_all(&dir)?;
             true
         } else {
             false
         };
-        if was_active {
-            self.clear_active()?;
-        }
         Ok(removed)
     }
 
@@ -500,23 +455,17 @@ mod tests {
     }
 
     #[test]
-    fn discovers_and_activates_packages() {
+    fn discovers_and_removes_packages() {
         let temp = tempfile::tempdir().expect("tempdir");
         let store = BackendStore::new(temp.path());
         package(temp.path(), "llama-vulkan", "1.0.0");
         package(temp.path(), "llama-vulkan", "1.1.0");
         package(temp.path(), "onnx-cuda", "2.0.0");
         assert_eq!(store.installed().expect("installed").len(), 3);
-        store.set_active("llama-vulkan", "1.0.0").expect("active");
-        store
-            .set_active("llama-vulkan", "1.1.0")
-            .expect("active replacement");
-        let active = store.active().expect("active").expect("present");
-        assert_eq!(active.manifest().version, "1.1.0");
-        assert!(active.launch().is_ok());
+        let installed = store.installed().expect("installed");
+        assert!(installed.iter().all(|package| package.launch().is_ok()));
         assert!(store.remove("llama-vulkan").expect("remove"));
-        assert!(store.active().expect("active").is_none());
-        assert!(!temp.path().join("active").exists());
+        assert_eq!(store.installed().expect("installed").len(), 1);
     }
 
     #[test]

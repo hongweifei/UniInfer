@@ -37,6 +37,7 @@ mod tests {
             tokenizer: Some("bytes".into()),
             min_vram: None,
             placement,
+            backend: None,
             files: vec![ModelFile {
                 path: PathBuf::from("model.onnx"),
                 sha256: "0".repeat(64),

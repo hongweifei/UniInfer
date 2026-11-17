@@ -160,6 +160,8 @@ impl WireSpec {
 pub struct ProcessEngine {
     worker: PathBuf,
     devices: Vec<DeviceClass>,
+    backend_id: String,
+    variant: String,
 }
 
 impl ProcessEngine {
@@ -177,22 +179,39 @@ impl ProcessEngine {
             .map(|value| parse_devices(&value))
             .filter(|devices| !devices.is_empty())
             .unwrap_or_else(|| vec![DeviceClass::Cpu]);
-        Self { worker, devices }
+        Self {
+            worker,
+            devices,
+            backend_id: "process".into(),
+            variant: "builtin".into(),
+        }
     }
 }
 
 impl ProcessEngine {
     #[must_use]
     pub fn with_worker(worker: PathBuf) -> Self {
-        Self {
-            worker,
-            devices: vec![DeviceClass::Cpu],
-        }
+        Self::with_worker_and_devices(worker, vec![DeviceClass::Cpu])
     }
 
     #[must_use]
     pub fn with_worker_and_devices(worker: PathBuf, devices: Vec<DeviceClass>) -> Self {
-        Self { worker, devices }
+        Self::with_identity(worker, devices, "process", "builtin")
+    }
+
+    #[must_use]
+    pub fn with_identity(
+        worker: PathBuf,
+        devices: Vec<DeviceClass>,
+        backend_id: impl Into<String>,
+        variant: impl Into<String>,
+    ) -> Self {
+        Self {
+            worker,
+            devices,
+            backend_id: backend_id.into(),
+            variant: variant.into(),
+        }
     }
 }
 
@@ -237,6 +256,14 @@ impl InferenceEngine for ProcessEngine {
 
     fn runtime(&self) -> Runtime {
         Runtime::Process
+    }
+
+    fn backend_id(&self) -> &str {
+        &self.backend_id
+    }
+
+    fn backend_variant(&self) -> &str {
+        &self.variant
     }
 
     fn implementations(&self) -> &[&'static str] {

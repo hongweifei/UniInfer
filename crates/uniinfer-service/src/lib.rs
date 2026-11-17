@@ -111,6 +111,27 @@ impl Runtime {
         })
     }
 
+    /// Assemble built-in engines plus every installed sidecar variant. Models
+    /// select a sidecar with their `[backend]` manifest block.
+    pub fn new_with_backends(
+        isolate_models: bool,
+        sidecars: &[uniinfer_backend_store::BackendLaunch],
+    ) -> Result<Self> {
+        Ok(Self {
+            registry: uniinfer_engine_set::build_with_backends(isolate_models, sidecars)?,
+        })
+    }
+
+    /// Register installed sidecars discovered after startup.
+    pub fn register_sidecars(&self, sidecars: &[uniinfer_backend_store::BackendLaunch]) {
+        uniinfer_engine_set::register_sidecars(&self.registry, sidecars);
+    }
+
+    /// Drop transports for a backend package removed from disk.
+    pub fn unregister_sidecar(&self, backend_id: &str, variant: &str) {
+        self.registry.unregister_sidecar(backend_id, variant);
+    }
+
     #[must_use]
     pub fn devices(&self) -> &[Device] {
         self.registry.inventory().devices()

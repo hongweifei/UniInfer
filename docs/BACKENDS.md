@@ -1,6 +1,6 @@
 # 推理引擎
 
-UniInfer 把内置引擎与下载后端统一管理：每个内置引擎（ONNX Runtime、Candle、llama.cpp、whisper.cpp 等）单独展示 runtime、实现、格式、模态与设备；外置 Sidecar 后端逐项声明自己的引擎。两类后端共享同一套列表、激活状态和重启语义。
+UniInfer 把内置引擎与下载后端统一管理：每个内置引擎（ONNX Runtime、Candle、llama.cpp、whisper.cpp 等）单独展示 runtime、实现、格式、模态与设备；外置 Sidecar 后端逐项声明自己的引擎。后端没有全局激活状态，安装后由模型 manifest 的 `[backend]` 选择使用哪个后端和变体。
 
 ## 目录
 
@@ -8,8 +8,8 @@ UniInfer 把内置引擎与下载后端统一管理：每个内置引擎（ONNX 
 
 - 自动从 `llama.cpp` 和 `stable-diffusion.cpp` 官方 release 发现 Windows CPU、Vulkan、CUDA 引擎。
 - 按官方项目、版本和加速变体下载并校验，安装到 `<配置文件目录>/backends/<id>/<version>/`。
-- 激活、卸载引擎；激活后重启应用生效。
-- 选择内置引擎组作为回退。
+- 卸载引擎；安装后后端即存在于列表中，供模型配置选择。
+- 同一项目的 CPU、Vulkan、CUDA 等变体按项目分组展示。
 
 ## 引擎清单
 
@@ -63,9 +63,24 @@ sha256 = "..."
 
 内部 `backend.toml` 只是安装后的启动描述，用户不需要编辑或手动导入。
 
+## 模型选择后端
+
+模型 manifest 通过 `[backend]` 指定使用哪个后端族和变体：
+
+```toml
+[backend]
+id = "llama.cpp"
+variant = "auto"
+```
+
+- `id` 是后端族，对应桌面上按项目分组的 `name`，例如 `llama.cpp`、`stable-diffusion.cpp`；`builtin` 表示只使用内置引擎。
+- `variant` 是已安装变体，例如 `CPU`、`Vulkan`、`CUDA`；省略或 `auto` 时按设备选择：CUDA 设备优先 CUDA，其他 GPU 优先 Vulkan，没有 GPU 时使用 CPU。
+- 没有 `[backend]` 时保持默认路由：内置引擎优先，模型按 `runtime` 和 `implementation` 匹配。
+- 模型运行配置界面会读取已安装后端，按项目生成后端选项，并把设备推荐变体显示在“自动”选项上。
+
 ## 运行时语义
 
-- 激活的后端注册为进程隔离传输引擎，优先处理其声明的格式/模态。
-- 图像、视频等内置引擎仍由主进程处理。
+- 所有已安装后端变体都会注册为进程隔离传输引擎；模型 manifest 决定具体使用哪一个，不存在全局“当前运行后端”。
+- 内置引擎仍在主进程处理；未选择外置后端的模型继续使用内置路由。
 - 后端 worker 崩溃或取消时只影响对应模型进程。
-- 后端激活/删除后需要重启主程序才能替换运行时；API `/v1/backends` 会返回 `restart_required`。
+- 新安装的后端在下一次读取 `/v1/backends` 时注册到运行时，不需要切换激活状态；删除后端会移除文件，正在加载的会话需要卸载或重启后释放。

@@ -125,10 +125,10 @@ flowchart TB
 
 ### 可下载后端
 
-- 桌面端「后端」页把内置引擎与外置 Sidecar 分开完整列出，每个引擎显示 runtime、实现、格式、模态、设备和运行状态。
-- 自动读取 `llama.cpp` 和 `stable-diffusion.cpp` 官方 release，按 CPU、Vulkan、CUDA 变体下载并校验；`llama-server` 走 HTTP 流式适配，`sd-server` 走图像生成适配。
-- 安装到配置目录下的 `backends/`。
-- 激活外置引擎或切回内置引擎组后重启生效；内置引擎不需要下载，始终作为回退能力。
+- 桌面端「后端」页把内置引擎与外置 Sidecar 分开完整列出；外置后端按官方项目分组，同一项目下展示 CPU、Vulkan、CUDA 等已安装变体。
+- 自动读取 `llama.cpp` 和 `stable-diffusion.cpp` 官方 release，按变体下载并校验；`llama-server` 走 HTTP 流式适配，`sd-server` 走图像生成适配。
+- 安装到配置目录下的 `backends/`；没有全局激活状态，安装后即可在模型运行配置中选择。
+- 每个模型可在 `[backend]` 中指定后端族与变体；变体为 `auto` 时按设备选择 CUDA、Vulkan 或 CPU。内置引擎不需要下载，始终作为默认回退。
 - 官方引擎适配和内部启动描述见 [docs/BACKENDS.md](docs/BACKENDS.md)。
 
 ### 分层驻留

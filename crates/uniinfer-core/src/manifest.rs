@@ -91,6 +91,15 @@ impl Capability {
     }
 }
 
+fn validate_backend_name(value: &str, field: &str) -> Result<()> {
+    if value.trim().is_empty() || value.chars().any(char::is_control) || value.len() > 128 {
+        return Err(EngineError::ManifestInvalid(format!(
+            "{field} must be a non-empty display name"
+        )));
+    }
+    Ok(())
+}
+
 fn unique_len(modalities: &[Modality]) -> usize {
     modalities.iter().copied().collect::<HashSet<_>>().len()
 }
@@ -627,6 +636,17 @@ impl Default for PlacementConfig {
     }
 }
 
+/// Model-level backend choice. An absent block keeps the registry's default
+/// routing; `variant = "auto"` lets the registry prefer the device backend.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct BackendConfig {
+    #[serde(default)]
+    pub id: Option<String>,
+    #[serde(default)]
+    pub variant: Option<String>,
+}
+
 /// Model manifest: capability, runtime, implementation and resource contract.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -646,6 +666,8 @@ pub struct ModelManifest {
     pub min_vram: Option<String>,
     #[serde(default)]
     pub placement: PlacementConfig,
+    #[serde(default)]
+    pub backend: Option<BackendConfig>,
     pub files: Vec<ModelFile>,
     #[serde(default)]
     pub text: Option<TextConfig>,
@@ -708,6 +730,19 @@ impl ModelManifest {
             return Err(EngineError::ManifestInvalid(
                 "implementation must be a non-empty [A-Za-z0-9._-] string".into(),
             ));
+        }
+        if let Some(backend) = &self.backend {
+            if let Some(id) = backend.id.as_deref() {
+                validate_backend_name(id, "backend.id")?;
+            }
+            if let Some(variant) = backend.variant.as_deref() {
+                validate_backend_name(variant, "backend.variant")?;
+                if backend.id.is_none() {
+                    return Err(EngineError::ManifestInvalid(
+                        "backend.variant requires backend.id".into(),
+                    ));
+                }
+            }
         }
         if self.capabilities.is_empty() {
             return Err(EngineError::ManifestInvalid("capabilities is empty".into()));
@@ -1160,6 +1195,29 @@ mode = "stream"
         );
         let error = parse(&raw).validate().expect_err("must reject");
         assert!(error.to_string().contains("twice"));
+    }
+
+    #[test]
+    fn parses_backend_choice() {
+        let raw = base().replace(
+            "[placement]",
+            "[backend]\nid = \"llama.cpp\"\nvariant = \"auto\"\n\n[placement]",
+        );
+        let manifest = parse(&raw);
+        manifest.validate().expect("backend choice");
+        let backend = manifest.backend.expect("backend");
+        assert_eq!(backend.id.as_deref(), Some("llama.cpp"));
+        assert_eq!(backend.variant.as_deref(), Some("auto"));
+    }
+
+    #[test]
+    fn rejects_variant_without_backend_id() {
+        let raw = base().replace(
+            "[placement]",
+            "[backend]\nvariant = \"CUDA\"\n\n[placement]",
+        );
+        let error = parse(&raw).validate().expect_err("must reject");
+        assert!(error.to_string().contains("requires backend.id"));
     }
 
     #[test]

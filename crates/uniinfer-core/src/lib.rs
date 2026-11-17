@@ -21,7 +21,7 @@ pub use engine::{
 pub use error::{EngineError, Result};
 pub use image_batch::{ImageBatch, MAX_IMAGES};
 pub use manifest::{
-    AudioConfig, Capability, CapabilityRequest, DiffusionComponent, DiffusionConfig,
+    AudioConfig, BackendConfig, Capability, CapabilityRequest, DiffusionComponent, DiffusionConfig,
     DiffusionScheduler, ImageConfig, Modality, Mode, ModelFile, ModelFormat, ModelManifest,
     Operation, PipelineConfig, PipelineStep, PlacementConfig, Quantization, Runtime, TextConfig,
 };

@@ -176,6 +176,7 @@ fn manifest() -> ModelManifest {
             offload_layers: None,
             kv_cache: None,
         },
+        backend: None,
         files: vec![uniinfer_core::ModelFile {
             path: PathBuf::from("weights.bin"),
             sha256: "0".repeat(64),
@@ -205,7 +206,7 @@ fn sha256(path: PathBuf) -> String {
 }
 
 fn registry() -> EngineRegistry {
-    let mut registry = EngineRegistry::new(DeviceInventory::probe());
+    let registry = EngineRegistry::new(DeviceInventory::probe());
     registry.register(std::sync::Arc::new(FakeEngine));
     registry
 }
@@ -303,7 +304,7 @@ fn defaults_to_auto_offload_for_capable_gpu_engine() {
             unified_memory: false,
         },
     ]);
-    let mut registry = EngineRegistry::new(inventory);
+    let registry = EngineRegistry::new(inventory);
     registry.register(std::sync::Arc::new(GpuOffloadEngine));
     let mut manifest = manifest();
     manifest.implementation = "onnx.offload".into();
@@ -332,7 +333,7 @@ fn rejects_min_vram_when_full_gpu_load_does_not_fit() {
             unified_memory: false,
         },
     ]);
-    let mut registry = EngineRegistry::new(inventory);
+    let registry = EngineRegistry::new(inventory);
     registry.register(std::sync::Arc::new(GpuOffloadEngine));
     let mut manifest = manifest();
     manifest.implementation = "onnx.offload".into();
@@ -371,7 +372,7 @@ fn ledger_reserves_and_releases_session_residency() {
     let mut manifest = manifest();
     manifest.implementation = "onnx.offload".into();
     let path = write_manifest(temp.path(), &manifest);
-    let mut registry = EngineRegistry::new(gpu_budget());
+    let registry = EngineRegistry::new(gpu_budget());
     registry.register(std::sync::Arc::new(GpuOffloadEngine));
 
     let lease = registry.load(&path).expect("first load");
@@ -402,7 +403,7 @@ fn reserves_reduce_admission_budget() {
     let mut manifest = manifest();
     manifest.implementation = "onnx.offload".into();
     let path = write_manifest(temp.path(), &manifest);
-    let mut registry = EngineRegistry::new(gpu_budget());
+    let registry = EngineRegistry::new(gpu_budget());
     registry.register(std::sync::Arc::new(GpuOffloadEngine));
     registry.set_reserves(401, 0);
     let error = match registry.load(&path) {
@@ -439,7 +440,7 @@ fn unified_gpu_charges_host_pool_once() {
     let mut manifest = manifest();
     manifest.implementation = "onnx.offload".into();
     let path = write_manifest(temp.path(), &manifest);
-    let mut registry = EngineRegistry::new(inventory);
+    let registry = EngineRegistry::new(inventory);
     registry.register(std::sync::Arc::new(GpuOffloadEngine));
     let first = registry.load(&path).expect("first unified load");
     let summary = registry.residency();

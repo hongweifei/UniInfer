@@ -59,7 +59,7 @@ async fn body_json(response: axum::response::Response) -> Value {
 }
 
 #[tokio::test]
-async fn lists_and_activates_installed_backends() {
+async fn lists_installed_backends_without_runtime_state() {
     let temp = tempfile::tempdir().expect("tempdir");
     let store = BackendStore::new(temp.path());
     install_fake(&store, "llama-vulkan", "1.0.0");
@@ -71,7 +71,6 @@ async fn lists_and_activates_installed_backends() {
     let app = app(&config);
 
     let response = app
-        .clone()
         .oneshot(
             Request::builder()
                 .uri("/v1/backends")
@@ -82,6 +81,8 @@ async fn lists_and_activates_installed_backends() {
         .expect("response");
     assert_eq!(response.status(), StatusCode::OK);
     let body = body_json(response).await;
+    assert!(body.get("active").is_none());
+    assert!(body.get("running").is_none());
     assert!(body["backends"].as_array().is_some_and(|items| {
         items.iter().any(|item| {
             item["kind"] == "builtin"
@@ -98,26 +99,34 @@ async fn lists_and_activates_installed_backends() {
             .iter()
             .any(|item| item["id"] == "llama-vulkan" && item["kind"] == "sidecar")
     }));
-    assert_eq!(body["active"]["id"], "builtin");
-    assert_eq!(body["running"]["id"], "builtin");
+}
+
+#[tokio::test]
+async fn removes_an_installed_backend() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let store = BackendStore::new(temp.path());
+    install_fake(&store, "llama-vulkan", "1.0.0");
+    let mut config = ApiConfig::new(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../models/tiny-onnx/manifest.toml"),
+    );
+    config.backend_dir = temp.path().to_path_buf();
+    let app = app(&config);
 
     let response = app
         .clone()
         .oneshot(
             Request::builder()
-                .method("POST")
-                .uri("/v1/backends/llama-vulkan/activate")
-                .header("content-type", "application/json")
-                .body(Body::from("{}"))
+                .method("DELETE")
+                .uri("/v1/backends/llama-vulkan")
+                .body(Body::empty())
                 .expect("request"),
         )
         .await
         .expect("response");
     assert_eq!(response.status(), StatusCode::OK);
     let body = body_json(response).await;
-    assert_eq!(body["restart_required"], true);
-    assert_eq!(body["active"]["version"], "1.0.0");
-    assert_eq!(body["active"]["kind"], "sidecar");
+    assert_eq!(body["removed"], true);
+    assert!(!temp.path().join("llama-vulkan").exists());
 
     let response = app
         .oneshot(
@@ -129,18 +138,19 @@ async fn lists_and_activates_installed_backends() {
         .await
         .expect("response");
     let body = body_json(response).await;
-    assert_eq!(body["active"]["id"], "llama-vulkan");
-    assert_eq!(body["running"]["id"], "builtin");
+    assert!(
+        body["backends"]
+            .as_array()
+            .is_some_and(|items| { items.iter().all(|item| item["id"] != "llama-vulkan") })
+    );
 }
 
 #[tokio::test]
-async fn builtin_backend_is_selectable_and_clears_sidecar_marker() {
+async fn active_marker_does_not_change_the_backend_list() {
     let temp = tempfile::tempdir().expect("tempdir");
     let store = BackendStore::new(temp.path());
     install_fake(&store, "llama-vulkan", "1.0.0");
-    store
-        .set_active("llama-vulkan", "1.0.0")
-        .expect("activate sidecar");
+    std::fs::write(temp.path().join("active"), "llama-vulkan/1.0.0\n").expect("legacy marker");
 
     let mut config = ApiConfig::new(
         Path::new(env!("CARGO_MANIFEST_DIR")).join("../../models/tiny-onnx/manifest.toml"),
@@ -151,17 +161,19 @@ async fn builtin_backend_is_selectable_and_clears_sidecar_marker() {
     let response = app
         .oneshot(
             Request::builder()
-                .method("POST")
-                .uri("/v1/backends/builtin/activate")
-                .header("content-type", "application/json")
-                .body(Body::from("{}"))
+                .uri("/v1/backends")
+                .body(Body::empty())
                 .expect("request"),
         )
         .await
         .expect("response");
     assert_eq!(response.status(), StatusCode::OK);
     let body = body_json(response).await;
-    assert_eq!(body["active"]["id"], "builtin");
-    assert_eq!(body["active"]["kind"], "builtin");
-    assert!(store.active().expect("active").is_none());
+    assert!(body.get("active").is_none());
+    assert!(body.get("running").is_none());
+    assert!(body["backends"].as_array().is_some_and(|items| {
+        items
+            .iter()
+            .any(|item| item["id"] == "llama-vulkan" && item["kind"] == "sidecar")
+    }));
 }

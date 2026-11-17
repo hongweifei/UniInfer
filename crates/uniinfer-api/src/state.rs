@@ -4,7 +4,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, RwLock};
 
 use tokio::sync::Mutex as AsyncMutex;
-use uniinfer_backend_store::{BackendRuntime, BackendStore};
+use uniinfer_backend_store::BackendStore;
 use uniinfer_config::{ConfigHandle, ServerConfig};
 use uniinfer_core::{CancelToken, CapabilityRequest, EngineError, ModelManifest, Result};
 use uniinfer_service::{AudioSlot, ImageSlot, ModelSlot, Runtime};
@@ -36,32 +36,34 @@ pub struct AppState {
     model_load_timeout_ms: Arc<AtomicU64>,
     pub(crate) catalog: Arc<RwLock<HashMap<String, CatalogEntry>>>,
     pub(crate) backends: Arc<BackendStore>,
-    pub(crate) active_backend: Option<(String, String)>,
     load_lock: Arc<AsyncMutex<()>>,
 }
 
 impl AppState {
     pub fn new(config: &ApiConfig) -> Result<Self> {
         let backends = Arc::new(BackendStore::new(config.backend_dir.clone()));
-        let active = match backends.active() {
-            Ok(active) => active,
+        let mut launches = Vec::new();
+        match backends.installed() {
+            Ok(installed) => {
+                // Newest package first; duplicate family/variant variants are
+                // resolved by the registry's declaration order.
+                for backend in installed.iter().rev() {
+                    match backend.launch() {
+                        Ok(launch) => launches.push(launch),
+                        Err(error) => {
+                            tracing::warn!(%error, id = %backend.manifest().id, "skipping unusable backend package");
+                        }
+                    }
+                }
+            }
             Err(error) => {
                 tracing::warn!(%error, "read backend store failed; using built-in engines");
-                None
             }
-        };
-        let launch = match active.as_ref().map(|backend| backend.launch()).transpose() {
-            Ok(launch) => launch,
-            Err(error) => {
-                tracing::warn!(%error, "active backend is unusable; using built-in engines");
-                None
-            }
-        };
-        let active_backend = launch
-            .as_ref()
-            .map(|backend| (backend.id.clone(), backend.version.clone()));
-        let backend = launch.map_or(BackendRuntime::Builtin, BackendRuntime::Sidecar);
-        let runtime = Arc::new(Runtime::new_with_backend(config.isolate_models, backend)?);
+        }
+        let runtime = Arc::new(Runtime::new_with_backends(
+            config.isolate_models,
+            &launches,
+        )?);
         runtime.set_reserves(
             config.vram_reserve_mb.saturating_mul(1024 * 1024),
             config.host_reserve_mb.saturating_mul(1024 * 1024),
@@ -111,9 +113,27 @@ impl AppState {
             )),
             catalog: Arc::new(RwLock::new(catalog)),
             backends,
-            active_backend,
             load_lock: Arc::new(AsyncMutex::new(())),
         })
+    }
+
+    /// Register sidecar packages installed after the runtime was built.
+    pub(crate) fn sync_backends(&self) -> std::result::Result<(), String> {
+        let installed = self
+            .backends
+            .installed()
+            .map_err(|error| error.to_string())?;
+        let mut launches = Vec::new();
+        for backend in installed.iter().rev() {
+            match backend.launch() {
+                Ok(launch) => launches.push(launch),
+                Err(error) => {
+                    tracing::warn!(%error, id = %backend.manifest().id, "skipping unusable backend package");
+                }
+            }
+        }
+        self.runtime.register_sidecars(&launches);
+        Ok(())
     }
 
     /// Select the first configured model that satisfies a capability request.

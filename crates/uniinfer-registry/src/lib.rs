@@ -2,7 +2,7 @@
 
 use std::path::Path;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, RwLock};
 
 use uniinfer_core::{
     CancelToken, DeviceBudget, DeviceClass, EngineError, EngineLoadSpec, EngineSession,
@@ -35,7 +35,7 @@ pub struct EngineDescriptor {
 
 /// Owns registered engines and hands out leases.
 pub struct EngineRegistry {
-    engines: Vec<Arc<dyn InferenceEngine>>,
+    engines: RwLock<Vec<Arc<dyn InferenceEngine>>>,
     inventory: DeviceInventory,
     active: Arc<AtomicUsize>,
     ledger: ResidencyLedger,
@@ -46,7 +46,7 @@ impl EngineRegistry {
     #[must_use]
     pub fn new(inventory: DeviceInventory) -> Self {
         Self {
-            engines: Vec::new(),
+            engines: RwLock::new(Vec::new()),
             inventory,
             active: Arc::new(AtomicUsize::new(0)),
             ledger: ResidencyLedger::default(),
@@ -54,8 +54,40 @@ impl EngineRegistry {
         }
     }
 
-    pub fn register(&mut self, engine: Arc<dyn InferenceEngine>) {
-        self.engines.push(engine);
+    pub fn register(&self, engine: Arc<dyn InferenceEngine>) {
+        if let Ok(mut engines) = self.engines.write() {
+            engines.push(engine);
+        }
+    }
+
+    /// Remove transports for a deleted backend family/variant.
+    pub fn unregister_sidecar(&self, backend_id: &str, variant: &str) {
+        if let Ok(mut engines) = self.engines.write() {
+            engines.retain(|engine| {
+                !(engine.is_transport()
+                    && engine.backend_id() == backend_id
+                    && engine.backend_variant().eq_ignore_ascii_case(variant))
+            });
+        }
+    }
+
+    /// Replace a transport with the same family/variant, keeping the newest
+    /// installed package authoritative.
+    pub fn register_sidecar(&self, engine: Arc<dyn InferenceEngine>) {
+        if !engine.is_transport() {
+            self.register(engine);
+            return;
+        }
+        if let Ok(mut engines) = self.engines.write() {
+            engines.retain(|current| {
+                !(current.is_transport()
+                    && current.backend_id() == engine.backend_id()
+                    && current
+                        .backend_variant()
+                        .eq_ignore_ascii_case(engine.backend_variant()))
+            });
+            engines.push(engine);
+        }
     }
 
     #[must_use]
@@ -72,7 +104,10 @@ impl EngineRegistry {
     /// the backend manager instead.
     #[must_use]
     pub fn engine_descriptors(&self) -> Vec<EngineDescriptor> {
-        self.engines
+        let Ok(engines) = self.engines.read() else {
+            return Vec::new();
+        };
+        engines
             .iter()
             .filter(|engine| !engine.is_transport())
             .map(|engine| {
@@ -243,6 +278,35 @@ impl EngineRegistry {
         })
     }
 
+    /// Prefer the installed variant that matches the live GPU backend.
+    fn variant_rank(&self, variant: &str) -> u8 {
+        let variant = variant.to_ascii_lowercase();
+        let gpus = self
+            .inventory
+            .devices()
+            .iter()
+            .filter(|device| device.class == DeviceClass::Gpu)
+            .collect::<Vec<_>>();
+        if gpus.is_empty() {
+            return if variant == "cpu" { 0 } else { 2 };
+        }
+        let has_cuda = gpus
+            .iter()
+            .any(|device| device.backend.to_ascii_lowercase().contains("cuda"));
+        let has_vulkan = gpus
+            .iter()
+            .any(|device| device.backend.to_ascii_lowercase().contains("vulkan"));
+        match variant.as_str() {
+            "cuda" if has_cuda => 0,
+            "vulkan" if has_vulkan => 0,
+            "vulkan" if has_cuda => 1,
+            "cuda" => 1,
+            "vulkan" => 2,
+            "cpu" => 3,
+            _ => 4,
+        }
+    }
+
     fn resolve(
         &self,
         manifest: &ModelManifest,
@@ -253,8 +317,46 @@ impl EngineRegistry {
         let mut saw_quantization = false;
         let mut saw_device = false;
         let mut saw_modality = false;
+        let mut saw_backend = false;
 
-        for engine in &self.engines {
+        let Ok(registered) = self.engines.read() else {
+            return Err(EngineError::Other("engine registry poisoned".into()));
+        };
+        let mut engines = registered.iter().collect::<Vec<_>>();
+        let backend_id = manifest
+            .backend
+            .as_ref()
+            .and_then(|backend| backend.id.as_deref())
+            .map(str::trim)
+            .filter(|id| !id.is_empty());
+        let backend_variant = manifest
+            .backend
+            .as_ref()
+            .and_then(|backend| backend.variant.as_deref())
+            .map(str::trim)
+            .filter(|variant| !variant.is_empty());
+        if let Some(id) = backend_id
+            && id != "auto"
+        {
+            engines.retain(|engine| {
+                if id == "builtin" {
+                    !engine.is_transport()
+                        || engine.backend_variant().eq_ignore_ascii_case("builtin")
+                } else {
+                    engine.backend_id() == id
+                }
+            });
+            saw_backend = !engines.is_empty();
+            if id != "builtin" {
+                match backend_variant {
+                    Some(variant) if variant != "auto" => engines
+                        .retain(|engine| engine.backend_variant().eq_ignore_ascii_case(variant)),
+                    _ => engines.sort_by_key(|engine| self.variant_rank(engine.backend_variant())),
+                }
+            }
+        }
+
+        for engine in engines {
             if !engine.is_transport() {
                 if engine.runtime() != manifest.runtime {
                     continue;
@@ -376,6 +478,15 @@ impl EngineRegistry {
             }
         }
 
+        if backend_id.is_some_and(|id| id != "auto") && !saw_backend {
+            let mut requested = backend_id.unwrap_or_default().to_owned();
+            if let Some(variant) = backend_variant.filter(|variant| *variant != "auto") {
+                requested.push_str(&format!(" / {variant}"));
+            }
+            return Err(EngineError::UnsupportedEngine(format!(
+                "no installed backend matches {requested}"
+            )));
+        }
         if !saw_runtime {
             return Err(EngineError::UnsupportedEngine(format!(
                 "no engine for runtime {:?}",

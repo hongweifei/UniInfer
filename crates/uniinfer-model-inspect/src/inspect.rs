@@ -271,6 +271,7 @@ pub fn inspect(root: &Path, options: &InspectOptions) -> Result<Inspection> {
         tokenizer: tokenizer.as_ref().map(|_| "hf".into()),
         min_vram: None,
         placement: PlacementConfig::default(),
+        backend: None,
         files,
         text,
         audio,

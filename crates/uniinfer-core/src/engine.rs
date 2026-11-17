@@ -174,6 +174,17 @@ pub trait InferenceEngine: Send + Sync {
     /// Runtime family this engine implements.
     fn runtime(&self) -> Runtime;
 
+    /// Backend family selected by a model manifest. Built-in engines default
+    /// to their engine name; transports expose the downloaded family.
+    fn backend_id(&self) -> &str {
+        self.engine_name()
+    }
+
+    /// Installed backend variant, e.g. `CPU`, `Vulkan`, `CUDA`.
+    fn backend_variant(&self) -> &str {
+        "builtin"
+    }
+
     /// Declarative implementation names accepted by this engine.
     fn implementations(&self) -> &[&'static str];
 

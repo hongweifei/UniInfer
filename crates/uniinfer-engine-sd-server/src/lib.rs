@@ -46,11 +46,23 @@ const QUANTIZATIONS: &[Quantization] = &[
 pub struct StableDiffusionServerEngine {
     executable: PathBuf,
     devices: Vec<DeviceClass>,
+    backend_id: String,
+    variant: String,
 }
 
 impl StableDiffusionServerEngine {
     #[must_use]
     pub fn new(executable: PathBuf, devices: Vec<DeviceClass>) -> Self {
+        Self::with_identity(executable, devices, "stable-diffusion.cpp", "auto")
+    }
+
+    #[must_use]
+    pub fn with_identity(
+        executable: PathBuf,
+        devices: Vec<DeviceClass>,
+        backend_id: impl Into<String>,
+        variant: impl Into<String>,
+    ) -> Self {
         Self {
             executable,
             devices: if devices.is_empty() {
@@ -58,6 +70,8 @@ impl StableDiffusionServerEngine {
             } else {
                 devices
             },
+            backend_id: backend_id.into(),
+            variant: variant.into(),
         }
     }
 }
@@ -69,6 +83,14 @@ impl InferenceEngine for StableDiffusionServerEngine {
 
     fn runtime(&self) -> Runtime {
         Runtime::Onnx
+    }
+
+    fn backend_id(&self) -> &str {
+        &self.backend_id
+    }
+
+    fn backend_variant(&self) -> &str {
+        &self.variant
     }
 
     fn implementations(&self) -> &[&'static str] {
