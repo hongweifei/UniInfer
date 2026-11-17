@@ -67,8 +67,15 @@ async fn lists_and_activates_installed_backends() {
         .expect("response");
     assert_eq!(response.status(), StatusCode::OK);
     let body = body_json(response).await;
-    assert_eq!(body["installed"][0]["id"], "llama-vulkan");
-    assert!(body["active"].is_null());
+    assert_eq!(body["backends"][0]["id"], "builtin");
+    assert_eq!(body["backends"][0]["kind"], "builtin");
+    assert!(body["backends"].as_array().is_some_and(|items| {
+        items
+            .iter()
+            .any(|item| item["id"] == "llama-vulkan" && item["kind"] == "sidecar")
+    }));
+    assert_eq!(body["active"]["id"], "builtin");
+    assert_eq!(body["running"]["id"], "builtin");
 
     let response = app
         .clone()
@@ -86,6 +93,7 @@ async fn lists_and_activates_installed_backends() {
     let body = body_json(response).await;
     assert_eq!(body["restart_required"], true);
     assert_eq!(body["active"]["version"], "1.0.0");
+    assert_eq!(body["active"]["kind"], "sidecar");
 
     let response = app
         .oneshot(
@@ -98,5 +106,38 @@ async fn lists_and_activates_installed_backends() {
         .expect("response");
     let body = body_json(response).await;
     assert_eq!(body["active"]["id"], "llama-vulkan");
-    assert_eq!(body["running"], Value::Null);
+    assert_eq!(body["running"]["id"], "builtin");
+}
+
+#[tokio::test]
+async fn builtin_backend_is_selectable_and_clears_sidecar_marker() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let store = BackendStore::new(temp.path());
+    install_fake(&store, "llama-vulkan", "1.0.0");
+    store
+        .set_active("llama-vulkan", "1.0.0")
+        .expect("activate sidecar");
+
+    let mut config = ApiConfig::new(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../models/tiny-onnx/manifest.toml"),
+    );
+    config.backend_dir = temp.path().to_path_buf();
+    let app = app(&config);
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/backends/builtin/activate")
+                .header("content-type", "application/json")
+                .body(Body::from("{}"))
+                .expect("request"),
+        )
+        .await
+        .expect("response");
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = body_json(response).await;
+    assert_eq!(body["active"]["id"], "builtin");
+    assert_eq!(body["active"]["kind"], "builtin");
+    assert!(store.active().expect("active").is_none());
 }

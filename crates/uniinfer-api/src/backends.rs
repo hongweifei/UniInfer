@@ -1,10 +1,12 @@
-//! Installed sidecar backend packages.
+//! Unified list and selection of built-in and sidecar inference backends.
 
 use axum::Json;
 use axum::extract::{Path, State};
 use serde::Deserialize;
 use serde_json::{Value, json};
-use uniinfer_backend_store::BackendStore;
+use uniinfer_backend_store::{
+    BUILTIN_BACKEND_ID, BackendInfo, BackendKind, BackendStore, InstalledBackend,
+};
 
 use crate::error::ApiError;
 use crate::extract::ApiJson;
@@ -21,47 +23,35 @@ pub(crate) async fn list(State(state): State<AppState>) -> Result<Json<Value>, A
         .backends
         .installed()
         .map_err(|error| ApiError::internal(format!("read backend store: {error}")))?;
-    let active = match state.backends.active() {
-        Ok(active) => active.map(|backend| {
-            (
-                backend.manifest().id.clone(),
-                backend.manifest().version.clone(),
-            )
-        }),
-        Err(error) => {
-            tracing::warn!(%error, "ignoring invalid active backend marker");
-            None
-        }
-    };
-    let running = state.active_backend.clone();
-    let data = installed
-        .iter()
+    let selected = selected_backend(&state)?;
+    let running = running_backend(&state);
+    let mut backends = vec![builtin_info(&state)];
+    backends.extend(installed.iter().map(InstalledBackend::info));
+    let data = backends
+        .into_iter()
         .map(|backend| {
-            let manifest = backend.manifest();
-            let is_active = active
+            let active = selected
                 .as_ref()
-                .is_some_and(|(id, version)| id == &manifest.id && version == &manifest.version);
+                .is_some_and(|(id, version)| id == &backend.id && version == &backend.version);
             json!({
-                "id": manifest.id,
-                "name": manifest.name,
-                "version": manifest.version,
-                "description": manifest.description,
-                "homepage": manifest.homepage,
-                "license": manifest.license,
-                "platform": manifest.platform,
-                "devices": manifest.devices,
-                "worker": manifest.worker,
-                "size_bytes": backend.size_bytes(),
-                "active": is_active,
+                "id": backend.id,
+                "name": backend.name,
+                "version": backend.version,
+                "description": backend.description,
+                "platform": backend.platform,
+                "devices": backend.devices,
+                "kind": backend.kind,
+                "size_bytes": backend.size_bytes,
+                "active": active,
             })
         })
         .collect::<Vec<_>>();
     Ok(Json(json!({
-        "active": active.map(|(id, version)| json!({"id": id, "version": version})),
-        "running": running.map(|(id, version)| json!({"id": id, "version": version})),
+        "active": selected.map(|(id, version)| backend_ref(&id, &version)),
+        "running": backend_ref(&running.0, &running.1),
         "directory": state.backends.root(),
         "catalog_url": state.backend_catalog_url,
-        "installed": data,
+        "backends": data,
     })))
 }
 
@@ -70,6 +60,16 @@ pub(crate) async fn activate(
     State(state): State<AppState>,
     ApiJson(request): ApiJson<ActivateRequest>,
 ) -> Result<Json<Value>, ApiError> {
+    if id == BUILTIN_BACKEND_ID {
+        state
+            .backends
+            .clear_active()
+            .map_err(|error| ApiError::internal(format!("clear active backend: {error}")))?;
+        return Ok(Json(json!({
+            "active": {"id": BUILTIN_BACKEND_ID, "version": env!("CARGO_PKG_VERSION"), "kind": "builtin"},
+            "restart_required": true,
+        })));
+    }
     let version = match request.version {
         Some(version) => version,
         None => latest_version(&state.backends, &id)?,
@@ -79,7 +79,7 @@ pub(crate) async fn activate(
         .set_active(&id, &version)
         .map_err(|error| ApiError::bad_request("backend_activate_failed", error.to_string()))?;
     Ok(Json(json!({
-        "active": {"id": id, "version": version},
+        "active": {"id": id, "version": version, "kind": "sidecar"},
         "restart_required": true,
     })))
 }
@@ -88,6 +88,12 @@ pub(crate) async fn remove(
     Path(id): Path<String>,
     State(state): State<AppState>,
 ) -> Result<Json<Value>, ApiError> {
+    if id == BUILTIN_BACKEND_ID {
+        return Err(ApiError::bad_request(
+            "builtin_backend",
+            "the built-in backend cannot be removed",
+        ));
+    }
     let removed = state
         .backends
         .remove(&id)
@@ -97,6 +103,66 @@ pub(crate) async fn remove(
         "removed": removed,
         "restart_required": true,
     })))
+}
+
+/// Kept as an alias for clients that predate the unified `builtin` entry.
+pub(crate) async fn deactivate(State(state): State<AppState>) -> Result<Json<Value>, ApiError> {
+    state
+        .backends
+        .clear_active()
+        .map_err(|error| ApiError::internal(format!("clear active backend: {error}")))?;
+    Ok(Json(json!({
+        "active": {"id": BUILTIN_BACKEND_ID, "version": env!("CARGO_PKG_VERSION"), "kind": "builtin"},
+        "restart_required": true,
+    })))
+}
+
+fn builtin_info(state: &AppState) -> BackendInfo {
+    let mut devices = Vec::new();
+    for device in state.runtime.devices() {
+        if !devices.contains(&device.class) {
+            devices.push(device.class);
+        }
+    }
+    BackendInfo::builtin(env!("CARGO_PKG_VERSION"), devices)
+}
+
+fn selected_backend(state: &AppState) -> Result<Option<(String, String)>, ApiError> {
+    match state.backends.active() {
+        Ok(Some(backend)) => Ok(Some((
+            backend.manifest().id.clone(),
+            backend.manifest().version.clone(),
+        ))),
+        Ok(None) => Ok(Some((
+            BUILTIN_BACKEND_ID.to_owned(),
+            env!("CARGO_PKG_VERSION").to_owned(),
+        ))),
+        Err(error) => {
+            tracing::warn!(%error, "ignoring invalid active backend marker");
+            Ok(Some((
+                BUILTIN_BACKEND_ID.to_owned(),
+                env!("CARGO_PKG_VERSION").to_owned(),
+            )))
+        }
+    }
+}
+
+fn running_backend(state: &AppState) -> (String, String) {
+    state.active_backend.clone().unwrap_or_else(|| {
+        (
+            BUILTIN_BACKEND_ID.to_owned(),
+            env!("CARGO_PKG_VERSION").to_owned(),
+        )
+    })
+}
+
+fn backend_ref(id: &str, version: &str) -> Value {
+    let kind = if id == BUILTIN_BACKEND_ID {
+        BackendKind::Builtin
+    } else {
+        BackendKind::Sidecar
+    };
+    json!({"id": id, "version": version, "kind": kind})
 }
 
 fn latest_version(store: &BackendStore, id: &str) -> Result<String, ApiError> {
@@ -116,14 +182,6 @@ fn latest_version(store: &BackendStore, id: &str) -> Result<String, ApiError> {
                 format!("backend {id} is not installed"),
             )
         })
-}
-
-pub(crate) async fn deactivate(State(state): State<AppState>) -> Result<Json<Value>, ApiError> {
-    state
-        .backends
-        .clear_active()
-        .map_err(|error| ApiError::internal(format!("clear active backend: {error}")))?;
-    Ok(Json(json!({"active": null, "restart_required": true})))
 }
 
 fn version_key(version: &str) -> Vec<u64> {

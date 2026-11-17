@@ -24,6 +24,52 @@ pub enum BackendError {
 
 pub type Result<T> = std::result::Result<T, BackendError>;
 
+/// Stable identifier for the in-process backend that ships with UniInfer.
+pub const BUILTIN_BACKEND_ID: &str = "builtin";
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum BackendKind {
+    Builtin,
+    Sidecar,
+}
+
+/// Uniform description used by the API and GUI for both backend kinds.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BackendInfo {
+    pub id: String,
+    pub name: String,
+    pub version: String,
+    pub description: String,
+    pub platform: String,
+    pub devices: Vec<DeviceClass>,
+    pub kind: BackendKind,
+    pub size_bytes: u64,
+}
+
+impl BackendInfo {
+    #[must_use]
+    pub fn builtin(version: impl Into<String>, devices: Vec<DeviceClass>) -> Self {
+        Self {
+            id: BUILTIN_BACKEND_ID.into(),
+            name: "内置后端".into(),
+            version: version.into(),
+            description: "随主程序分发的 ONNX / Candle / llama.cpp / whisper.cpp 引擎".into(),
+            platform: std::env::consts::OS.into(),
+            devices,
+            kind: BackendKind::Builtin,
+            size_bytes: 0,
+        }
+    }
+}
+
+/// Runtime selection: both built-in and sidecar backends use this type.
+#[derive(Debug, Clone)]
+pub enum BackendRuntime {
+    Builtin,
+    Sidecar(BackendLaunch),
+}
+
 /// A downloadable backend package.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -83,6 +129,20 @@ pub struct BackendLaunch {
 }
 
 impl InstalledBackend {
+    #[must_use]
+    pub fn info(&self) -> BackendInfo {
+        BackendInfo {
+            id: self.manifest.id.clone(),
+            name: self.manifest.name.clone(),
+            version: self.manifest.version.clone(),
+            description: self.manifest.description.clone(),
+            platform: self.manifest.platform.clone(),
+            devices: self.manifest.devices.clone(),
+            kind: BackendKind::Sidecar,
+            size_bytes: self.size_bytes(),
+        }
+    }
+
     #[must_use]
     pub fn dir(&self) -> &Path {
         &self.dir

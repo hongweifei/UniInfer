@@ -4,7 +4,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, RwLock};
 
 use tokio::sync::Mutex as AsyncMutex;
-use uniinfer_backend_store::BackendStore;
+use uniinfer_backend_store::{BackendRuntime, BackendStore};
 use uniinfer_config::{ConfigHandle, ServerConfig};
 use uniinfer_core::{CancelToken, CapabilityRequest, EngineError, ModelManifest, Result};
 use uniinfer_service::{AudioSlot, ImageSlot, ModelSlot, Runtime};
@@ -61,7 +61,8 @@ impl AppState {
         let active_backend = launch
             .as_ref()
             .map(|backend| (backend.id.clone(), backend.version.clone()));
-        let runtime = Arc::new(Runtime::new_with_backend(config.isolate_models, launch)?);
+        let backend = launch.map_or(BackendRuntime::Builtin, BackendRuntime::Sidecar);
+        let runtime = Arc::new(Runtime::new_with_backend(config.isolate_models, backend)?);
         runtime.set_reserves(
             config.vram_reserve_mb.saturating_mul(1024 * 1024),
             config.host_reserve_mb.saturating_mul(1024 * 1024),

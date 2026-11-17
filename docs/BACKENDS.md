@@ -1,6 +1,6 @@
 # 推理后端包
 
-UniInfer 主程序内置 CPU 引擎；带 CUDA、Vulkan、DirectML、CoreML、QNN 等硬件加速的推理后端可以独立下载和升级。
+UniInfer 把内置后端与下载后端统一为同一种「后端」：内置后端随主程序分发，带 CUDA、Vulkan、DirectML、CoreML、QNN 等硬件加速的 Sidecar 后端可以独立下载、升级和激活。两类后端共享同一套列表、激活状态和重启语义。
 
 ## 目录
 
@@ -10,7 +10,7 @@ UniInfer 主程序内置 CPU 引擎；带 CUDA、Vulkan、DirectML、CoreML、QN
 - 下载并校验后端包，安装到 `<配置文件目录>/backends/<id>/<version>/`。
 - 导入包含 `backend.toml` 的本地后端目录。
 - 激活、删除后端；激活后重启应用生效。
-- 切回内置引擎。
+- 选择「内置后端」作为回退。
 
 ## 后端清单
 
