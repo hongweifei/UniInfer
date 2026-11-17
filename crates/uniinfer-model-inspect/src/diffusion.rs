@@ -64,10 +64,10 @@ pub(crate) fn detect(root: &Path, onnx: &[PathBuf]) -> Option<DiffusionLayout> {
             },
             text_encoder_input: input_name(text_info.as_ref(), "input_ids"),
             unet_sample_input: input_name(unet_info.as_ref(), "sample"),
-            unet_timestep_input: input_name(unet_info.as_ref(), "timestep"),
-            unet_encoder_input: input_name(unet_info.as_ref(), "encoder_hidden_states"),
+            unet_timestep_input: input_at(unet_info.as_ref(), 1, "timestep"),
+            unet_encoder_input: input_at(unet_info.as_ref(), 2, "encoder_hidden_states"),
             unet_timestep_dtype: input_dtype(unet_info.as_ref(), "timestep"),
-            vae_input: input_name(vae_info.as_ref(), "latent_sample"),
+            vae_input: input_at(vae_info.as_ref(), 0, "latent_sample"),
             latent_channels: 4,
             max_length: 77,
             pad_token: 0,
@@ -82,7 +82,19 @@ pub(crate) fn detect(root: &Path, onnx: &[PathBuf]) -> Option<DiffusionLayout> {
 
 fn input_name(graph: Option<&GraphInfo>, fallback: &str) -> String {
     graph
-        .and_then(|graph| graph.inputs.first())
+        .and_then(|graph| {
+            graph
+                .inputs
+                .iter()
+                .find(|tensor| tensor.name == fallback)
+                .or_else(|| graph.inputs.first())
+        })
+        .map_or_else(|| fallback.to_owned(), |tensor| tensor.name.clone())
+}
+
+fn input_at(graph: Option<&GraphInfo>, index: usize, fallback: &str) -> String {
+    graph
+        .and_then(|graph| graph.inputs.get(index))
         .map_or_else(|| fallback.to_owned(), |tensor| tensor.name.clone())
 }
 

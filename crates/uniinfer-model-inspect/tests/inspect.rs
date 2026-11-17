@@ -157,6 +157,9 @@ fn diffusion_layout_uses_graph_tensor_names() {
     let diffusion = image.diffusion.expect("diffusion");
     assert_eq!(diffusion.vae_input, "latent_sample");
     assert_eq!(diffusion.unet.output, "out_sample");
+    assert_eq!(diffusion.unet_sample_input, "sample");
+    assert_eq!(diffusion.unet_timestep_input, "timestep");
+    assert_eq!(diffusion.unet_encoder_input, "encoder_hidden_states");
     assert_eq!(diffusion.vae_decoder.output, "sample");
     assert_eq!(diffusion.unet_timestep_dtype, "f32");
 }
