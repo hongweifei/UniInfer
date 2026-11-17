@@ -21,7 +21,10 @@ export function mountCatalog(root, ctx) {
     h('option', { value: 'modelscope', text: 'ModelScope' }),
     h('option', { value: 'huggingface', text: 'Hugging Face' }),
   );
-  source.addEventListener('change', () => { if (lastQuery) void search(1); });
+  source.addEventListener('change', () => {
+    resetResults();
+    if (lastQuery) void search(1);
+  });
   const searchButton = h('button', { class: 'btn primary', type: 'button', onClick: () => void search() },
     h('span', { html: icon('search', 14) }), h('span', { text: '搜索' }));
   const categoryBar = h('div', { class: 'filter-chips', style: 'margin-top:10px' });
@@ -34,6 +37,7 @@ export function mountCatalog(root, ctx) {
     }));
   }
   let disposed = false;
+  let searchSeq = 0;
   let currentPage = 1;
   let hasMore = false;
   let lastQuery = '';
@@ -162,9 +166,21 @@ export function mountCatalog(root, ctx) {
     );
   }
 
+  function resetResults() {
+    searchSeq += 1;
+    currentItems = [];
+    clear(results);
+    clear(categoryBar);
+    clear(tagBar);
+    pager.replaceChildren();
+  }
+
   async function search(page = 1) {
     const text = query.value.trim();
+    const seq = ++searchSeq;
     if (!text) return;
+    const requestedSource = source.value;
+    const requestedLabel = sourceLabel();
     lastQuery = text;
     if (page === 1) {
       currentPage = 1;
@@ -173,25 +189,28 @@ export function mountCatalog(root, ctx) {
       categoryFilter = 'all';
       tagFilter = 'all';
     }
-    status.textContent = `正在搜索 ${sourceLabel()}…`;
+    status.textContent = `正在搜索 ${requestedLabel}…`;
     clear(results);
+    clear(categoryBar);
+    clear(tagBar);
     pager.replaceChildren();
     try {
       const result = await invoke('search_models', {
         query: text,
-        source: source.value,
+        source: requestedSource,
         page,
         pageSize: PAGE_SIZE,
       });
-      if (disposed) return;
+      if (disposed || seq !== searchSeq) return;
       currentPage = result.page ?? page;
       hasMore = Boolean(result.has_more);
       totalResults = result.total ?? null;
       status.textContent = result.total
-        ? `${result.total} 个结果 · ${sourceLabel()}`
-        : `${result.items?.length ?? 0} 个结果 · ${sourceLabel()}`;
+        ? `${result.total} 个结果 · ${requestedLabel}`
+        : `${result.items?.length ?? 0} 个结果 · ${requestedLabel}`;
       renderPage(currentPage, result.items ?? []);
     } catch (error) {
+      if (disposed || seq !== searchSeq) return;
       status.textContent = error?.message ?? String(error);
       toast(status.textContent, 'error');
     }

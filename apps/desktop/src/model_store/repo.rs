@@ -95,21 +95,34 @@ pub(super) async fn fetch_hf_repo(repo: &str) -> Result<RepoFiles, String> {
     })
 }
 
+fn modelscope_repo_error(repo: &str, status: reqwest::StatusCode) -> String {
+    if status == reqwest::StatusCode::NOT_FOUND {
+        format!(
+            "ModelScope 上不存在仓库 {repo}（HTTP 404）；如果它来自 Hugging Face，请切换模型源后重试"
+        )
+    } else {
+        format!("ModelScope 仓库 {repo} 请求失败：HTTP {status}")
+    }
+}
+
 pub(super) async fn fetch_modelscope_repo(repo: &str) -> Result<RepoFiles, String> {
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(30))
         .user_agent("UniInfer-Desktop/0.0")
         .build()
         .map_err(|error| format!("repo client: {error}"))?;
-    let value = client
+    let response = client
         .get(format!(
             "https://modelscope.cn/api/v1/models/{repo}/repo/files?Revision=master&Root=&Recursive=true"
         ))
         .send()
         .await
-        .map_err(|error| format!("repo files: {error}"))?
-        .error_for_status()
-        .map_err(|error| format!("repo files: {error}"))?
+        .map_err(|error| format!("repo files: {error}"))?;
+    let status = response.status();
+    if !status.is_success() {
+        return Err(modelscope_repo_error(repo, status));
+    }
+    let value = response
         .json::<serde_json::Value>()
         .await
         .map_err(|error| format!("repo files: {error}"))?;
