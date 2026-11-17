@@ -1,7 +1,7 @@
 import { h, clear } from '../dom.js';
 import { icon } from '../icons.js';
 import { toast, setBusy, confirmDialog, copyText } from '../components/ui.js';
-import { errorMessage } from '../format.js';
+import { errorMessage, formatBytes } from '../format.js';
 
 export function mountSettings(root, ctx) {
   const { state } = ctx;
@@ -27,6 +27,37 @@ export function mountSettings(root, ctx) {
     },
   });
 
+  function renderHardware() {
+    const devices = ctx.devices();
+    if (!devices.length) {
+      hardwareSummary.textContent = '未检测到设备。';
+      return;
+    }
+    const total = devices.reduce((sum, device) => sum + (Number(device.memory_bytes) || 0), 0);
+    const free = devices.reduce((sum, device) => sum + (Number(device.available_memory_bytes) || 0), 0);
+    hardwareSummary.textContent = `${devices.length} 个设备 · 总内存 ${formatBytes(total)} · 可用 ${formatBytes(free)}`;
+  }
+
+  function applyProfile(profile) {
+    if (profile === 'low') {
+      maxLoaded.value = '1';
+      vramReserve.value = '1024';
+      hostReserve.value = '4096';
+      queueTimeout.value = '60';
+    } else if (profile === 'balanced') {
+      maxLoaded.value = '2';
+      vramReserve.value = '512';
+      hostReserve.value = '2048';
+      queueTimeout.value = '30';
+    } else {
+      maxLoaded.value = '0';
+      vramReserve.value = '0';
+      hostReserve.value = '0';
+      queueTimeout.value = '15';
+    }
+    toast('已填入预设，保存运行时设置后生效', 'success', 1800);
+  }
+
   function renderTheme() {
     clear(themeSwitch);
     for (const [value, label, iconName] of [['system', '跟随系统', 'monitor'], ['light', '浅色', 'sun'], ['dark', '深色', 'moon']]) {
@@ -41,6 +72,9 @@ export function mountSettings(root, ctx) {
   const requestTimeout = h('input', { class: 'input', type: 'number', min: '0', step: '1', value: '0' });
   const loadTimeout = h('input', { class: 'input', type: 'number', min: '0', step: '1', value: '0' });
   const queueTimeout = h('input', { class: 'input', type: 'number', min: '0', step: '1', value: '30' });
+  const vramReserve = h('input', { class: 'input', type: 'number', min: '0', step: '256', value: '0' });
+  const hostReserve = h('input', { class: 'input', type: 'number', min: '0', step: '512', value: '0' });
+  const hardwareSummary = h('div', { class: 'notice faint', text: '读取设备中…' });
   const configPath = h('span', { class: 'mono muted', text: '读取中…' });
   const runtimeStatus = h('span', { class: 'faint' });
   const saveRuntimeButton = h('button', {
@@ -74,6 +108,9 @@ export function mountSettings(root, ctx) {
       requestTimeout.value = String(Math.round((server.request_timeout_ms ?? 0) / 1000));
       loadTimeout.value = String(Math.round((server.model_load_timeout_ms ?? 0) / 1000));
       queueTimeout.value = String(Math.round((server.queue_timeout_ms ?? 30000) / 1000));
+      vramReserve.value = String(server.vram_reserve_mb ?? 0);
+      hostReserve.value = String(server.host_reserve_mb ?? 0);
+      renderHardware();
       configPath.textContent = config.path ?? '未绑定配置文件';
       runtimeStatus.textContent = config.token_configured ? 'API token 已配置' : '';
       saveRuntimeButton.disabled = false;
@@ -95,6 +132,8 @@ export function mountSettings(root, ctx) {
           request_timeout_ms: Math.max(0, Number(requestTimeout.value) || 0) * 1000,
           model_load_timeout_ms: Math.max(0, Number(loadTimeout.value) || 0) * 1000,
           queue_timeout_ms: Math.max(0, Number(queueTimeout.value) || 0) * 1000,
+          vram_reserve_mb: Math.max(0, Number(vramReserve.value) || 0),
+          host_reserve_mb: Math.max(0, Number(hostReserve.value) || 0),
         },
       };
       const result = await ctx.api.saveConfig(body);
@@ -149,9 +188,26 @@ export function mountSettings(root, ctx) {
         ),
         h('div', { class: 'card', attrs: { id: 'settings-runtime' } },
           h('div', { class: 'section-title' }, h('h2', { text: '运行时' }), h('span', { class: 'spacer' }), runtimeStatus),
+          h('div', { class: 'notice faint', text: '这里配置整机资源；单个模型的层卸载与 KV 位置请到「已安装模型」的运行配置中单独调整。' }),
+          h('div', { class: 'row', style: 'margin:10px 0' },
+            h('span', { class: 'faint', text: '快速预设' }),
+            h('button', { class: 'btn sm ghost', type: 'button', text: '省内存', onClick: () => applyProfile('low') }),
+            h('button', { class: 'btn sm ghost', type: 'button', text: '平衡', onClick: () => applyProfile('balanced') }),
+            h('button', { class: 'btn sm ghost', type: 'button', text: '性能', onClick: () => applyProfile('high') }),
+            h('span', { class: 'spacer' }),
+            hardwareSummary,
+          ),
           h('div', { class: 'setting-row' },
             h('div', { class: 'setting-label' }, h('strong', { text: '最大驻留模型数' }), h('span', { text: '0 表示不限制；超出后自动卸载最久未用模型。' })),
             h('div', { style: 'width:140px' }, maxLoaded),
+          ),
+          h('div', { class: 'setting-row' },
+            h('div', { class: 'setting-label' }, h('strong', { text: 'GPU 预留 (MiB)' }), h('span', { text: '给驱动和其他进程保留的显存；越大越保守。' })),
+            h('div', { style: 'width:140px' }, vramReserve),
+          ),
+          h('div', { class: 'setting-row' },
+            h('div', { class: 'setting-label' }, h('strong', { text: '内存预留 (MiB)' }), h('span', { text: '给系统和缓存保留的主机内存。' })),
+            h('div', { style: 'width:140px' }, hostReserve),
           ),
           h('div', { class: 'setting-row' },
             h('div', { class: 'setting-label' }, h('strong', { text: '请求超时' }), h('span', { text: '单位：秒；0 表示不设截止时间。' })),

@@ -272,9 +272,11 @@ export function mountModels(root, ctx) {
 
   async function openConfig(model) {
     let manifest;
+    let sizeBytes = 0;
     try {
       const data = await ctx.api.request(`/v1/models/${encodeURIComponent(model.id)}/manifest`);
       manifest = data.manifest;
+      sizeBytes = Number(data.size_bytes) || 0;
     } catch (error) {
       toast(errorMessage(error), 'error');
       return;
@@ -294,12 +296,55 @@ export function mountModels(root, ctx) {
     }
     const fallback = h('input', { type: 'checkbox', checked: placement.allow_cpu_fallback !== false });
     const context = h('input', { class: 'input', type: 'number', min: '1', value: String(manifest.context_len ?? 2048) });
+    const offload = h('select', { class: 'select', attrs: { 'aria-label': '层卸载' } },
+      h('option', { value: '', text: '默认（按引擎能力）' }),
+      h('option', { value: 'auto', text: '自动（按空闲显存）' }),
+      h('option', { value: '0', text: '全部 CPU' }),
+      h('option', { value: '4', text: '固定 4 层到 GPU' }),
+      h('option', { value: '8', text: '固定 8 层到 GPU' }),
+      h('option', { value: '16', text: '固定 16 层到 GPU' }),
+      h('option', { value: '999', text: '全部层到 GPU' }),
+    );
+    offload.value = placement.offload_layers ?? '';
+    const kv = h('select', { class: 'select', attrs: { 'aria-label': 'KV cache 位置' } },
+      h('option', { value: 'vram', text: 'VRAM' }),
+      h('option', { value: 'ram', text: 'RAM' }),
+      h('option', { value: 'auto', text: '自动' }),
+    );
+    kv.value = placement.kv_cache ?? 'vram';
+    const supportsOffload = model.runtime === 'llama'
+      || (model.runtime === 'onnx' && model.implementation === 'onnx.layered');
+    if (!supportsOffload) {
+      offload.disabled = true;
+      kv.disabled = true;
+      offload.value = '';
+      kv.value = 'vram';
+    }
+    const gpu = ctx.devices().find((device) => device.class === 'gpu');
+    const gpuFree = Number(gpu?.available_memory_bytes) || 0;
+    const tight = sizeBytes > 0 && gpuFree > 0 && sizeBytes > gpuFree;
+    const recommendation = !supportsOffload
+      ? '当前引擎没有层切分能力（需 llama.cpp 或 onnx.layered）。'
+      : sizeBytes
+        ? `${formatBytes(sizeBytes)} 模型；GPU 可用 ${gpuFree ? formatBytes(gpuFree) : '未知'}。建议：${tight ? '自动层卸载 + KV 放 RAM' : '自动层卸载 + KV 放 VRAM'}。`
+        : '无法读取模型体积；建议使用自动层卸载。';
     const body = h('div', { style: 'display:grid;gap:12px' },
-      h('div', { class: 'notice', text: '这里是模型的默认运行配置，保存后即时应用；下载模型会自动生成一份默认配置。' }),
+      h('div', { class: 'notice', text: '这里是模型的默认运行配置，保存后即时应用；不同大小、不同格式的模型应分别配置。' }),
+      h('div', { class: 'notice faint', text: recommendation }),
       h('div', { class: 'field' }, h('label', { text: '设备放置策略' }), policy),
       h('div', { class: 'field' }, h('label', { text: '优先设备' }), prefRow),
       h('label', { class: 'row', style: 'gap:7px;font-size:13px' }, fallback, h('span', { text: '允许回退到 CPU' })),
+      h('div', { class: 'field' }, h('label', { text: '层卸载（llama.cpp / onnx.layered）' }), offload),
+      h('div', { class: 'field' }, h('label', { text: 'KV cache 位置' }), kv),
       h('div', { class: 'field' }, h('label', { text: '上下文长度' }), context),
+      h('div', { class: 'row' },
+        h('button', { class: 'btn sm ghost', type: 'button', text: '使用推荐配置', onClick: () => {
+          if (!supportsOffload) { toast('当前引擎不支持层卸载', 'error'); return; }
+          offload.value = 'auto';
+          kv.value = tight ? 'ram' : 'vram';
+          toast('已填入推荐配置，保存后生效', 'success', 1800);
+        } }),
+      ),
     );
     openModal({
       title: `运行配置 · ${model.id}`,
@@ -309,12 +354,16 @@ export function mountModels(root, ctx) {
         {
           label: '保存配置', kind: 'primary',
           onClick: async () => {
-            manifest.placement = {
+            const nextPlacement = {
               ...placement,
               policy: policy.value,
               prefer: [...prefers],
               allow_cpu_fallback: fallback.checked,
+              kv_cache: kv.value,
             };
+            if (offload.value) nextPlacement.offload_layers = offload.value;
+            else delete nextPlacement.offload_layers;
+            manifest.placement = nextPlacement;
             manifest.context_len = Math.max(1, Number(context.value) || 2048);
             try {
               const result = await ctx.api.request(`/v1/models/${encodeURIComponent(model.id)}/manifest`, {
