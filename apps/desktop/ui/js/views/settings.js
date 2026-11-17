@@ -33,9 +33,19 @@ export function mountSettings(root, ctx) {
       hardwareSummary.textContent = '未检测到设备。';
       return;
     }
-    const total = devices.reduce((sum, device) => sum + (Number(device.memory_bytes) || 0), 0);
-    const free = devices.reduce((sum, device) => sum + (Number(device.available_memory_bytes) || 0), 0);
-    hardwareSummary.textContent = `${devices.length} 个设备 · 总内存 ${formatBytes(total)} · 可用 ${formatBytes(free)}`;
+    const unified = devices.filter((device) => device.unified_memory && device.class === 'gpu');
+    const host = devices.find((device) => device.class === 'cpu') ?? unified[0];
+    const dedicated = devices.filter((device) => device.class === 'gpu' && !device.unified_memory);
+    const total = (Number(host?.memory_bytes) || 0)
+      + dedicated.reduce((sum, device) => sum + (Number(device.memory_bytes) || 0), 0);
+    const free = (Number(host?.available_memory_bytes) || 0)
+      + dedicated.reduce((sum, device) => sum + (Number(device.available_memory_bytes) || 0), 0);
+    const memoryLabel = unified.length && !dedicated.length ? '统一内存' : '总内存';
+    hardwareSummary.textContent = `${devices.length} 个设备 · ${memoryLabel} ${formatBytes(total)} · 可用 ${formatBytes(free)}`;
+    if (unified.length && !dedicated.length) {
+      vramReserve.disabled = true;
+      vramReserve.title = '统一内存机型由主机内存预留控制';
+    }
   }
 
   function applyProfile(profile) {
