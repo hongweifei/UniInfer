@@ -7,9 +7,11 @@
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
-use onnx_protobuf::{GraphProto, Message, ModelProto, NodeProto, TensorProto, ValueInfoProto};
 use protobuf::MessageField;
 use uniinfer_core::{DeviceClass, EngineError, PlacementPlan, Result, TensorDtype, TensorSpec};
+use uniinfer_onnx_protobuf::{
+    GraphProto, Message, ModelProto, NodeProto, TensorProto, ValueInfoProto,
+};
 
 const RESERVE_BYTES: u64 = 256 * 1024 * 1024;
 
@@ -354,7 +356,9 @@ fn value_info_map(graph: &GraphProto) -> HashMap<String, ValueInfoProto> {
 fn materialize_external(graph: &mut GraphProto, base: &Path) -> Result<()> {
     for tensor in &mut graph.initializer {
         if tensor.data_location
-            != protobuf::EnumOrUnknown::new(onnx_protobuf::tensor_proto::DataLocation::EXTERNAL)
+            != protobuf::EnumOrUnknown::new(
+                uniinfer_onnx_protobuf::tensor_proto::DataLocation::EXTERNAL,
+            )
         {
             continue;
         }
@@ -384,8 +388,9 @@ fn materialize_external(graph: &mut GraphProto, base: &Path) -> Result<()> {
             )));
         }
         tensor.raw_data = bytes[offset..end].to_vec();
-        tensor.data_location =
-            protobuf::EnumOrUnknown::new(onnx_protobuf::tensor_proto::DataLocation::DEFAULT);
+        tensor.data_location = protobuf::EnumOrUnknown::new(
+            uniinfer_onnx_protobuf::tensor_proto::DataLocation::DEFAULT,
+        );
         tensor.external_data.clear();
     }
     Ok(())
@@ -457,7 +462,7 @@ fn value_specs(values: &[ValueInfoProto]) -> Result<Vec<TensorSpec>> {
                 .type_
                 .as_ref()
                 .and_then(|ty| match &ty.value {
-                    Some(onnx_protobuf::type_proto::Value::TensorType(tensor)) => Some(tensor),
+                    Some(uniinfer_onnx_protobuf::type_proto::Value::TensorType(tensor)) => Some(tensor),
                     _ => None,
                 })
                 .ok_or_else(|| {
@@ -486,7 +491,7 @@ fn value_specs(values: &[ValueInfoProto]) -> Result<Vec<TensorSpec>> {
                         .iter()
                         .map(|dim| match dim.value {
                             Some(
-                                onnx_protobuf::tensor_shape_proto::dimension::Value::DimValue(
+                                uniinfer_onnx_protobuf::tensor_shape_proto::dimension::Value::DimValue(
                                     value,
                                 ),
                             ) => usize::try_from(value).ok(),

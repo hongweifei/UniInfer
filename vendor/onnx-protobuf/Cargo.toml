@@ -11,7 +11,7 @@
 
 [package]
 edition = "2021"
-name = "onnx-protobuf"
+name = "uniinfer-onnx-protobuf"
 version = "0.2.3"
 authors = ["Aster <192607617@qq.com>"]
 exclude = ["tests/*"]
@@ -26,3 +26,5 @@ version = "3.7.2"
 
 [dev-dependencies.protobuf-codegen]
 version = "3.7.2"
+
+[lints]

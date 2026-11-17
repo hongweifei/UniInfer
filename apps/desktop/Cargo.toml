@@ -71,8 +71,3 @@ unsafe_code = "forbid"
 
 [lints.clippy]
 all = "warn"
-
-[patch.crates-io]
-# Keep the desktop workspace on the same patched onnx-protobuf as the root
-# workspace so protobuf 3.7.2 can satisfy its generated version check.
-onnx-protobuf = { path = "../../vendor/onnx-protobuf" }

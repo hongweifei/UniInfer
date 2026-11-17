@@ -3686,13 +3686,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9f7c3e4beb33f85d45ae3e3a1792185706c8e16d043238c593331cc7cd313b50"
 
 [[package]]
-name = "onnx-protobuf"
-version = "0.2.3"
-dependencies = [
- "protobuf",
-]
-
-[[package]]
 name = "openssl"
 version = "0.10.82"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6358,6 +6351,7 @@ dependencies = [
  "serde_json",
  "tracing",
  "uniinfer-core",
+ "uniinfer-engine-sidecar",
 ]
 
 [[package]]
@@ -6366,7 +6360,6 @@ version = "0.0.0"
 dependencies = [
  "half",
  "image",
- "onnx-protobuf",
  "ort",
  "protobuf",
  "rustfft",
@@ -6376,6 +6369,7 @@ dependencies = [
  "tokenizers",
  "tracing",
  "uniinfer-core",
+ "uniinfer-onnx-protobuf",
 ]
 
 [[package]]
@@ -6398,6 +6392,7 @@ dependencies = [
  "serde_json",
  "tracing",
  "uniinfer-core",
+ "uniinfer-engine-sidecar",
 ]
 
 [[package]]
@@ -6420,6 +6415,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "uniinfer-engine-sidecar"
+version = "0.0.0"
+dependencies = [
+ "reqwest 0.12.28",
+ "tracing",
+ "uniinfer-core",
+]
+
+[[package]]
 name = "uniinfer-engine-whisper"
 version = "0.0.0"
 dependencies = [
@@ -6436,6 +6440,7 @@ dependencies = [
  "serde_json",
  "tracing",
  "uniinfer-core",
+ "uniinfer-engine-sidecar",
 ]
 
 [[package]]
@@ -6449,6 +6454,13 @@ dependencies = [
  "thiserror 2.0.21",
  "toml 1.2.1+spec-1.1.0",
  "uniinfer-core",
+]
+
+[[package]]
+name = "uniinfer-onnx-protobuf"
+version = "0.2.3"
+dependencies = [
+ "protobuf",
 ]
 
 [[package]]

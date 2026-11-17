@@ -1,5 +1,5 @@
 [package]
-name = "onnx-protobuf"
+name = "uniinfer-onnx-protobuf"
 version = "0.2.3"
 authors = ["Aster <192607617@qq.com>"]
 description = "ONNX protocol buffers messages."

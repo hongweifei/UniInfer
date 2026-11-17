@@ -19,7 +19,7 @@ half.workspace = true
 tokenizers.workspace = true
 rustfft.workspace = true
 image.workspace = true
-onnx-protobuf = "0.2.3"
+uniinfer-onnx-protobuf.workspace = true
 protobuf = "3.7.2"
 
 [features]

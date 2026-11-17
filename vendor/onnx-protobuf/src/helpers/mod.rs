@@ -1,6 +1,9 @@
-use protobuf::Enum;
-use crate::{attribute_proto::AttributeType, AttributeProto, GraphProto, SparseTensorProto, TensorProto, TypeProto};
 use crate::tensor_proto::DataType;
+use crate::{
+    attribute_proto::AttributeType, AttributeProto, GraphProto, SparseTensorProto, TensorProto,
+    TypeProto,
+};
+use protobuf::Enum;
 
 /// Typed onnx attribute value
 pub enum AttributeValue<'a> {
@@ -47,7 +50,9 @@ impl AttributeProto {
                     Some(s) => AttributeValue::SparseTensor(s),
                     None => unreachable!(),
                 },
-                AttributeType::SPARSE_TENSORS => AttributeValue::SparseTensors(&self.sparse_tensors),
+                AttributeType::SPARSE_TENSORS => {
+                    AttributeValue::SparseTensors(&self.sparse_tensors)
+                }
                 AttributeType::TYPE_PROTO => match &self.tp.0 {
                     Some(s) => AttributeValue::Type(s),
                     None => unreachable!(),
@@ -76,94 +81,99 @@ impl TensorProto {
     /// Convert to typed value
     pub fn as_value(&self) -> TensorValue {
         match DataType::from_i32(self.data_type) {
-            Some(o) => {
-                match o {
-                    DataType::UNDEFINED => { TensorValue::Unknown(0) }
-                    DataType::FLOAT8E4M3FN => {
-                        let _ = &self.int32_data;
-                        todo!()
-                    }
-                    DataType::FLOAT8E4M3FNUZ => {
-                        let _ = &self.int32_data;
-                        todo!()
-                    }
-                    DataType::FLOAT8E5M2 => {
-                        let _ = &self.int32_data;
-                        todo!()
-                    }
-                    DataType::FLOAT8E5M2FNUZ => {
-                        let _ = &self.int32_data;
-                        todo!()
-                    }
-                    DataType::FLOAT16 => {
-                        let _ = &self.int32_data;
-                        todo!()
-                    }
-                    DataType::BFLOAT16 => {
-                        let _ = &self.int32_data;
-                        todo!()
-                    }
-                    DataType::FLOAT => {
-                        TensorValue::Float32(&self.float_data)
-                    }
-                    DataType::DOUBLE => {
-                        TensorValue::Float64(&self.double_data)
-                    }
-                    DataType::UINT4 => {
-                        let _ = &self.int32_data;
-                        todo!()
-                    }
-                    DataType::UINT8 => {
-                        let _ = &self.int32_data;
-                        todo!()
-                    }
-                    DataType::UINT16 => {
-                        let _ = &self.int32_data;
-                        todo!()
-                    }
-                    DataType::UINT32 => {
-                        let u64_slice: &[u64] = &self.uint64_data;
-                        let u32_slice: &[u32] = unsafe { core::slice::from_raw_parts(u64_slice.as_ptr() as *const u32, u64_slice.len() * 2) };
-                        TensorValue::Unsigned32(u32_slice)
-                    }
-                    DataType::UINT64 => {
-                        TensorValue::Unsigned64(&self.uint64_data)
-                    }
-                    DataType::BOOL => {
-                        let _ = &self.int32_data;
-                        todo!()
-                    }
-                    DataType::INT4 => {
-                        let _ = &self.int32_data;
-                        todo!()
-                    }
-                    DataType::INT8 => {
-                        let i32_slice: &[i32] = &self.int32_data;
-                        let i8_slice: &[i8] = unsafe { core::slice::from_raw_parts(i32_slice.as_ptr() as *const i8, i32_slice.len() * 4) };
-                        TensorValue::Integer8(i8_slice)
-                    }
-                    DataType::INT16 => {
-                        let i32_slice: &[i32] = &self.int32_data;
-                        let i16_slice: &[i16] = unsafe { core::slice::from_raw_parts(i32_slice.as_ptr() as *const i16, i32_slice.len() * 2) };
-                        TensorValue::Integer16(i16_slice)
-                    }
-                    DataType::INT32 => {
-                        TensorValue::Integer32(&self.int32_data)
-                    }
-                    DataType::INT64 => {
-                        TensorValue::Integer64(&self.int64_data)
-                    }
-                    DataType::COMPLEX64 => {
-                        let _ = &self.float_data;
-                        todo!()
-                    }
-                    DataType::COMPLEX128 => {
-                        let _ = &self.double_data;
-                        todo!()
-                    }
-                    DataType::STRING => { todo!() }
+            Some(o) => match o {
+                DataType::UNDEFINED => TensorValue::Unknown(0),
+                DataType::FLOAT8E4M3FN => {
+                    let _ = &self.int32_data;
+                    todo!()
                 }
-            }
+                DataType::FLOAT8E4M3FNUZ => {
+                    let _ = &self.int32_data;
+                    todo!()
+                }
+                DataType::FLOAT8E5M2 => {
+                    let _ = &self.int32_data;
+                    todo!()
+                }
+                DataType::FLOAT8E5M2FNUZ => {
+                    let _ = &self.int32_data;
+                    todo!()
+                }
+                DataType::FLOAT16 => {
+                    let _ = &self.int32_data;
+                    todo!()
+                }
+                DataType::BFLOAT16 => {
+                    let _ = &self.int32_data;
+                    todo!()
+                }
+                DataType::FLOAT => TensorValue::Float32(&self.float_data),
+                DataType::DOUBLE => TensorValue::Float64(&self.double_data),
+                DataType::UINT4 => {
+                    let _ = &self.int32_data;
+                    todo!()
+                }
+                DataType::UINT8 => {
+                    let _ = &self.int32_data;
+                    todo!()
+                }
+                DataType::UINT16 => {
+                    let _ = &self.int32_data;
+                    todo!()
+                }
+                DataType::UINT32 => {
+                    let u64_slice: &[u64] = &self.uint64_data;
+                    let u32_slice: &[u32] = unsafe {
+                        core::slice::from_raw_parts(
+                            u64_slice.as_ptr() as *const u32,
+                            u64_slice.len() * 2,
+                        )
+                    };
+                    TensorValue::Unsigned32(u32_slice)
+                }
+                DataType::UINT64 => TensorValue::Unsigned64(&self.uint64_data),
+                DataType::BOOL => {
+                    let _ = &self.int32_data;
+                    todo!()
+                }
+                DataType::INT4 => {
+                    let _ = &self.int32_data;
+                    todo!()
+                }
+                DataType::INT8 => {
+                    let i32_slice: &[i32] = &self.int32_data;
+                    let i8_slice: &[i8] = unsafe {
+                        core::slice::from_raw_parts(
+                            i32_slice.as_ptr() as *const i8,
+                            i32_slice.len() * 4,
+                        )
+                    };
+                    TensorValue::Integer8(i8_slice)
+                }
+                DataType::INT16 => {
+                    let i32_slice: &[i32] = &self.int32_data;
+                    let i16_slice: &[i16] = unsafe {
+                        core::slice::from_raw_parts(
+                            i32_slice.as_ptr() as *const i16,
+                            i32_slice.len() * 2,
+                        )
+                    };
+                    TensorValue::Integer16(i16_slice)
+                }
+                DataType::INT32 => TensorValue::Integer32(&self.int32_data),
+                DataType::INT64 => TensorValue::Integer64(&self.int64_data),
+                DataType::COMPLEX64 => {
+                    let _ = &self.float_data;
+                    todo!()
+                }
+                DataType::COMPLEX128 => {
+                    let _ = &self.double_data;
+                    todo!()
+                }
+                DataType::STRING => {
+                    todo!()
+                }
+            },
             None => TensorValue::Unknown(self.data_type),
         }
     }

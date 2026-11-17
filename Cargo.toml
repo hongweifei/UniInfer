@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/*"]
+members = ["crates/*", "vendor/onnx-protobuf"]
 exclude = ["apps/desktop"]
 
 [workspace.package]
@@ -18,6 +18,7 @@ uniinfer-model-inspect = { version = "0.0.0", path = "crates/uniinfer-model-insp
 uniinfer-devices = { version = "0.0.0", path = "crates/uniinfer-devices" }
 uniinfer-registry = { version = "0.0.0", path = "crates/uniinfer-registry" }
 uniinfer-backend-store = { version = "0.0.0", path = "crates/uniinfer-backend-store" }
+uniinfer-onnx-protobuf = { version = "0.2.3", path = "vendor/onnx-protobuf" }
 uniinfer-router = { version = "0.0.0", path = "crates/uniinfer-router" }
 uniinfer-service = { version = "0.0.0", path = "crates/uniinfer-service" }
 uniinfer-engine-onnx = { version = "0.0.0", path = "crates/uniinfer-engine-onnx" }
@@ -69,9 +70,3 @@ unsafe_code = "deny"
 
 [workspace.lints.clippy]
 all = "warn"
-
-[patch.crates-io]
-# onnx-protobuf 0.2.3 generated code pins protobuf 3.4.0, which is affected
-# by RUSTSEC-2024-0437. The vendored copy updates the generated version check
-# so the crate can run with patched protobuf 3.7.2.
-onnx-protobuf = { path = "vendor/onnx-protobuf" }
