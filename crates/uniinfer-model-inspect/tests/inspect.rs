@@ -131,6 +131,37 @@ fn detects_multicomponent_diffusion_layout() {
 }
 
 #[test]
+fn diffusion_layout_uses_graph_tensor_names() {
+    let fixture =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../models/tiny-diffusion");
+    let dir = tempfile::tempdir().expect("tempdir");
+    for (source, target) in [
+        ("text_encoder.onnx", "text_encoder/model.onnx"),
+        ("unet.onnx", "unet/model.onnx"),
+        ("vae_decoder.onnx", "vae_decoder/model.onnx"),
+    ] {
+        let target = dir.path().join(target);
+        fs::create_dir_all(target.parent().unwrap()).expect("component dir");
+        fs::copy(fixture.join(source), target).expect("copy component");
+    }
+    fs::write(dir.path().join("tokenizer.json"), b"{}").expect("tokenizer");
+    fs::write(
+        dir.path().join("text_encoder/config.json"),
+        r#"{"architectures":["CLIPTextModel"],"vocab_size":100}"#,
+    )
+    .expect("config");
+
+    let inspection = inspect(dir.path(), &InspectOptions::default()).expect("inspect");
+    let image = inspection.manifest.image.expect("image");
+    assert_eq!((image.width, image.height), (64, 64));
+    let diffusion = image.diffusion.expect("diffusion");
+    assert_eq!(diffusion.vae_input, "latent_sample");
+    assert_eq!(diffusion.unet.output, "out_sample");
+    assert_eq!(diffusion.vae_decoder.output, "sample");
+    assert_eq!(diffusion.unet_timestep_dtype, "f32");
+}
+
+#[test]
 #[ignore = "requires local amd/sd-turbo-amdnpu-onnx download"]
 fn inspects_amd_diffusion_download() {
     let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))

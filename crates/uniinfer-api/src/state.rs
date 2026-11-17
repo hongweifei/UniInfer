@@ -7,6 +7,7 @@ use tokio::sync::Mutex as AsyncMutex;
 use uniinfer_backend_store::BackendStore;
 use uniinfer_config::{ConfigHandle, ServerConfig};
 use uniinfer_core::{CancelToken, CapabilityRequest, EngineError, ModelManifest, Result};
+use uniinfer_model_inspect::{InspectOptions, inspect};
 use uniinfer_service::{AudioSlot, ImageSlot, ModelSlot, Runtime};
 
 use crate::api_config::ApiConfig;
@@ -217,9 +218,26 @@ impl AppState {
             .write()
             .map_err(|_| EngineError::Other("manifest paths lock poisoned".into()))?;
         for path in found {
-            let Ok(manifest) = ModelManifest::load(&path) else {
+            let Ok(mut manifest) = ModelManifest::load(&path) else {
                 continue;
             };
+            if manifest.image.is_none() && looks_like_diffusion(&manifest) {
+                let root = path.parent().unwrap_or_else(|| Path::new("."));
+                if let Ok(inspection) = inspect(
+                    root,
+                    &InspectOptions {
+                        id: Some(manifest.id.clone()),
+                        ..InspectOptions::default()
+                    },
+                ) && inspection.manifest.image.is_some()
+                {
+                    if let Err(error) = inspection.write_manifest() {
+                        tracing::warn!(%error, path = %path.display(), "repair diffusion manifest");
+                    } else {
+                        manifest = inspection.manifest;
+                    }
+                }
+            }
             let id = manifest.id.clone();
             let audio_only = manifest.audio.is_some() && manifest.text.is_none();
             let image_only = manifest.image.is_some();
@@ -464,6 +482,16 @@ impl AppState {
             })
             .unwrap_or_default()
     }
+}
+
+fn looks_like_diffusion(manifest: &ModelManifest) -> bool {
+    let has = |prefix: &str| {
+        manifest
+            .files
+            .iter()
+            .any(|file| file.path.to_string_lossy().starts_with(prefix))
+    };
+    has("text_encoder/") && has("unet/") && has("vae_decoder/")
 }
 
 fn collect_manifests(dir: &Path, depth: usize, out: &mut Vec<PathBuf>) {

@@ -10,6 +10,7 @@ description = "Detect local model layouts and generate UniInfer manifests"
 
 [dependencies]
 uniinfer-core.workspace = true
+uniinfer-onnx-protobuf.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true

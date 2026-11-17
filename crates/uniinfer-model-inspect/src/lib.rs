@@ -11,6 +11,7 @@ mod inspect;
 mod inspection;
 mod metadata;
 mod onnx;
+mod onnx_graph;
 
 pub use error::{InspectError, Result};
 pub use inspect::{InspectOptions, inspect};
