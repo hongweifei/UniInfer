@@ -6,7 +6,8 @@ use std::sync::{Arc, Mutex};
 
 use uniinfer_core::{
     CancelToken, DeviceBudget, DeviceClass, EngineError, EngineLoadSpec, EngineSession,
-    InferenceEngine, ModelManifest, PlacementPlan, Residency, ResidencySummary, Result,
+    InferenceEngine, Modality, ModelFormat, ModelManifest, PlacementPlan, Residency,
+    ResidencySummary, Result, Runtime,
 };
 use uniinfer_devices::DeviceInventory;
 
@@ -19,6 +20,17 @@ use residency::{Reservation, ResidencyLedger, effective_residency, estimate_resi
 pub struct EngineRoute {
     pub engine_name: String,
     pub placement: PlacementPlan,
+}
+
+/// Public capability snapshot for one registered in-process engine.
+#[derive(Debug, Clone)]
+pub struct EngineDescriptor {
+    pub name: String,
+    pub runtime: Runtime,
+    pub implementations: Vec<String>,
+    pub formats: Vec<ModelFormat>,
+    pub modalities: Vec<Modality>,
+    pub devices: Vec<DeviceClass>,
 }
 
 /// Owns registered engines and hands out leases.
@@ -54,6 +66,39 @@ impl EngineRegistry {
     #[must_use]
     pub fn active_sessions(&self) -> usize {
         self.active.load(Ordering::SeqCst)
+    }
+
+    /// Describe every in-process engine. Sidecar transports are reported by
+    /// the backend manager instead.
+    #[must_use]
+    pub fn engine_descriptors(&self) -> Vec<EngineDescriptor> {
+        self.engines
+            .iter()
+            .filter(|engine| !engine.is_transport())
+            .map(|engine| {
+                let formats = engine.supported_formats().to_vec();
+                let mut modalities = Vec::new();
+                for format in &formats {
+                    for modality in engine.supported_modalities(*format) {
+                        if !modalities.contains(modality) {
+                            modalities.push(*modality);
+                        }
+                    }
+                }
+                EngineDescriptor {
+                    name: engine.engine_name().to_owned(),
+                    runtime: engine.runtime(),
+                    implementations: engine
+                        .implementations()
+                        .iter()
+                        .map(|name| (*name).to_owned())
+                        .collect(),
+                    formats,
+                    modalities,
+                    devices: engine.supported_devices().to_vec(),
+                }
+            })
+            .collect()
     }
 
     /// Aggregate bytes currently reserved by loaded sessions.

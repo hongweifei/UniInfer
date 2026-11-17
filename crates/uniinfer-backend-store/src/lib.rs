@@ -34,6 +34,25 @@ pub enum BackendKind {
     Sidecar,
 }
 
+/// One inference engine exposed by a backend package.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BackendEngine {
+    pub id: String,
+    pub name: String,
+    #[serde(default)]
+    pub runtime: String,
+    #[serde(default)]
+    pub description: String,
+    #[serde(default)]
+    pub implementations: Vec<String>,
+    #[serde(default)]
+    pub formats: Vec<String>,
+    #[serde(default)]
+    pub modalities: Vec<String>,
+    #[serde(default)]
+    pub devices: Vec<DeviceClass>,
+}
+
 /// Uniform description used by the API and GUI for both backend kinds.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BackendInfo {
@@ -45,20 +64,23 @@ pub struct BackendInfo {
     pub devices: Vec<DeviceClass>,
     pub kind: BackendKind,
     pub size_bytes: u64,
+    #[serde(default)]
+    pub engines: Vec<BackendEngine>,
 }
 
 impl BackendInfo {
     #[must_use]
-    pub fn builtin(version: impl Into<String>, devices: Vec<DeviceClass>) -> Self {
+    pub fn builtin(version: impl Into<String>, engine: BackendEngine) -> Self {
         Self {
-            id: BUILTIN_BACKEND_ID.into(),
-            name: "内置后端".into(),
+            id: format!("builtin:{}", engine.id),
+            name: engine.name.clone(),
             version: version.into(),
-            description: "随主程序分发的 ONNX / Candle / llama.cpp / whisper.cpp 引擎".into(),
+            description: engine.description.clone(),
             platform: std::env::consts::OS.into(),
-            devices,
+            devices: engine.devices.clone(),
             kind: BackendKind::Builtin,
             size_bytes: 0,
+            engines: vec![engine],
         }
     }
 }
@@ -90,6 +112,8 @@ pub struct BackendManifest {
     pub worker: String,
     #[serde(default)]
     pub devices: Vec<DeviceClass>,
+    #[serde(default)]
+    pub engines: Vec<BackendEngine>,
     #[serde(default)]
     pub files: Vec<BackendFile>,
 }
@@ -140,6 +164,7 @@ impl InstalledBackend {
             devices: self.manifest.devices.clone(),
             kind: BackendKind::Sidecar,
             size_bytes: self.size_bytes(),
+            engines: self.manifest.engines.clone(),
         }
     }
 
@@ -360,6 +385,18 @@ pub fn validate_manifest(manifest: &BackendManifest) -> Result<()> {
             manifest.worker
         )));
     }
+    if manifest.engines.is_empty() {
+        return Err(BackendError::Invalid(
+            "backend must declare at least one [[engines]] entry".into(),
+        ));
+    }
+    for engine in &manifest.engines {
+        if engine.id.trim().is_empty() || engine.name.trim().is_empty() {
+            return Err(BackendError::Invalid(
+                "backend engine id and name are required".into(),
+            ));
+        }
+    }
     for file in &manifest.files {
         if !BackendStore::safe_relative(&file.path) {
             return Err(BackendError::Invalid(format!(
@@ -411,6 +448,16 @@ mod tests {
             platform: "test".into(),
             worker: "bin/worker.exe".into(),
             devices: vec![DeviceClass::Gpu],
+            engines: vec![BackendEngine {
+                id: "test-vulkan".into(),
+                name: "Test Vulkan".into(),
+                runtime: "test".into(),
+                description: "test engine".into(),
+                implementations: vec!["test.graph".into()],
+                formats: vec!["gguf".into()],
+                modalities: vec!["text".into()],
+                devices: vec![DeviceClass::Gpu],
+            }],
             files: Vec::new(),
         };
         BackendStore::new(root)

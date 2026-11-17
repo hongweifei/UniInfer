@@ -34,6 +34,7 @@ whisper = ["uniinfer-service/whisper"]
 uniinfer-core.workspace = true
 uniinfer-config.workspace = true
 uniinfer-model-inspect.workspace = true
+uniinfer-registry.workspace = true
 uniinfer-service.workspace = true
 uniinfer-router.workspace = true
 uniinfer-backends.workspace = true

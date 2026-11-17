@@ -5,8 +5,9 @@ use axum::extract::{Path, State};
 use serde::Deserialize;
 use serde_json::{Value, json};
 use uniinfer_backend_store::{
-    BUILTIN_BACKEND_ID, BackendInfo, BackendKind, BackendStore, InstalledBackend,
+    BUILTIN_BACKEND_ID, BackendEngine, BackendInfo, BackendKind, BackendStore, InstalledBackend,
 };
+use uniinfer_registry::EngineDescriptor;
 
 use crate::error::ApiError;
 use crate::extract::ApiJson;
@@ -25,14 +26,25 @@ pub(crate) async fn list(State(state): State<AppState>) -> Result<Json<Value>, A
         .map_err(|error| ApiError::internal(format!("read backend store: {error}")))?;
     let selected = selected_backend(&state)?;
     let running = running_backend(&state);
-    let mut backends = vec![builtin_info(&state)];
+    let mut backends = state
+        .runtime
+        .engine_descriptors()
+        .into_iter()
+        .map(builtin_info)
+        .collect::<Vec<_>>();
     backends.extend(installed.iter().map(InstalledBackend::info));
     let data = backends
         .into_iter()
         .map(|backend| {
-            let active = selected
-                .as_ref()
-                .is_some_and(|(id, version)| id == &backend.id && version == &backend.version);
+            let active = if backend.kind == BackendKind::Builtin {
+                selected
+                    .as_ref()
+                    .is_some_and(|(id, _)| id == BUILTIN_BACKEND_ID)
+            } else {
+                selected
+                    .as_ref()
+                    .is_some_and(|(id, version)| id == &backend.id && version == &backend.version)
+            };
             json!({
                 "id": backend.id,
                 "name": backend.name,
@@ -42,6 +54,7 @@ pub(crate) async fn list(State(state): State<AppState>) -> Result<Json<Value>, A
                 "devices": backend.devices,
                 "kind": backend.kind,
                 "size_bytes": backend.size_bytes,
+                "engines": backend.engines,
                 "active": active,
             })
         })
@@ -117,14 +130,38 @@ pub(crate) async fn deactivate(State(state): State<AppState>) -> Result<Json<Val
     })))
 }
 
-fn builtin_info(state: &AppState) -> BackendInfo {
-    let mut devices = Vec::new();
-    for device in state.runtime.devices() {
-        if !devices.contains(&device.class) {
-            devices.push(device.class);
-        }
+fn builtin_info(descriptor: EngineDescriptor) -> BackendInfo {
+    let name = friendly_engine_name(&descriptor.name);
+    let engine = BackendEngine {
+        id: descriptor.name.clone(),
+        name: name.clone(),
+        runtime: format!("{:?}", descriptor.runtime).to_ascii_lowercase(),
+        description: format!("内置 {name} 推理引擎"),
+        implementations: descriptor.implementations,
+        formats: descriptor
+            .formats
+            .iter()
+            .map(|format| format!("{format:?}").to_ascii_lowercase())
+            .collect(),
+        modalities: descriptor
+            .modalities
+            .iter()
+            .map(|modality| format!("{modality:?}").to_ascii_lowercase())
+            .collect(),
+        devices: descriptor.devices,
+    };
+    BackendInfo::builtin(env!("CARGO_PKG_VERSION"), engine)
+}
+
+fn friendly_engine_name(name: &str) -> String {
+    match name {
+        "onnx" => "ONNX Runtime".into(),
+        "candle" => "Candle".into(),
+        "llama" => "llama.cpp".into(),
+        "llama-mtmd" => "llama.cpp MTMD".into(),
+        "whisper" => "whisper.cpp".into(),
+        other => other.to_owned(),
     }
-    BackendInfo::builtin(env!("CARGO_PKG_VERSION"), devices)
 }
 
 fn selected_backend(state: &AppState) -> Result<Option<(String, String)>, ApiError> {

@@ -3121,6 +3121,7 @@ dependencies = [
  "uniinfer-config",
  "uniinfer-core",
  "uniinfer-model-inspect",
+ "uniinfer-registry",
  "uniinfer-router",
  "uniinfer-service",
 ]

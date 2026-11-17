@@ -7,7 +7,7 @@ use http_body_util::BodyExt;
 use serde_json::Value;
 use tower::ServiceExt;
 use uniinfer_api::{ApiConfig, AppState, routes};
-use uniinfer_backend_store::{BackendManifest, BackendStore};
+use uniinfer_backend_store::{BackendEngine, BackendManifest, BackendStore};
 
 fn app(config: &ApiConfig) -> Router {
     let state = AppState::new(config).expect("state");
@@ -28,6 +28,16 @@ fn install_fake(store: &BackendStore, id: &str, version: &str) {
         platform: "test".into(),
         worker: "bin/worker.exe".into(),
         devices: vec![uniinfer_core::DeviceClass::Gpu],
+        engines: vec![BackendEngine {
+            id: "llama-vulkan".into(),
+            name: "llama.cpp Vulkan".into(),
+            runtime: "llama".into(),
+            description: "Vulkan".into(),
+            implementations: vec!["llama.text".into()],
+            formats: vec!["gguf".into()],
+            modalities: vec!["text".into()],
+            devices: vec![uniinfer_core::DeviceClass::Gpu],
+        }],
         files: Vec::new(),
     };
     store.write_manifest(&dir, &manifest).expect("manifest");
@@ -67,8 +77,17 @@ async fn lists_and_activates_installed_backends() {
         .expect("response");
     assert_eq!(response.status(), StatusCode::OK);
     let body = body_json(response).await;
-    assert_eq!(body["backends"][0]["id"], "builtin");
-    assert_eq!(body["backends"][0]["kind"], "builtin");
+    assert!(body["backends"].as_array().is_some_and(|items| {
+        items.iter().any(|item| {
+            item["kind"] == "builtin"
+                && item["id"]
+                    .as_str()
+                    .is_some_and(|id| id.starts_with("builtin:"))
+                && item["engines"]
+                    .as_array()
+                    .is_some_and(|engines| !engines.is_empty())
+        })
+    }));
     assert!(body["backends"].as_array().is_some_and(|items| {
         items
             .iter()

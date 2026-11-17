@@ -122,6 +122,11 @@ impl Runtime {
     }
 
     #[must_use]
+    pub fn engine_descriptors(&self) -> Vec<uniinfer_registry::EngineDescriptor> {
+        self.registry.engine_descriptors()
+    }
+
+    #[must_use]
     pub fn residency(&self) -> uniinfer_core::ResidencySummary {
         self.registry.residency()
     }

@@ -1,6 +1,6 @@
 # 推理后端包
 
-UniInfer 把内置后端与下载后端统一为同一种「后端」：内置后端随主程序分发，带 CUDA、Vulkan、DirectML、CoreML、QNN 等硬件加速的 Sidecar 后端可以独立下载、升级和激活。两类后端共享同一套列表、激活状态和重启语义。
+UniInfer 把内置引擎与下载后端统一管理：每个内置引擎（ONNX Runtime、Candle、llama.cpp、whisper.cpp 等）单独展示 runtime、实现、格式、模态与设备；外置 Sidecar 后端逐项声明自己的引擎。两类后端共享同一套列表、激活状态和重启语义。
 
 ## 目录
 
@@ -10,7 +10,7 @@ UniInfer 把内置后端与下载后端统一为同一种「后端」：内置�
 - 下载并校验后端包，安装到 `<配置文件目录>/backends/<id>/<version>/`。
 - 导入包含 `backend.toml` 的本地后端目录。
 - 激活、删除后端；激活后重启应用生效。
-- 选择「内置后端」作为回退。
+- 选择内置引擎组作为回退。
 
 ## 后端清单
 
@@ -25,6 +25,16 @@ platform = "windows-x86_64"
 worker = "bin/uniinfer-worker.exe"
 devices = ["gpu"]
 
+[[engines]]
+id = "llama-vulkan"
+name = "llama.cpp Vulkan"
+runtime = "llama"
+description = "llama.cpp GGUF inference on Vulkan"
+implementations = ["llama.text"]
+formats = ["gguf"]
+modalities = ["text"]
+devices = ["gpu"]
+
 [[files]]
 path = "bin/uniinfer-worker.exe"
 url = "https://example.com/llama-vulkan/uniinfer-worker.exe"
@@ -35,6 +45,7 @@ sha256 = "..."
 - `worker` 必须是相对路径，并且位于 `files` 中。
 - 安装时校验文件大小与 SHA-256；缺少 `sha256` 的文件不会被拒绝，但生产目录应始终提供。
 - `devices` 用于放置预算，可选 `cpu`、`gpu`、`npu`。
+- `engines` 必须至少包含一项，逐项写清推理引擎 id、名称、runtime、格式、模态与设备；界面会按引擎展示，而不是笼统显示一个包。
 - 当前 sidecar worker 实现现有 MessagePack 张量协议；加载、取消、流式扩展沿用同一 worker 生命周期。
 
 ## 远程目录
@@ -50,6 +61,18 @@ sha256 = "..."
       "platform": "windows-x86_64",
       "worker": "bin/uniinfer-worker.exe",
       "devices": ["gpu"],
+      "engines": [
+        {
+          "id": "llama-vulkan",
+          "name": "llama.cpp Vulkan",
+          "runtime": "llama",
+          "description": "llama.cpp GGUF inference on Vulkan",
+          "implementations": ["llama.text"],
+          "formats": ["gguf"],
+          "modalities": ["text"],
+          "devices": ["gpu"]
+        }
+      ],
       "files": [
         {
           "path": "bin/uniinfer-worker.exe",
