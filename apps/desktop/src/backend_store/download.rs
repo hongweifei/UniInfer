@@ -1,6 +1,6 @@
 //! HTTP transfer, archive extraction and integrity checks for engine distributions.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use futures_util::StreamExt;
@@ -12,7 +12,7 @@ const DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(90);
 
 pub(super) async fn download_package(
     store: &BackendStore,
-    package: &BackendManifest,
+    package: &mut BackendManifest,
     staging: &Path,
 ) -> Result<(), String> {
     std::fs::create_dir_all(staging).map_err(|error| format!("创建暂存目录失败：{error}"))?;
@@ -34,11 +34,37 @@ pub(super) async fn download_package(
     }
     extract_archives(staging, package)?;
     if !staging.join(&package.worker).is_file() {
-        return Err(format!("引擎包缺少启动文件：{}", package.worker));
+        let wanted = Path::new(&package.worker)
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("llama-server.exe");
+        let Some(found) = find_file(staging, wanted) else {
+            return Err(format!("引擎包缺少启动文件：{}", package.worker));
+        };
+        package.worker = found
+            .strip_prefix(staging)
+            .map_err(|error| format!("定位启动文件失败：{error}"))?
+            .to_string_lossy()
+            .into_owned();
     }
     store
         .write_manifest(staging, package)
         .map_err(|error| format!("写入引擎清单失败：{error}"))
+}
+
+fn find_file(root: &Path, name: &str) -> Option<PathBuf> {
+    let entries = std::fs::read_dir(root).ok()?;
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            if let Some(found) = find_file(&path, name) {
+                return Some(found);
+            }
+        } else if path.file_name().and_then(|value| value.to_str()) == Some(name) {
+            return Some(path);
+        }
+    }
+    None
 }
 
 fn extract_archives(staging: &Path, package: &BackendManifest) -> Result<(), String> {

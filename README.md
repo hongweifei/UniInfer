@@ -126,10 +126,10 @@ flowchart TB
 ### 可下载后端
 
 - 桌面端「后端」页把内置引擎与外置 Sidecar 分开完整列出，每个引擎显示 runtime、实现、格式、模态、设备和运行状态。
-- 可读取远程引擎目录，按官方项目/版本/加速变体下载并校验；`llama.cpp` 官方 `llama-server` 走官方 HTTP 流式适配。
+- 自动读取 `llama.cpp` 官方 release，按 CPU、Vulkan、CUDA 变体下载并校验；官方 `llama-server` 走 HTTP 流式适配。
 - 安装到配置目录下的 `backends/`。
 - 激活外置引擎或切回内置引擎组后重启生效；内置引擎不需要下载，始终作为回退能力。
-- 后端包格式、目录 JSON 与构建方式见 [docs/BACKENDS.md](docs/BACKENDS.md)。
+- 官方引擎适配和内部启动描述见 [docs/BACKENDS.md](docs/BACKENDS.md)。
 
 ### 分层驻留
 
