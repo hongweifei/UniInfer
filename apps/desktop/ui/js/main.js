@@ -164,6 +164,24 @@ function sidebar() {
       ));
     }
     context.push(nav);
+  } else if (state.view === 'backends') {
+    const nav = h('div', { class: 'sidebar-section' });
+    nav.append(h('div', { class: 'sidebar-heading' }, h('span', { text: '后端' })));
+    const items = [
+      ['总览', 'box', () => document.querySelector('.main')?.scrollTo({ top: 0, behavior: 'smooth' })],
+      ['已安装', 'cpu', () => document.getElementById('backend-installed')?.scrollIntoView({ behavior: 'smooth', block: 'start' })],
+      ['可下载', 'cloud', () => document.getElementById('backend-available')?.scrollIntoView({ behavior: 'smooth', block: 'start' })],
+    ];
+    for (const [label, iconName, action] of items) {
+      nav.append(h('button', { class: 'nav-item', type: 'button', onClick: action },
+        h('span', { html: icon(iconName, 16) }), h('span', { text: label })));
+    }
+    nav.append(h('button', {
+      class: 'nav-item', type: 'button',
+      onClick: () => { state.subview = 'downloads'; navigate('models'); },
+    }, h('span', { html: icon('download', 16) }), h('span', { text: '下载任务' }),
+      activeDownloads().length ? h('span', { class: 'filter-count', text: String(activeDownloads().length) }) : null));
+    context.push(nav);
   } else if (state.view === 'models') {
     const links = [
       ['online', '在线模型', 'cloud'],
@@ -364,8 +382,14 @@ function watchDownloads() {
       const before = previous.get(task.id);
       previous.set(task.id, task.status);
       if (before && before !== 'done' && task.status === 'done') {
-        toast(`${task.repo} 下载完成并已加入模型库`, 'success');
-        void refreshModels({ silent: true }).catch(() => {});
+        if (task.kind === 'backend') {
+          const variant = task.variant_label ? ` ${task.variant_label}` : '';
+          toast(`${task.repo}${variant} 引擎已安装`, 'success');
+          void api.backends().catch(() => {});
+        } else {
+          toast(`${task.repo} 下载完成并已加入模型库`, 'success');
+          void refreshModels({ silent: true }).catch(() => {});
+        }
       }
     }
   });

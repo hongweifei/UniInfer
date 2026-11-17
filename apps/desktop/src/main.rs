@@ -90,13 +90,13 @@ fn main() {
             model_store::search_models,
             model_store::plan_model,
             model_store::download::start_download,
+            model_store::download::start_backend_download,
             model_store::download::list_downloads,
             model_store::download::cancel_download,
             model_store::download::remove_download,
             model_store::download::clear_downloads,
             model_store::delete_model,
-            backend_store::fetch_backend_catalog,
-            backend_store::install_backend
+            backend_store::fetch_backend_catalog
         ])
         .setup(|app| {
             let startup = api_server::start();

@@ -6,10 +6,11 @@ UniInfer 把内置引擎与下载后端统一管理：每个内置引擎（ONNX 
 
 桌面端「后端」页面支持：
 
-- 自动从 `llama.cpp` 和 `stable-diffusion.cpp` 官方 release 发现 Windows CPU、Vulkan、CUDA 引擎。
+- 自动从 `llama.cpp` 和 `stable-diffusion.cpp` 官方 release 发现 Windows CPU、Vulkan、CUDA、ROCm 引擎。
 - 按官方项目、版本和加速变体下载并校验，安装到 `<配置文件目录>/backends/<id>/<version>/`。
 - 卸载引擎；安装后后端即存在于列表中，供模型配置选择。
-- 同一项目的 CPU、Vulkan、CUDA 等变体按项目分组展示。
+- 同一项目的 CPU、Vulkan、CUDA、ROCm 等变体按项目分组展示；每个引擎只显示一张卡片，变体是独立下载项。
+- 后端下载与在线模型下载共用「下载任务」队列，支持排队、进度、取消、失败重试和清除记录。
 
 ## 引擎清单
 
@@ -56,7 +57,7 @@ sha256 = "..."
 ## 官方引擎
 
 - `llama.cpp`：下载官方 release 的 `llama-server` 压缩包，设置 `launcher = "llama-server"`。UniInfer 启动官方 server，通过 `/completion` 流式协议适配。
-- `stable-diffusion.cpp`：下载官方 `sd-server` 压缩包，设置 `launcher = "stable-diffusion-server"`。UniInfer 启动官方 server，通过 A1111兼容的 `/sdapi/v1/txt2img` 生成图像；模型 manifest 需要提供完整 checkpoint 文件。
+- `stable-diffusion.cpp`：下载官方 `sd-server` 压缩包（含 ROCm 变体），设置 `launcher = "stable-diffusion-server"`。UniInfer 启动官方 server，通过 A1111兼容的 `/sdapi/v1/txt2img` 生成图像；模型 manifest 需要提供完整 checkpoint 文件。
 - `ONNX Runtime`：官方 DLL 仍需 `ort/load-dynamic` 适配，当前由内置 ONNX Runtime 提供。
 - `whisper.cpp`：官方 server/CLI 需要 ASR 适配器，当前由内置 whisper.cpp 提供。
 - `Candle`：上游不提供官方二进制，只能作为内置 Rust 引擎。

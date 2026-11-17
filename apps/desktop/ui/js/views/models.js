@@ -6,7 +6,7 @@ import { filterModels, modelTagOptions } from '../model-filters.js';
 import { toast, emptyState, chip, setBusy, openModal, confirmDialog } from '../components/ui.js';
 import { mountCatalog } from '../components/catalog.js';
 import { mountDownloads } from './downloads.js';
-import { backendChoices, preferredVariant, variantOptions } from '../model-backend.js';
+import { backendChoices, preferredVariant, variantOptions, variantSupport } from '../model-backend.js';
 
 export function mountModels(root, ctx) {
   let filter = 'all';
@@ -329,14 +329,25 @@ export function mountModels(root, ctx) {
       variantSelect.disabled = false;
       variantSelect.append(h('option', { value: 'auto', text: `自动（${recommended}）` }));
       for (const variant of variantOptions(choice, configuredBackend.variant)) {
-        variantSelect.append(h('option', { value: variant, text: variant }));
+        const support = variantSupport(variant, ctx.devices());
+        const option = h('option', {
+          value: variant,
+          text: support.supported ? variant : `${variant}（当前设备不支持）`,
+        });
+        option.disabled = !support.supported;
+        variantSelect.append(option);
       }
       const wanted = configuredBackend.variant || 'auto';
       variantSelect.value = [...variantSelect.options].some((option) => option.value === wanted)
         ? wanted
         : 'auto';
+      const selectedSupport = variantSelect.value === 'auto'
+        ? { supported: true, reason: '' }
+        : variantSupport(variantSelect.value, ctx.devices());
       variantHint.textContent = choice.variants.length
-        ? `自动会按当前设备优先选择 ${recommended}；可选变体来自已安装包。`
+        ? selectedSupport.supported
+          ? `自动会按当前设备优先选择 ${recommended}；可选变体来自已安装包。`
+          : `当前选择的变体不可用：${selectedSupport.reason}。`
         : '该后端尚未安装，保存后模型在该后端安装前不可用。';
     }
     backendSelect.addEventListener('change', rebuildVariants);

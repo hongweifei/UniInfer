@@ -6,7 +6,7 @@ use std::time::SystemTime;
 use uniinfer_backend_store::{BackendCatalog, BackendManifest, BackendStore, validate_manifest};
 
 mod catalog;
-mod download;
+pub(crate) mod download;
 
 use download::download_package;
 
@@ -17,17 +17,20 @@ pub(crate) async fn fetch_backend_catalog() -> Result<BackendCatalog, String> {
 
 #[derive(Clone, serde::Serialize)]
 pub(crate) struct InstallResult {
-    id: String,
-    version: String,
-    path: PathBuf,
+    pub(crate) id: String,
+    pub(crate) version: String,
+    pub(crate) path: PathBuf,
 }
 
-#[tauri::command]
-pub(crate) async fn install_backend(package: BackendManifest) -> Result<InstallResult, String> {
-    install_package(package).await
-}
-
-async fn install_package(mut package: BackendManifest) -> Result<InstallResult, String> {
+pub(crate) async fn install_package_with<P, C>(
+    mut package: BackendManifest,
+    mut progress: P,
+    cancel: C,
+) -> Result<InstallResult, String>
+where
+    P: FnMut(u64, u64),
+    C: Fn() -> bool,
+{
     validate_manifest(&package).map_err(|error| error.to_string())?;
     if package.files.is_empty() {
         return Err("后端包没有文件清单".into());
@@ -35,11 +38,19 @@ async fn install_package(mut package: BackendManifest) -> Result<InstallResult, 
     let store = BackendStore::new(backend_dir());
     store.ensure().map_err(|error| error.to_string())?;
     let staging = staging_dir(&store, &package.id, &package.version);
-    let result = download_package(&store, &mut package, &staging).await;
+    let result = download_package(&store, &mut package, &staging, &mut progress, &cancel).await;
     if let Err(error) = result {
         let _ = std::fs::remove_dir_all(&staging);
         return Err(error);
     }
+    if cancel() {
+        let _ = std::fs::remove_dir_all(&staging);
+        return Err(download::CANCELLED.into());
+    }
+    progress(
+        package.files.iter().map(|file| file.size).sum(),
+        package.files.iter().map(|file| file.size).sum(),
+    );
     finalize_package(&store, &package, &staging)
 }
 

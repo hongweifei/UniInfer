@@ -56,6 +56,12 @@ export async function startDownload({ repo, source, variant }) {
   return task;
 }
 
+export async function startBackendDownload(packageInfo) {
+  const task = await invoke('start_backend_download', { package: packageInfo });
+  upsertTask(task);
+  return task;
+}
+
 export async function cancelDownload(id) {
   const task = await invoke('cancel_download', { id });
   upsertTask(task);

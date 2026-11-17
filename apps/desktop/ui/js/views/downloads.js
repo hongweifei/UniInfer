@@ -9,6 +9,7 @@ import {
   isTerminalStatus,
   removeDownload,
   startDownload,
+  startBackendDownload,
   subscribeDownloads,
 } from '../downloads.js';
 
@@ -54,7 +55,7 @@ export function mountDownloads(root, ctx) {
       list.append(emptyState({
         iconName: 'download',
         title: '还没有下载任务',
-        description: '在「在线模型」里选择模型和变体，任务会在这里排队、显示进度并支持取消。',
+        description: '在线模型和推理后端共用这个队列，按顺序下载并显示进度。',
       }));
       return;
     }
@@ -72,7 +73,7 @@ export function mountDownloads(root, ctx) {
     const speed = active && task.status === 'downloading' ? updateSpeed(task) : 0;
     const eta = speed > 0 && total > downloaded ? (total - downloaded) / speed : 0;
     const meta = [
-      task.source === 'huggingface' ? 'Hugging Face' : 'ModelScope',
+      task.source === 'backend' ? '推理后端' : task.source === 'huggingface' ? 'Hugging Face' : 'ModelScope',
       task.variant_label || task.variant,
       task.file ? task.file.split('/').pop() : null,
     ].filter(Boolean);
@@ -144,7 +145,12 @@ export function mountDownloads(root, ctx) {
   async function retry(task) {
     try {
       await removeDownload(task.id);
-      await startDownload({ repo: task.repo, source: task.source, variant: task.variant });
+      if (task.kind === 'backend') {
+        if (!task.backend) throw new Error('后端下载描述已丢失，请重新从「后端」页面下载');
+        await startBackendDownload(task.backend);
+      } else {
+        await startDownload({ repo: task.repo, source: task.source, variant: task.variant });
+      }
     } catch (error) {
       toast(errorMessage(error), 'error');
     }

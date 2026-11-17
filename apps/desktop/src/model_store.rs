@@ -20,6 +20,7 @@ use search::{search_huggingface, search_modelscope};
 pub(crate) enum Source {
     HuggingFace,
     ModelScope,
+    Backend,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -97,6 +98,7 @@ pub(crate) async fn search_models(
     match source {
         Source::HuggingFace => search_huggingface(query, page, page_size).await,
         Source::ModelScope => search_modelscope(query, page, page_size).await,
+        Source::Backend => Err("推理后端只能从后端页面下载".into()),
     }
 }
 

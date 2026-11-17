@@ -24,11 +24,13 @@ pub(super) async fn fetch_repo_files(
     let repo_files = match source {
         Source::HuggingFace => fetch_hf_repo(repo).await?,
         Source::ModelScope => fetch_modelscope_repo(repo).await?,
+        Source::Backend => return Err("推理后端没有模型仓库文件".into()),
     };
     let base_files = match &repo_files.base_model {
         Some(base) => Some(match source {
             Source::HuggingFace => fetch_hf_repo(base).await?,
             Source::ModelScope => fetch_modelscope_repo(base).await?,
+            Source::Backend => return Err("推理后端没有基线模型".into()),
         }),
         None => None,
     };
@@ -176,5 +178,6 @@ pub(super) fn file_url(source: Source, repo: &str, path: &str) -> String {
         Source::ModelScope => {
             format!("https://modelscope.cn/models/{repo}/resolve/master/{path}")
         }
+        Source::Backend => path.to_owned(),
     }
 }

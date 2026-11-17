@@ -2,6 +2,8 @@ import { h, clear } from '../dom.js';
 import { icon } from '../icons.js';
 import { formatBytes, errorMessage } from '../format.js';
 import { toast, chip, confirmDialog } from '../components/ui.js';
+import { startBackendDownload, subscribeDownloads, isTerminalStatus } from '../downloads.js';
+import { variantSupport } from '../model-backend.js';
 
 const invoke = (command, args) => window.__TAURI__?.core?.invoke(command, args);
 
@@ -43,6 +45,13 @@ export function mountBackends(root, ctx) {
     class: 'btn btn-icon ghost sm', type: 'button', title: '重新读取后端列表',
     onClick: () => void refresh(),
   }, h('span', { html: icon('refresh', 14) }));
+  const downloadButton = h('button', {
+    class: 'btn sm ghost', type: 'button',
+    onClick: () => {
+      ctx.state.subview = 'downloads';
+      ctx.navigate('models');
+    },
+  }, h('span', { html: icon('download', 14) }), h('span', { text: '下载任务' }));
 
 
   function showError(message) {
@@ -65,6 +74,9 @@ export function mountBackends(root, ctx) {
       if (reloadCatalog) {
         try {
           catalog = await invoke('fetch_backend_catalog');
+          if (catalog?.warnings?.length) {
+            message = `部分引擎目录不可用：${catalog.warnings.join('；')}`;
+          }
         } catch (error) {
           message = `官方引擎目录不可用：${errorMessage(error)}`;
         }
@@ -83,9 +95,8 @@ export function mountBackends(root, ctx) {
     busy = true;
     render();
     try {
-      await invoke('install_backend', { package: packageInfo });
-      toast(`已安装 ${packageInfo.name} ${packageInfo.version}`, 'success');
-      await refresh({ reloadCatalog: false });
+      await startBackendDownload(packageInfo);
+      toast(`${packageInfo.name} ${packageInfo.engines?.[0]?.variant ?? ''} 已加入下载队列`, 'success');
     } catch (error) {
       toast(errorMessage(error), 'error');
     } finally {
@@ -209,47 +220,74 @@ export function mountBackends(root, ctx) {
         h('div', { class: 'backend-icon' }, h('span', { html: icon('box', 20) })),
         h('div', { class: 'backend-card-title' },
           h('strong', { text: first.name }),
-          h('span', { class: 'backend-card-id', text: `${packages.length} 个变体 · ${formatBytes(totalSize)}` }),
+          h('span', { class: 'backend-card-id', text: `${packages.length} 个变体 · ${totalSize > 0 ? formatBytes(totalSize) : '大小未知'}` }),
         ),
         chip('已安装', 'muted'),
       ),
       h('p', { class: 'backend-description', text: backendSummary(first) }),
       engineList(first),
       h('div', { class: 'backend-engine-list' },
-        ...packages.map((backend) => h('div', { class: 'backend-engine' },
+        ...packages.map((backend) => {
+          const variant = backend.engines?.[0]?.variant || backend.version;
+          const support = variantSupport(variant, ctx.devices());
+          return h('div', {
+            class: `backend-engine with-action ${support.supported ? '' : 'unsupported'}`,
+            title: support.reason,
+          },
           h('div', { class: 'backend-engine-main' },
-            h('strong', { text: backend.engines?.[0]?.variant || backend.version }),
+            h('strong', { text: variant }),
             h('span', { class: 'faint', text: `版本 ${backend.version}` }),
+            !support.supported ? h('span', { class: 'backend-unsupported', text: support.reason }) : null,
           ),
-          h('button', {
-            class: 'btn btn-icon ghost sm danger', type: 'button', title: '删除这个变体',
-            onClick: () => void remove(backend),
-          }, h('span', { html: icon('trash', 14) })),
-        )),
+            h('button', {
+              class: 'btn btn-icon ghost sm danger', type: 'button', title: '删除这个变体',
+              onClick: () => void remove(backend),
+            }, h('span', { html: icon('trash', 14) })),
+          );
+        }),
       ),
       backendMeta(first, 'installed'),
     );
   }
 
-  function availableCard(packageInfo) {
-    const already = (state.backends ?? []).some((item) => item.id === packageInfo.id && item.version === packageInfo.version);
+  function availableCard(packages) {
+    const first = packages[0];
+    const installedKeys = new Set((state.backends ?? []).map((item) => `${item.id}@${item.version}`));
+    const totalSize = packages.reduce((sum, item) => sum + (item.files ?? []).reduce((size, file) => size + (file.size ?? 0), 0), 0);
     return h('div', { class: 'card backend-card available' },
       h('div', { class: 'backend-card-head' },
         h('div', { class: 'backend-icon remote' }, h('span', { html: icon('cloud', 20) })),
         h('div', { class: 'backend-card-title' },
-          h('strong', { text: packageInfo.name }),
-          h('span', { class: 'backend-card-id', text: `版本 ${packageInfo.version}` }),
+          h('strong', { text: first.name }),
+          h('span', { class: 'backend-card-id', text: `${packages.length} 个变体 · ${totalSize > 0 ? formatBytes(totalSize) : '大小未知'}` }),
         ),
         chip('可下载', 'accent'),
       ),
-      h('p', { class: 'backend-description', text: backendSummary(packageInfo) }),
-      engineList(packageInfo),
-      backendMeta(packageInfo, 'available'),
-      h('div', { class: 'backend-card-actions' },
-        h('button', {
-          class: 'btn sm primary', type: 'button', disabled: busy || already,
-          onClick: () => void install(packageInfo),
-        }, h('span', { html: icon('download', 14) }), h('span', { text: already ? '已安装' : '下载安装' })),
+      h('p', { class: 'backend-description', text: backendSummary(first) }),
+      engineList(first),
+      h('div', { class: 'backend-engine-list' },
+        ...packages.map((packageInfo) => {
+          const installed = installedKeys.has(`${packageInfo.id}@${packageInfo.version}`);
+          const variant = packageInfo.engines?.[0]?.variant || packageInfo.version;
+          const support = variantSupport(variant, ctx.devices());
+          return h('div', {
+            class: `backend-engine with-action ${support.supported ? '' : 'unsupported'}`,
+            title: support.reason,
+          },
+            h('div', { class: 'backend-engine-main' },
+              h('strong', { text: variant }),
+              h('span', { class: 'faint', text: `版本 ${packageInfo.version} · ${packageInfo.files?.length ?? 0} 个文件` }),
+              !support.supported ? h('span', { class: 'backend-unsupported', text: support.reason }) : null,
+            ),
+            h('button', {
+              class: `btn sm ${installed || !support.supported ? 'ghost' : 'backend-download'}`, type: 'button',
+              disabled: busy || installed || !support.supported,
+              title: support.supported ? '' : support.reason,
+              onClick: () => void install(packageInfo),
+            }, h('span', { html: icon(installed ? 'check' : support.supported ? 'download' : 'x', 14) }),
+              h('span', { text: installed ? '已安装' : support.supported ? '下载' : '不支持' })),
+          );
+        }),
       ),
     );
   }
@@ -296,7 +334,13 @@ export function mountBackends(root, ctx) {
     const installedKeys = new Set(all.map((backend) => `${backend.id}@${backend.version}`));
     const available = (catalog?.backends ?? [])
       .filter((packageInfo) => !installedKeys.has(`${packageInfo.id}@${packageInfo.version}`));
-    availableCount.textContent = `${available.length} 个`;
+    const availableGroups = new Map();
+    for (const packageInfo of available) {
+      const group = availableGroups.get(packageInfo.name) ?? [];
+      group.push(packageInfo);
+      availableGroups.set(packageInfo.name, group);
+    }
+    availableCount.textContent = `${availableGroups.size} 个引擎`;
     if (loading) {
       availableHost.append(h('div', { class: 'backend-loading', text: '正在读取目录…' }));
     } else if (!catalog) {
@@ -305,14 +349,14 @@ export function mountBackends(root, ctx) {
         '刷新后会从官方 release 读取当前设备可安装的推理引擎。',
         'cloud',
       ));
-    } else if (!available.length) {
+    } else if (!availableGroups.size) {
       availableHost.append(emptyBackend(
         '没有新的后端',
         '目录中的后端都已安装，或目录暂时为空。',
         'check',
       ));
     } else {
-      for (const packageInfo of available) availableHost.append(availableCard(packageInfo));
+      for (const group of availableGroups.values()) availableHost.append(availableCard(group));
     }
   }
 
@@ -325,11 +369,12 @@ export function mountBackends(root, ctx) {
           h('p', { text: '后端安装后即可被模型选用；模型各自配置后端与设备变体。' }),
         ),
         h('div', { class: 'backend-hero-side' },
+          downloadButton,
           refreshButton,
         ),
       ),
       errorBanner,
-      h('section', { class: 'backend-section' },
+      h('section', { class: 'backend-section', attrs: { id: 'backend-builtin' } },
         h('div', { class: 'backend-section-head' },
           h('div', {},
             h('h2', { text: '内置引擎' }),
@@ -340,7 +385,7 @@ export function mountBackends(root, ctx) {
         ),
         builtinHost,
       ),
-      h('section', { class: 'backend-section' },
+      h('section', { class: 'backend-section', attrs: { id: 'backend-installed' } },
         h('div', { class: 'backend-section-head' },
           h('div', {},
             h('h2', { text: '外置后端' }),
@@ -351,7 +396,7 @@ export function mountBackends(root, ctx) {
         ),
         sidecarHost,
       ),
-      h('section', { class: 'backend-section' },
+      h('section', { class: 'backend-section', attrs: { id: 'backend-available' } },
         h('div', { class: 'backend-section-head' },
           h('div', {},
             h('h2', { text: '可下载' }),
@@ -366,7 +411,17 @@ export function mountBackends(root, ctx) {
   }
 
   root.append(renderPage());
+  const refreshedBackends = new Set();
+  const unsubscribeDownloads = subscribeDownloads((tasks) => {
+    for (const task of tasks) {
+      if (task.kind !== 'backend' || !isTerminalStatus(task.status) || refreshedBackends.has(task.id)) continue;
+      refreshedBackends.add(task.id);
+      if (task.status === 'done') void refresh({ reloadCatalog: false });
+    }
+  });
   void refresh();
 
-  return () => {};
+  return () => {
+    unsubscribeDownloads();
+  };
 }

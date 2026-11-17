@@ -8,16 +8,28 @@ use reqwest::header::ACCEPT_ENCODING;
 use sha2::{Digest, Sha256};
 use uniinfer_backend_store::{BackendFile, BackendManifest, BackendStore};
 
-const DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(90);
+const DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(30 * 60);
+pub(crate) const CANCELLED: &str = "已取消";
 
-pub(super) async fn download_package(
+pub(super) async fn download_package<P, C>(
     store: &BackendStore,
     package: &mut BackendManifest,
     staging: &Path,
-) -> Result<(), String> {
+    mut progress: P,
+    cancel: C,
+) -> Result<(), String>
+where
+    P: FnMut(u64, u64),
+    C: Fn() -> bool,
+{
     std::fs::create_dir_all(staging).map_err(|error| format!("创建暂存目录失败：{error}"))?;
+    let total = package.files.iter().map(|file| file.size).sum::<u64>();
     let client = reqwest::Client::new();
+    let mut done = 0_u64;
     for file in &package.files {
+        if cancel() {
+            return Err(CANCELLED.into());
+        }
         if !BackendStore::safe_relative(&file.path) {
             return Err(format!("非法文件路径：{}", file.path));
         }
@@ -30,8 +42,19 @@ pub(super) async fn download_package(
                 .await
                 .map_err(|error| format!("创建目录失败：{error}"))?;
         }
-        download_file(&client, file, &destination).await?;
+        let before = done;
+        done = done.saturating_add(
+            download_file(
+                &client,
+                file,
+                &destination,
+                |bytes| progress(before.saturating_add(bytes), total),
+                &cancel,
+            )
+            .await?,
+        );
     }
+    progress(done, total.max(done));
     extract_archives(staging, package)?;
     if !staging.join(&package.worker).is_file() {
         let wanted = Path::new(&package.worker)
@@ -86,11 +109,17 @@ fn extract_archives(staging: &Path, package: &BackendManifest) -> Result<(), Str
     Ok(())
 }
 
-async fn download_file(
+async fn download_file<P, C>(
     client: &reqwest::Client,
     file: &BackendFile,
     destination: &Path,
-) -> Result<(), String> {
+    mut progress: P,
+    cancel: C,
+) -> Result<u64, String>
+where
+    P: FnMut(u64),
+    C: Fn() -> bool,
+{
     let response = client
         .get(&file.url)
         .header(ACCEPT_ENCODING, "identity")
@@ -113,12 +142,17 @@ async fn download_file(
     let mut total = 0_u64;
     let mut stream = response.bytes_stream();
     while let Some(chunk) = stream.next().await {
+        if cancel() {
+            let _ = tokio::fs::remove_file(&tmp).await;
+            return Err(CANCELLED.into());
+        }
         let chunk = chunk.map_err(|error| format!("下载 {} 中断：{error}", file.path))?;
         total = total.saturating_add(u64::try_from(chunk.len()).unwrap_or(u64::MAX));
         hasher.update(&chunk);
         tokio::io::AsyncWriteExt::write_all(&mut output, &chunk)
             .await
             .map_err(|error| format!("写入 {} 失败：{error}", tmp.display()))?;
+        progress(total);
     }
     tokio::io::AsyncWriteExt::flush(&mut output)
         .await
@@ -143,5 +177,7 @@ async fn download_file(
     }
     tokio::fs::rename(&tmp, destination)
         .await
-        .map_err(|error| format!("安装 {} 失败：{error}", destination.display()))
+        .map_err(|error| format!("安装 {} 失败：{error}", destination.display()))?;
+    progress(total);
+    Ok(total)
 }
