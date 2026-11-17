@@ -17,6 +17,14 @@ const MODALITY_LABELS = {
   image: '图像',
   video: '视频',
 };
+const ENGINE_SUMMARIES = {
+  onnx: '运行 ONNX 模型，覆盖文本、语音、图像与视频处理。',
+  candle: 'Rust 原生推理，支持 GGUF 与 Safetensors 模型。',
+  llama: '运行 GGUF 文本模型，支持 CPU 与 GPU 混合推理。',
+  'llama-mtmd': 'llama.cpp 多模态视觉语言引擎。',
+  whisper: '语音转写引擎，支持 Whisper 模型。',
+};
+const TAG_LABELS = { ...FORMAT_LABELS, ...MODALITY_LABELS };
 
 export function mountBackends(root, ctx) {
   let state = { backends: [], active: null, running: null, directory: '' };
@@ -160,30 +168,78 @@ export function mountBackends(root, ctx) {
     return chip('已安装', 'muted');
   }
 
+  function capabilityRows(engine) {
+    const groups = [
+      ['格式', (engine.formats ?? []).map((value) => TAG_LABELS[value] ?? value)],
+      ['内容', (engine.modalities ?? []).map((value) => MODALITY_LABELS[value] ?? value)],
+      ['设备', (engine.devices ?? []).map((value) => value.toUpperCase())],
+    ];
+    return h('div', { class: 'backend-specs' },
+      ...groups.filter(([, values]) => values.length).map(([label, values]) => h('div', { class: 'backend-spec' },
+        h('span', { class: 'backend-spec-label', text: label }),
+        h('span', { class: 'backend-spec-values', text: values.join(' · ') }),
+      )),
+    );
+  }
+
   function engineList(backend) {
     const engines = backend.engines ?? [];
-    if (!engines.length) {
-      return h('div', { class: 'backend-engine-empty', text: '此包未声明引擎信息' });
-    }
-    const single = engines.length === 1 && (engines[0].name || engines[0].id) === backend.name;
+    if (!engines.length) return null;
+    if (engines.length === 1) return capabilityRows(engines[0]);
     return h('div', { class: 'backend-engine-list' },
-      ...engines.map((engine) => h('div', { class: `backend-engine ${single ? 'single' : ''}` },
-        single ? h('div', { class: 'backend-engine-main' },
-          h('strong', { class: 'backend-engine-variant', text: engine.variant || '内置' }),
-          h('span', { text: `${engine.runtime || 'runtime?'} · ${engine.id}` }),
-        ) : h('div', { class: 'backend-engine-main' },
-          h('strong', { text: engine.name || engine.id }),
-          h('span', { text: `${engine.variant || 'runtime?'} · ${engine.runtime || 'runtime?'} · ${engine.id}` }),
+      ...engines.map((engine) => h('div', { class: 'backend-engine' },
+        h('div', { class: 'backend-engine-main' },
+          h('strong', { text: engine.variant || engine.name || engine.id }),
         ),
-        h('div', { class: 'backend-engine-tags' },
-          ...(engine.formats ?? []).map((value) => h('span', { class: 'backend-tag', text: FORMAT_LABELS[value] ?? value })),
-          ...(engine.modalities ?? []).map((value) => h('span', { class: 'backend-tag muted', text: MODALITY_LABELS[value] ?? value })),
-          ...(engine.devices ?? []).map((value) => h('span', { class: 'backend-tag muted', text: value.toUpperCase() })),
-        ),
-        (engine.implementations ?? []).length
-          ? h('div', { class: 'backend-engine-impl', text: engine.implementations.join(' · ') })
-          : null,
+        capabilityRows(engine),
       )),
+    );
+  }
+
+  function backendSummary(backend) {
+    if (backend.kind === 'builtin') {
+      const engine = backend.engines?.[0];
+      const key = `${engine?.id ?? ''} ${backend.name}`.toLowerCase();
+      if (ENGINE_SUMMARIES[engine?.id]) return ENGINE_SUMMARIES[engine.id];
+      if (key.includes('onnx')) return ENGINE_SUMMARIES.onnx;
+      if (key.includes('candle')) return ENGINE_SUMMARIES.candle;
+      if (key.includes('whisper')) return ENGINE_SUMMARIES.whisper;
+      if (key.includes('llama')) return ENGINE_SUMMARIES.llama;
+      return '随应用内置的推理引擎。';
+    }
+    return backend.description || '官方推理引擎。';
+  }
+
+  function platformLabel(value) {
+    const platform = (value || '').toLowerCase();
+    if (platform.includes('windows')) return 'Windows';
+    if (platform.includes('macos') || platform.includes('darwin')) return 'macOS';
+    if (platform.includes('linux')) return 'Linux';
+    return value || '当前平台';
+  }
+
+  function backendSubtitle(backend) {
+    if (backend.kind === 'builtin') return '内置 · 随应用提供';
+    const engine = backend.engines?.[0];
+    const variant = engine?.variant ? ` · ${engine.variant}` : '';
+    return backend.version === '0.0.0' ? `已安装${variant}` : `版本 ${backend.version}${variant}`;
+  }
+
+  function backendMeta(backend, kind) {
+    if (kind === 'builtin') {
+      return h('div', { class: 'backend-meta' },
+        h('span', { class: 'backend-meta-item' }, h('span', { html: icon('monitor', 12) }), platformLabel(backend.platform)),
+      );
+    }
+    if (kind === 'available') {
+      return h('div', { class: 'backend-meta' },
+        h('span', { class: 'backend-meta-item' }, h('span', { html: icon('monitor', 12) }), platformLabel(backend.platform)),
+        h('span', { class: 'backend-meta-item' }, h('span', { html: icon('box', 12) }), `${backend.files?.length ?? 0} 个文件`),
+      );
+    }
+    return h('div', { class: 'backend-meta' },
+      h('span', { class: 'backend-meta-item' }, h('span', { html: icon('monitor', 12) }), platformLabel(backend.platform)),
+      h('span', { class: 'backend-meta-item' }, h('span', { html: icon('box', 12) }), formatBytes(backend.size_bytes ?? 0)),
     );
   }
 
@@ -194,17 +250,13 @@ export function mountBackends(root, ctx) {
         h('div', { class: 'backend-icon builtin' }, h('span', { html: icon('cpu', 20) })),
         h('div', { class: 'backend-card-title' },
           h('strong', { text: backend.name }),
-          h('span', { class: 'backend-card-id', text: `${backend.id} · ${backend.version}` }),
+          h('span', { class: 'backend-card-id', text: backendSubtitle(backend) }),
         ),
         running ? chip('运行中', 'success') : chip('可用', 'muted'),
       ),
-      h('p', { class: 'backend-description', text: backend.description || '内置推理引擎' }),
+      h('p', { class: 'backend-description', text: backendSummary(backend) }),
       engineList(backend),
-      h('div', { class: 'backend-meta' },
-        ...(backend.engines?.length ? [] : [h('span', { class: 'backend-meta-item' }, h('span', { html: icon('cpu', 12) }), (backend.devices ?? []).join(' / ') || '设备未知')]),
-        h('span', { class: 'backend-meta-item' }, h('span', { html: icon('monitor', 12) }), backend.platform || '平台未知'),
-        h('span', { class: 'backend-meta-item' }, h('span', { html: icon('box', 12) }), '随主程序'),
-      ),
+      backendMeta(backend, 'builtin'),
     );
   }
 
@@ -217,17 +269,13 @@ export function mountBackends(root, ctx) {
         h('div', { class: 'backend-icon' }, h('span', { html: icon('box', 20) })),
         h('div', { class: 'backend-card-title' },
           h('strong', { text: backend.name }),
-          h('span', { class: 'backend-card-id', text: `${backend.id} · ${backend.version}` }),
+          h('span', { class: 'backend-card-id', text: backendSubtitle(backend) }),
         ),
         sidecarStatus(backend),
       ),
-      h('p', { class: 'backend-description', text: backend.description || '未提供描述' }),
+      h('p', { class: 'backend-description', text: backendSummary(backend) }),
       engineList(backend),
-      h('div', { class: 'backend-meta' },
-        ...(backend.engines?.length ? [] : [h('span', { class: 'backend-meta-item' }, h('span', { html: icon('cpu', 12) }), (backend.devices ?? []).join(' / ') || '设备未知')]),
-        h('span', { class: 'backend-meta-item' }, h('span', { html: icon('monitor', 12) }), backend.platform || '平台未知'),
-        h('span', { class: 'backend-meta-item' }, h('span', { html: icon('box', 12) }), formatBytes(backend.size_bytes ?? 0)),
-      ),
+      backendMeta(backend, 'installed'),
       h('div', { class: 'backend-card-actions' },
         h('button', {
           class: `btn sm ${selected ? 'ghost' : 'primary'}`, type: 'button',
@@ -249,17 +297,13 @@ export function mountBackends(root, ctx) {
         h('div', { class: 'backend-icon remote' }, h('span', { html: icon('cloud', 20) })),
         h('div', { class: 'backend-card-title' },
           h('strong', { text: packageInfo.name }),
-          h('span', { class: 'backend-card-id', text: `${packageInfo.id} · ${packageInfo.version}` }),
+          h('span', { class: 'backend-card-id', text: `版本 ${packageInfo.version}` }),
         ),
         chip('可下载', 'accent'),
       ),
-      h('p', { class: 'backend-description', text: packageInfo.description || '未提供描述' }),
+      h('p', { class: 'backend-description', text: backendSummary(packageInfo) }),
       engineList(packageInfo),
-      h('div', { class: 'backend-meta' },
-        ...(packageInfo.engines?.length ? [] : [h('span', { class: 'backend-meta-item' }, h('span', { html: icon('cpu', 12) }), (packageInfo.devices ?? []).join(' / ') || '设备未知')]),
-        h('span', { class: 'backend-meta-item' }, h('span', { html: icon('monitor', 12) }), packageInfo.platform || '平台未知'),
-        h('span', { class: 'backend-meta-item' }, h('span', { html: icon('box', 12) }), `${packageInfo.files?.length ?? 0} 个文件`),
-      ),
+      backendMeta(packageInfo, 'available'),
       h('div', { class: 'backend-card-actions' },
         h('button', {
           class: 'btn sm primary', type: 'button', disabled: busy || already,
@@ -286,12 +330,10 @@ export function mountBackends(root, ctx) {
     const builtins = all.filter((backend) => backend.kind === 'builtin');
     const sidecars = all.filter((backend) => backend.kind !== 'builtin');
     const runningBuiltin = state.running?.kind === 'builtin';
-    const builtinNames = builtins.map((backend) => backend.name).join(' · ');
     runningName.textContent = runningBuiltin ? '内置引擎组' : state.running?.id ?? '未运行';
     runningVersion.textContent = runningBuiltin
-      ? `${builtins.length} 个内置引擎${builtinNames ? ` · ${builtinNames}` : ''}`
-      : state.running?.version ?? '';
-    runningVersion.title = runningVersion.textContent;
+      ? `${builtins.length} 个引擎`
+      : state.running?.version ? `版本 ${state.running.version}` : '';
     builtinCount.textContent = `${builtins.length} 个`;
     sidecarCount.textContent = `${sidecars.length} 个`;
     useBuiltinButton.hidden = state.active?.id === 'builtin';
@@ -306,7 +348,7 @@ export function mountBackends(root, ctx) {
         builtinHost.append(emptyBackend('没有内置引擎', '当前构建未启用任何内置推理引擎。', 'cpu'));
       }
       if (!sidecars.length) {
-        sidecarHost.append(emptyBackend('没有外置后端', '下载或导入 Sidecar 后端后会显示在这里。', 'box'));
+        sidecarHost.append(emptyBackend('没有外置后端', '下载官方推理引擎后会显示在这里。', 'box'));
       }
     }
 
@@ -371,7 +413,7 @@ export function mountBackends(root, ctx) {
         h('div', { class: 'backend-section-head' },
           h('div', {},
             h('h2', { text: '外置后端' }),
-            h('p', { text: '独立安装的 Sidecar 后端，激活后优先处理其声明的引擎与模态。' }),
+            h('p', { text: '独立下载的官方推理引擎，激活后用于对应模型。' }),
           ),
           h('span', { class: 'spacer' }),
           sidecarCount,
@@ -382,7 +424,7 @@ export function mountBackends(root, ctx) {
         h('div', { class: 'backend-section-head' },
           h('div', {},
             h('h2', { text: '可下载' }),
-            h('p', { text: '来自后端目录的 Sidecar 后端包。' }),
+            h('p', { text: '从官方 release 获取的可安装版本。' }),
           ),
           h('span', { class: 'spacer' }),
           availableCount,

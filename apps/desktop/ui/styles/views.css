@@ -543,11 +543,12 @@
 .backend-card {
   display: grid;
   align-content: start;
-  gap: 11px;
-  padding: 16px;
-  transition: border-color 0.15s var(--ease), background 0.15s var(--ease);
+  gap: 8px;
+  padding: 17px 18px 15px;
+  border-radius: 13px;
+  transition: border-color 0.15s var(--ease), background 0.15s var(--ease), transform 0.15s var(--ease);
 }
-.backend-card:hover { border-color: var(--border); }
+.backend-card:hover { border-color: var(--border); transform: translateY(-1px); }
 .backend-card.selected {
   border-color: color-mix(in srgb, var(--accent) 36%, var(--border));
   background: color-mix(in srgb, var(--accent-soft) 36%, var(--surface));
@@ -568,9 +569,9 @@
 .backend-icon.builtin { color: var(--success); background: color-mix(in srgb, var(--success) 8%, var(--surface-2)); }
 .backend-icon.remote { color: var(--warning); background: color-mix(in srgb, var(--warning) 8%, var(--surface-2)); }
 .backend-card-title { flex: 1 1 auto; min-width: 0; display: grid; gap: 2px; }
-.backend-card-title strong { color: var(--text); font-size: 14px; font-weight: 600; overflow-wrap: anywhere; }
-.backend-card-id { color: var(--faint); font: 11px var(--font-mono); overflow-wrap: anywhere; }
-.backend-description { min-height: 38px; color: var(--muted); font-size: 12.5px; line-height: 1.5; }
+.backend-card-title strong { color: var(--text); font-size: 15px; font-weight: 600; overflow-wrap: anywhere; }
+.backend-card-id { color: var(--muted); font-size: 11.5px; overflow-wrap: anywhere; }
+.backend-description { color: var(--muted); font-size: 12.5px; line-height: 1.55; }
 .backend-meta { display: flex; flex-wrap: wrap; gap: 6px 12px; color: var(--faint); font-size: 11.5px; }
 .backend-meta-item { display: inline-flex; align-items: center; gap: 5px; }
 .backend-meta-item .icon { color: var(--faint); }
@@ -659,3 +660,14 @@
 .backend-hero-side { display: flex; align-items: stretch; gap: 8px; }
 .backend-hero-side .btn { align-self: center; }
 .backend-engine-variant { color: var(--accent) !important; }
+
+.backend-specs {
+  display: grid;
+  gap: 5px;
+  padding-top: 6px;
+  border-top: 1px solid var(--border-soft);
+}
+.backend-spec { display: grid; grid-template-columns: 34px minmax(0, 1fr); gap: 8px; align-items: baseline; }
+.backend-spec-label { color: var(--faint); font-size: 10.5px; }
+.backend-spec-values { color: var(--text-soft); font-size: 11.5px; line-height: 1.5; }
+.backend-engine .backend-specs { padding-top: 6px; border-top: 0; }
