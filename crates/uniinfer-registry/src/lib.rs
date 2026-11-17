@@ -296,12 +296,18 @@ impl EngineRegistry {
         let has_vulkan = gpus
             .iter()
             .any(|device| device.backend.to_ascii_lowercase().contains("vulkan"));
+        let has_rocm = gpus
+            .iter()
+            .any(|device| device.backend.to_ascii_lowercase().contains("rocm"));
         match variant.as_str() {
             "cuda" if has_cuda => 0,
+            "rocm" if has_rocm => 0,
             "vulkan" if has_vulkan => 0,
-            "vulkan" if has_cuda => 1,
+            "rocm" if has_vulkan => 1,
+            "vulkan" if has_cuda || has_rocm => 1,
             "cuda" => 1,
             "vulkan" => 2,
+            "rocm" => 2,
             "cpu" => 3,
             _ => 4,
         }

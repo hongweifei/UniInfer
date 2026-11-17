@@ -218,6 +218,36 @@ fn sidecars_can_be_registered_and_removed_at_runtime() {
 }
 
 #[test]
+fn automatic_variant_prefers_a_rocm_device() {
+    let inventory = DeviceInventory::from(vec![
+        device("cpu:0", DeviceClass::Cpu, "cpu"),
+        device("gpu:0", DeviceClass::Gpu, "rocm"),
+    ]);
+    let registry = EngineRegistry::new(inventory);
+    for (name, variant) in [
+        ("alpha-cuda", "CUDA"),
+        ("alpha-vulkan", "Vulkan"),
+        ("alpha-rocm", "ROCm"),
+    ] {
+        registry.register_sidecar(std::sync::Arc::new(FakeEngine {
+            name,
+            backend: "alpha",
+            variant,
+            transport: true,
+        }));
+    }
+    let mut manifest = manifest();
+    manifest.backend = Some(BackendConfig {
+        id: Some("alpha".into()),
+        variant: Some("auto".into()),
+    });
+    assert_eq!(
+        registry.route(&manifest).expect("route").engine_name,
+        "alpha-rocm"
+    );
+}
+
+#[test]
 fn builtin_selection_rejects_transports() {
     let mut manifest = manifest();
     manifest.backend = Some(BackendConfig {

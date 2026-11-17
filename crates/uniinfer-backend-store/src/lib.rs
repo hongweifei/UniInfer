@@ -148,6 +148,8 @@ pub struct BackendFile {
 pub struct BackendCatalog {
     #[serde(default)]
     pub backends: Vec<BackendManifest>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub warnings: Vec<String>,
 }
 
 /// An installed package discovered on disk.
