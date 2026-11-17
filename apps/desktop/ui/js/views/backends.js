@@ -269,15 +269,22 @@ export function mountBackends(root, ctx) {
     );
   }
 
+  function packageSize(packageInfo) {
+    return (packageInfo.files ?? []).reduce((sum, file) => sum + (Number(file.size) || 0), 0);
+  }
+
+  function sizeText(bytes) {
+    return bytes > 0 ? formatBytes(bytes) : '大小未知';
+  }
+
   function sidecarCard(packages) {
     const first = packages[0];
-    const totalSize = packages.reduce((sum, item) => sum + (item.size_bytes ?? 0), 0);
     return h('div', { class: 'card backend-card' },
       h('div', { class: 'backend-card-head' },
         h('div', { class: 'backend-icon' }, h('span', { html: icon('box', 20) })),
         h('div', { class: 'backend-card-title' },
           h('strong', { text: first.name }),
-          h('span', { class: 'backend-card-id', text: `${packages.length} 个变体 · ${totalSize > 0 ? formatBytes(totalSize) : '大小未知'}` }),
+          h('span', { class: 'backend-card-id', text: `${packages.length} 个变体` }),
         ),
         chip('已安装', 'muted'),
       ),
@@ -295,6 +302,7 @@ export function mountBackends(root, ctx) {
             h('div', { class: 'backend-engine-main' },
               h('strong', { text: variant }),
               h('span', { class: 'faint', text: `版本 ${backend.version}` }),
+              h('span', { class: 'backend-size', text: sizeText(backend.size_bytes) }),
             ),
             !support.supported ? h('span', { class: 'backend-unsupported', text: support.reason }) : null,
           ),
@@ -305,20 +313,24 @@ export function mountBackends(root, ctx) {
           );
         }),
       ),
-      backendMeta(first, 'installed'),
+      h('div', { class: 'backend-meta' },
+        h('span', { class: 'backend-meta-item' },
+          h('span', { html: icon('monitor', 12) }),
+          platformLabel(first.platform),
+        ),
+      ),
     );
   }
 
   function availableCard(packages) {
     const first = packages[0];
     const installedKeys = new Set((state.backends ?? []).map((item) => `${item.id}@${item.version}`));
-    const totalSize = packages.reduce((sum, item) => sum + (item.files ?? []).reduce((size, file) => size + (file.size ?? 0), 0), 0);
     return h('div', { class: 'card backend-card available' },
       h('div', { class: 'backend-card-head' },
         h('div', { class: 'backend-icon remote' }, h('span', { html: icon('cloud', 20) })),
         h('div', { class: 'backend-card-title' },
           h('strong', { text: first.name }),
-          h('span', { class: 'backend-card-id', text: `${packages.length} 个变体 · ${totalSize > 0 ? formatBytes(totalSize) : '大小未知'}` }),
+          h('span', { class: 'backend-card-id', text: `${packages.length} 个变体` }),
         ),
         chip('可下载', 'accent'),
       ),
@@ -337,6 +349,7 @@ export function mountBackends(root, ctx) {
               h('div', { class: 'backend-engine-main' },
                 h('strong', { text: variant }),
                 h('span', { class: 'faint', text: `版本 ${packageInfo.version} · ${packageInfo.files?.length ?? 0} 个文件` }),
+                h('span', { class: 'backend-size', text: sizeText(packageSize(packageInfo)) }),
               ),
               !support.supported ? h('span', { class: 'backend-unsupported', text: support.reason }) : null,
             ),

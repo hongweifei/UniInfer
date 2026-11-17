@@ -629,6 +629,14 @@
 .backend-engine-main { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
 .backend-engine.single { padding: 8px 10px; }
 .backend-engine-main strong { color: var(--text-soft); font-size: 12px; font-weight: 600; }
+.backend-engine-main .backend-size {
+  margin-left: auto;
+  flex: 0 0 auto;
+  overflow: visible;
+  color: var(--text-soft);
+  font-variant-numeric: tabular-nums;
+  text-overflow: clip;
+}
 .backend-engine-main span { color: var(--faint); font: 10.5px var(--font-mono); overflow-wrap: anywhere; }
 .backend-engine-tags { display: flex; flex-wrap: wrap; gap: 4px; }
 .backend-tag {

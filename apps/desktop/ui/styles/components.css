@@ -217,7 +217,11 @@
 .progress.determinate span {
   width: 0;
   animation: none;
-  transition: width 0.25s linear;
+  transition: width 0.35s linear;
+}
+.progress.queued span {
+  width: 0;
+  animation: none;
 }
 @keyframes indeterminate {
   from { transform: translateX(-110%); }

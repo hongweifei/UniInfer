@@ -40,6 +40,7 @@ function formatEta(seconds) {
 export function createDownloadPopover() {
   let open = false;
   let tasks = [];
+  let renderScheduled = false;
   const samples = new Map();
 
   const badge = h('span', { class: 'download-badge', hidden: true, text: '' });
@@ -96,6 +97,15 @@ export function createDownloadPopover() {
     badge.textContent = count > 99 ? '99+' : String(count);
   }
 
+  function scheduleRender() {
+    if (renderScheduled) return;
+    renderScheduled = true;
+    requestAnimationFrame(() => {
+      renderScheduled = false;
+      render();
+    });
+  }
+
   function render() {
     updateBadge();
     if (!open) return;
@@ -120,8 +130,11 @@ export function createDownloadPopover() {
     const percent = total > 0 ? Math.min(100, Math.round((downloaded / total) * 100)) : 0;
     const speed = !terminal && task.status === 'downloading' ? updateSpeed(task) : 0;
     const eta = speed > 0 && total > downloaded ? (total - downloaded) / speed : 0;
-    const bar = h('div', { class: `progress ${total > 0 ? 'determinate' : ''}` }, h('span'));
-    if (total > 0) bar.firstChild.style.width = `${percent}%`;
+    const queued = task.status === 'queued';
+    const bar = h('div', {
+      class: `progress ${queued ? 'queued' : total > 0 ? 'determinate' : ''}`,
+    }, h('span'));
+    if (!queued && total > 0) bar.firstChild.style.width = `${percent}%`;
     if (task.status === 'failed' || task.status === 'cancelled') bar.hidden = true;
     const meta = [
       task.kind === 'backend' ? null : sourceLabel(task.source),
@@ -227,7 +240,7 @@ export function createDownloadPopover() {
 
   const unsubscribe = subscribeDownloads((next) => {
     tasks = next;
-    render();
+    scheduleRender();
   });
   document.addEventListener('click', (event) => {
     if (open && root.isConnected && !root.contains(event.target)) close();
@@ -237,7 +250,7 @@ export function createDownloadPopover() {
   });
   void initDownloads().then((next) => {
     tasks = next;
-    render();
+    scheduleRender();
   }).catch(() => {});
 
   return {

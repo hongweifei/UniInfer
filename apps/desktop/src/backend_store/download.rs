@@ -1,7 +1,7 @@
 //! HTTP transfer, archive extraction and integrity checks for engine distributions.
 
 use std::path::{Path, PathBuf};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use futures_util::StreamExt;
 use reqwest::header::ACCEPT_ENCODING;
@@ -140,6 +140,7 @@ where
         .map_err(|error| format!("创建 {} 失败：{error}", tmp.display()))?;
     let mut hasher = Sha256::new();
     let mut total = 0_u64;
+    let mut last_progress = Instant::now();
     let mut stream = response.bytes_stream();
     while let Some(chunk) = stream.next().await {
         if cancel() {
@@ -152,7 +153,10 @@ where
         tokio::io::AsyncWriteExt::write_all(&mut output, &chunk)
             .await
             .map_err(|error| format!("写入 {} 失败：{error}", tmp.display()))?;
-        progress(total);
+        if last_progress.elapsed() >= Duration::from_millis(100) {
+            progress(total);
+            last_progress = Instant::now();
+        }
     }
     tokio::io::AsyncWriteExt::flush(&mut output)
         .await
