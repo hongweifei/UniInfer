@@ -10,6 +10,7 @@ import { mountChat } from './views/chat.js';
 import { mountTranscribe } from './views/transcribe.js';
 import { mountImages } from './views/images.js';
 import { mountModels } from './views/models.js';
+import { mountBackends } from './views/backends.js';
 import { mountSettings } from './views/settings.js';
 
 const views = {
@@ -17,6 +18,7 @@ const views = {
   transcribe: { title: '语音转写', subtitle: '把 WAV 音频转成可编辑文本', mount: mountTranscribe },
   images: { title: '图像生成', subtitle: '用提示词生成图片', mount: mountImages },
   models: { title: '模型', subtitle: '管理本地模型与设备', mount: mountModels },
+  backends: { title: '后端', subtitle: '下载和管理推理后端', mount: mountBackends },
   settings: { title: '设置', subtitle: '外观、对话与运行时', mount: mountSettings },
 };
 
@@ -25,6 +27,7 @@ const navItems = [
   ['transcribe', '语音转写', 'wave'],
   ['images', '图像生成', 'image'],
   ['models', '模型', 'models'],
+  ['backends', '后端', 'box'],
   ['settings', '设置', 'settings'],
 ];
 

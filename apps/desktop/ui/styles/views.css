@@ -469,3 +469,11 @@
 .download-message.error { color: var(--error); }
 .download-path { font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .download-actions { display: flex; justify-content: flex-end; gap: 6px; }
+
+.backend-view { max-width: 980px; }
+.backend-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.backend-grid > .notice { grid-column: 1 / -1; }
+.backend-card { display: grid; gap: 10px; }
+.backend-card p { margin: 0; font-size: 12px; line-height: 1.5; }
+.backend-meta { display: flex; flex-wrap: wrap; gap: 6px 14px; color: var(--muted); font-size: 11.5px; }
+@media (max-width: 860px) { .backend-grid { grid-template-columns: 1fr; } }

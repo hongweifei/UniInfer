@@ -1,6 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod api_server;
+mod backend_store;
 mod model_store;
 
 use serde::Serialize;
@@ -93,7 +94,11 @@ fn main() {
             model_store::download::cancel_download,
             model_store::download::remove_download,
             model_store::download::clear_downloads,
-            model_store::delete_model
+            model_store::delete_model,
+            backend_store::fetch_backend_catalog,
+            backend_store::install_backend,
+            backend_store::pick_backend_folder,
+            backend_store::import_backend
         ])
         .setup(|app| {
             let startup = api_server::start();

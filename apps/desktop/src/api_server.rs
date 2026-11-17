@@ -111,10 +111,33 @@ pub(crate) fn start() -> ApiStartup {
     }
 }
 
-fn start_inner() -> Result<(ApiInfo, Arc<tokio::runtime::Runtime>), Box<dyn std::error::Error>> {
-    let config_path = std::env::var_os("UNIINFER_CONFIG")
+pub(crate) fn backend_dir() -> std::path::PathBuf {
+    if let Some(path) = std::env::var_os("UNIINFER_BACKEND_DIR") {
+        return std::path::PathBuf::from(path);
+    }
+    if let Some(path) = config_path() {
+        let base = path.parent().unwrap_or_else(|| std::path::Path::new("."));
+        if path.is_file()
+            && let Ok(config) = UniInferConfig::load(&path)
+            && let Some(dir) = config.server.backend_dir
+        {
+            return if dir.is_absolute() { dir } else { base.join(dir) };
+        }
+        return base.join("backends");
+    }
+    std::env::current_dir()
+        .unwrap_or_else(|_| std::path::PathBuf::from("."))
+        .join("backends")
+}
+
+fn config_path() -> Option<std::path::PathBuf> {
+    std::env::var_os("UNIINFER_CONFIG")
         .map(std::path::PathBuf::from)
-        .or_else(|| project_root().map(|root| root.join("uniinfer.toml")));
+        .or_else(|| project_root().map(|root| root.join("uniinfer.toml")))
+}
+
+fn start_inner() -> Result<(ApiInfo, Arc<tokio::runtime::Runtime>), Box<dyn std::error::Error>> {
+    let config_path = config_path();
     let handle = match config_path {
         Some(path) if path.is_file() => ConfigHandle::load(path)?,
         Some(path) => ConfigHandle::new(UniInferConfig::default(), Some(path)),
