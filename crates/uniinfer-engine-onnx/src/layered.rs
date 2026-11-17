@@ -22,49 +22,120 @@ pub(crate) fn load(
     spec: &EngineLoadSpec,
     _class: DeviceClass,
 ) -> Result<Box<dyn EngineSession>> {
-    let config = load_genai_config(&spec.base_dir)?.ok_or_else(|| {
-        EngineError::ManifestInvalid("onnx.layered requires genai_config.json".into())
-    })?;
     let model_file = spec
         .manifest
         .files
         .first()
         .ok_or_else(|| EngineError::ManifestInvalid("files is empty".into()))?;
     let model_path = spec.base_dir.join(&model_file.path);
-    let stages = partition::split(&model_path, &spec.placement)?;
-    let decoder = &config.model.decoder;
-    let past = (0..decoder.num_hidden_layers)
-        .flat_map(|layer| {
-            [
-                (
-                    decoder
-                        .inputs
-                        .past_key_names
-                        .replace("%d", &layer.to_string()),
-                    decoder
-                        .outputs
-                        .present_key_names
-                        .replace("%d", &layer.to_string()),
-                ),
-                (
-                    decoder
-                        .inputs
-                        .past_value_names
-                        .replace("%d", &layer.to_string()),
-                    decoder
-                        .outputs
-                        .present_value_names
-                        .replace("%d", &layer.to_string()),
-                ),
-            ]
-        })
-        .collect::<Vec<_>>();
-    let mut graphs = Vec::with_capacity(stages.len());
+    let partitioned = partition::split(&model_path, &spec.placement)?;
+    let graph_inputs = partitioned.inputs;
+    let graph_outputs = partitioned.outputs;
+    let config = load_genai_config(&spec.base_dir)?;
+    let (input_ids, attention_mask, logits, past, inputs, outputs, total_layers, kv) =
+        if let Some(config) = config {
+            let decoder = &config.model.decoder;
+            let past = (0..decoder.num_hidden_layers)
+                .flat_map(|layer| {
+                    [
+                        (
+                            decoder
+                                .inputs
+                                .past_key_names
+                                .replace("%d", &layer.to_string()),
+                            decoder
+                                .outputs
+                                .present_key_names
+                                .replace("%d", &layer.to_string()),
+                        ),
+                        (
+                            decoder
+                                .inputs
+                                .past_value_names
+                                .replace("%d", &layer.to_string()),
+                            decoder
+                                .outputs
+                                .present_value_names
+                                .replace("%d", &layer.to_string()),
+                        ),
+                    ]
+                })
+                .collect::<Vec<_>>();
+            let input_ids = decoder.inputs.input_ids.clone();
+            let attention_mask = decoder.inputs.attention_mask.clone();
+            let logits = decoder.outputs.logits.clone();
+            (
+                input_ids.clone(),
+                attention_mask.clone(),
+                logits.clone(),
+                past,
+                vec![
+                    TensorSpec {
+                        name: input_ids,
+                        dtype: TensorDtype::I64,
+                        shape: vec![Some(1), None],
+                    },
+                    TensorSpec {
+                        name: attention_mask,
+                        dtype: TensorDtype::I64,
+                        shape: vec![Some(1), None],
+                    },
+                ],
+                vec![TensorSpec {
+                    name: logits.clone(),
+                    dtype: TensorDtype::F32,
+                    shape: vec![Some(1), None, None],
+                }],
+                decoder.num_hidden_layers,
+                true,
+            )
+        } else {
+            let input_ids = graph_inputs
+                .iter()
+                .find(|spec| spec.name == "input_ids")
+                .ok_or_else(|| {
+                    EngineError::ManifestInvalid("onnx.layered requires an input_ids tensor".into())
+                })?
+                .name
+                .clone();
+            let attention_mask = graph_inputs
+                .iter()
+                .find(|spec| spec.name == "attention_mask")
+                .map(|spec| spec.name.clone())
+                .unwrap_or_default();
+            let logits = graph_outputs
+                .iter()
+                .find(|spec| spec.dtype == TensorDtype::F32 && spec.name == "logits")
+                .or_else(|| {
+                    graph_outputs
+                        .iter()
+                        .find(|spec| spec.dtype == TensorDtype::F32)
+                })
+                .ok_or_else(|| {
+                    EngineError::ManifestInvalid(
+                        "onnx.layered requires a float logits output".into(),
+                    )
+                })?
+                .name
+                .clone();
+            let total_layers = partitioned.stages.iter().map(|stage| stage.layers).sum();
+            (
+                input_ids,
+                attention_mask,
+                logits,
+                Vec::new(),
+                graph_inputs,
+                graph_outputs,
+                total_layers,
+                false,
+            )
+        };
+    let mut graphs = Vec::with_capacity(partitioned.stages.len());
     let mut vram_bytes = 0u64;
     let mut host_bytes = 0u64;
     let mut offload_layers = 0usize;
     let disk_bytes = std::fs::metadata(&model_path).map_or(0, |metadata| metadata.len());
-    for stage in stages {
+    for stage in partitioned.stages {
         let bytes = u64::try_from(stage.bytes.len()).unwrap_or(0);
         if stage.device == DeviceClass::Gpu {
             vram_bytes = vram_bytes.saturating_add(bytes);
@@ -84,40 +155,23 @@ pub(crate) fn load(
         host_bytes,
         disk_bytes,
         offload_layers,
-        total_layers: Some(decoder.num_hidden_layers),
+        total_layers: Some(total_layers),
         estimated: false,
     };
-    let input_ids = decoder.inputs.input_ids.clone();
-    let attention_mask = decoder.inputs.attention_mask.clone();
-    let logits = decoder.outputs.logits.clone();
     Ok(Box::new(LayeredSession {
         graphs,
-        input_ids: input_ids.clone(),
-        attention_mask: attention_mask.clone(),
-        logits: logits.clone(),
+        input_ids,
+        attention_mask,
+        logits,
         past,
         state: Mutex::new(LayeredState {
             past_values: HashMap::new(),
             cached_ids: Vec::new(),
         }),
-        inputs: vec![
-            TensorSpec {
-                name: input_ids,
-                dtype: TensorDtype::I64,
-                shape: vec![Some(1), None],
-            },
-            TensorSpec {
-                name: attention_mask,
-                dtype: TensorDtype::I64,
-                shape: vec![Some(1), None],
-            },
-        ],
-        outputs: vec![TensorSpec {
-            name: logits.clone(),
-            dtype: TensorDtype::F32,
-            shape: vec![Some(1), None, None],
-        }],
+        inputs,
+        outputs,
         residency,
+        kv,
         cancelled: AtomicBool::new(false),
     }))
 }
@@ -132,6 +186,7 @@ struct LayeredSession {
     inputs: Vec<TensorSpec>,
     outputs: Vec<TensorSpec>,
     residency: Residency,
+    kv: bool,
     cancelled: AtomicBool,
 }
 
@@ -156,6 +211,35 @@ impl EngineSession for LayeredSession {
     fn run(&self, inputs: Vec<Tensor>) -> Result<Vec<Tensor>> {
         if self.cancelled.load(Ordering::SeqCst) {
             return Err(EngineError::Cancelled);
+        }
+        if !self.kv {
+            let mut values = inputs
+                .into_iter()
+                .map(|tensor| (tensor.name.clone(), tensor))
+                .collect::<HashMap<_, _>>();
+            for graph in &self.graphs {
+                let mut graph = graph
+                    .lock()
+                    .map_err(|_| EngineError::Other("layer partition lock poisoned".into()))?;
+                let mut stage_inputs = Vec::with_capacity(graph.inputs().len());
+                for spec in graph.inputs() {
+                    stage_inputs.push(values.remove(&spec.name).ok_or_else(|| {
+                        EngineError::Other(format!("missing layered input {}", spec.name))
+                    })?);
+                }
+                for output in graph.run(stage_inputs)? {
+                    values.insert(output.name.clone(), output);
+                }
+            }
+            return self
+                .outputs
+                .iter()
+                .map(|spec| {
+                    values.remove(&spec.name).ok_or_else(|| {
+                        EngineError::Other(format!("missing layered output {}", spec.name))
+                    })
+                })
+                .collect();
         }
         let ids = find_i64(&inputs, &self.input_ids)?;
         let mask = find_i64(&inputs, &self.attention_mask).unwrap_or_else(|_| vec![1; ids.len()]);

@@ -91,3 +91,27 @@ fn qwen3_layered_directml_runs_gpu_and_cpu_stages() {
     let output = session.run(vec![ids, mask]).expect("directml layered run");
     assert!(output.iter().any(|tensor| tensor.name == "logits"));
 }
+
+#[test]
+fn tiny_graph_without_layer_names_uses_stateless_layered_path() {
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../models/tiny-onnx");
+    let mut manifest = ModelManifest::load(&dir.join("manifest.toml")).expect("manifest");
+    manifest.implementation = "onnx.layered".into();
+    let placement = DeviceInventory::probe()
+        .plan(&manifest, &[DeviceClass::Cpu])
+        .expect("placement");
+    let session = OnnxEngine::new()
+        .expect("engine")
+        .load_session(EngineLoadSpec {
+            manifest,
+            base_dir: dir,
+            manifest_path: None,
+            placement,
+            budget: DeviceBudget::default(),
+            cancel: CancelToken::new(),
+        })
+        .expect("load generic layered");
+    let ids = Tensor::new("input_ids", vec![1, 2], TensorData::I64(vec![1, 2])).expect("ids");
+    let output = session.run(vec![ids]).expect("generic run");
+    assert!(output.iter().any(|tensor| tensor.name == "logits"));
+}

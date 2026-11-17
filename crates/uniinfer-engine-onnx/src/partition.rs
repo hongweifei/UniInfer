@@ -9,7 +9,7 @@ use std::path::Path;
 
 use onnx_protobuf::{GraphProto, Message, ModelProto, NodeProto, TensorProto, ValueInfoProto};
 use protobuf::MessageField;
-use uniinfer_core::{DeviceClass, EngineError, PlacementPlan, Result};
+use uniinfer_core::{DeviceClass, EngineError, PlacementPlan, Result, TensorDtype, TensorSpec};
 
 const RESERVE_BYTES: u64 = 256 * 1024 * 1024;
 
@@ -20,7 +20,13 @@ pub(crate) struct Stage {
     pub(crate) layers: usize,
 }
 
-pub(crate) fn split(path: &Path, placement: &PlacementPlan) -> Result<Vec<Stage>> {
+pub(crate) struct Partitioned {
+    pub(crate) stages: Vec<Stage>,
+    pub(crate) inputs: Vec<TensorSpec>,
+    pub(crate) outputs: Vec<TensorSpec>,
+}
+
+pub(crate) fn split(path: &Path, placement: &PlacementPlan) -> Result<Partitioned> {
     let raw = std::fs::read(path)
         .map_err(|error| EngineError::LoadFailed(format!("read {}: {error}", path.display())))?;
     let model = ModelProto::parse_from_bytes(&raw)
@@ -29,77 +35,87 @@ pub(crate) fn split(path: &Path, placement: &PlacementPlan) -> Result<Vec<Stage>
         .graph
         .as_ref()
         .ok_or_else(|| EngineError::ManifestInvalid("ONNX model has no graph".into()))?;
-    let first = graph
-        .node
-        .iter()
-        .position(|node| layer_index(&node.name).is_some())
-        .ok_or_else(|| {
-            EngineError::UnsupportedEngine("onnx.layered requires layer-indexed node names".into())
-        })?;
-    let last = graph
-        .node
-        .iter()
-        .rposition(|node| layer_index(&node.name).is_some())
-        .ok_or_else(|| EngineError::UnsupportedEngine("ONNX model has no layer nodes".into()))?;
     let layer_count = graph
         .node
         .iter()
         .filter_map(|node| layer_index(&node.name))
         .max()
         .map_or(0, |layer| layer + 1);
-    if layer_count == 0 {
-        return Err(EngineError::UnsupportedEngine(
-            "ONNX model has no layers".into(),
-        ));
-    }
-    let gpu_layers = gpu_layers(path, layer_count, placement);
-    let main_class = if gpu_layers > 0 {
-        DeviceClass::Gpu
-    } else {
-        DeviceClass::Cpu
-    };
-
-    let layer_device = |layer: usize| {
-        if layer < gpu_layers {
+    let has_layers = layer_count > 0;
+    let (stage_devices, stage_layers, node_stage) = if has_layers {
+        let first = graph
+            .node
+            .iter()
+            .position(|node| layer_index(&node.name).is_some())
+            .expect("layer count");
+        let last = graph
+            .node
+            .iter()
+            .rposition(|node| layer_index(&node.name).is_some())
+            .expect("layer count");
+        let gpu_layers = gpu_layers(path, layer_count, placement);
+        let main_class = if gpu_layers > 0 {
             DeviceClass::Gpu
         } else {
             DeviceClass::Cpu
-        }
-    };
-    let mut groups: Vec<(DeviceClass, usize, usize)> = Vec::new();
-    for layer in 0..layer_count {
-        let device = layer_device(layer);
-        if let Some((last_device, _start, _)) = groups.last_mut()
-            && *last_device == device
-        {
-            groups.last_mut().expect("group").2 = layer + 1;
-        } else {
-            groups.push((device, layer, layer + 1));
-        }
-    }
-
-    let stage_count = 2 + groups.len();
-    let pre_stage = 0;
-    let post_stage = stage_count - 1;
-    let mut node_stage = vec![pre_stage; graph.node.len()];
-    let mut current = pre_stage;
-    for (index, node) in graph.node.iter().enumerate() {
-        let stage = if let Some(layer) = layer_index(&node.name) {
-            let group = groups
-                .iter()
-                .position(|(_, start, end)| (*start..*end).contains(&layer))
-                .unwrap_or(0);
-            1 + group
-        } else if index < first {
-            pre_stage
-        } else if index > last {
-            post_stage
-        } else {
-            current
         };
-        node_stage[index] = stage;
-        current = stage;
-    }
+        let mut groups: Vec<(DeviceClass, usize, usize)> = Vec::new();
+        for layer in 0..layer_count {
+            let device = if layer < gpu_layers {
+                DeviceClass::Gpu
+            } else {
+                DeviceClass::Cpu
+            };
+            if let Some(last) = groups.last_mut()
+                && last.0 == device
+            {
+                last.2 = layer + 1;
+            } else {
+                groups.push((device, layer, layer + 1));
+            }
+        }
+        let stage_count = 2 + groups.len();
+        let pre_stage = 0;
+        let post_stage = stage_count - 1;
+        let mut node_stage = vec![pre_stage; graph.node.len()];
+        let mut current = pre_stage;
+        for (index, node) in graph.node.iter().enumerate() {
+            let stage = if let Some(layer) = layer_index(&node.name) {
+                let group = groups
+                    .iter()
+                    .position(|(_, start, end)| (*start..*end).contains(&layer))
+                    .unwrap_or(0);
+                1 + group
+            } else if index < first {
+                pre_stage
+            } else if index > last {
+                post_stage
+            } else {
+                current
+            };
+            node_stage[index] = stage;
+            current = stage;
+        }
+        let mut devices = vec![main_class];
+        devices.extend(groups.iter().map(|(device, _, _)| *device));
+        devices.push(main_class);
+        let mut layers = vec![0];
+        layers.extend(groups.iter().map(|(_, start, end)| end - start));
+        layers.push(0);
+        (devices, layers, node_stage)
+    } else {
+        let (split, devices) = generic_partition(graph, path, placement);
+        let stage_count = devices.len();
+        let node_stage = graph
+            .node
+            .iter()
+            .enumerate()
+            .map(|(index, _)| if split > 0 && index >= split { 1 } else { 0 })
+            .map(|stage| stage.min(stage_count - 1))
+            .collect::<Vec<_>>();
+        (devices, vec![0; stage_count], node_stage)
+    };
+    let stage_count = stage_devices.len();
 
     let input_names = graph
         .input
@@ -248,11 +264,7 @@ pub(crate) fn split(path: &Path, placement: &PlacementPlan) -> Result<Vec<Stage>
             .iter()
             .map(|index| graph.node[*index].clone())
             .collect::<Vec<NodeProto>>();
-        let device = if stage == pre_stage || stage == post_stage {
-            main_class
-        } else {
-            groups[stage - 1].0
-        };
+        let device = stage_devices[stage];
         let graph = GraphProto {
             node: nodes,
             name: format!("uniinfer-stage-{stage}"),
@@ -271,11 +283,7 @@ pub(crate) fn split(path: &Path, placement: &PlacementPlan) -> Result<Vec<Stage>
         let bytes = submodel
             .write_to_bytes()
             .map_err(|error| EngineError::LoadFailed(format!("serialize ONNX stage: {error}")))?;
-        let layers = if stage == pre_stage || stage == post_stage {
-            0
-        } else {
-            groups[stage - 1].2 - groups[stage - 1].1
-        };
+        let layers = stage_layers[stage];
         stages.push(Stage {
             name: format!("stage-{stage}"),
             device,
@@ -283,7 +291,11 @@ pub(crate) fn split(path: &Path, placement: &PlacementPlan) -> Result<Vec<Stage>
             layers,
         });
     }
-    Ok(stages)
+    Ok(Partitioned {
+        stages,
+        inputs: value_specs(&graph.input)?,
+        outputs: value_specs(&graph.output)?,
+    })
 }
 
 fn gpu_layers(path: &Path, layer_count: usize, placement: &PlacementPlan) -> usize {
@@ -334,5 +346,118 @@ fn value_info_map(graph: &GraphProto) -> HashMap<String, ValueInfoProto> {
         .value_info
         .iter()
         .map(|value| (value.name.clone(), value.clone()))
+        .collect()
+}
+
+fn generic_partition(
+    graph: &GraphProto,
+    _path: &Path,
+    placement: &PlacementPlan,
+) -> (usize, Vec<DeviceClass>) {
+    if placement
+        .devices
+        .first()
+        .is_none_or(|device| device.class != DeviceClass::Gpu)
+    {
+        return (0, vec![DeviceClass::Cpu]);
+    }
+    let total = graph
+        .initializer
+        .iter()
+        .map(|tensor| u64::try_from(tensor.raw_data.len()).unwrap_or(0))
+        .sum::<u64>();
+    let available = placement
+        .devices
+        .iter()
+        .find(|device| device.class == DeviceClass::Gpu)
+        .map_or(0, |device| device.available_memory_bytes);
+    if available == 0 || total == 0 {
+        return (0, vec![DeviceClass::Gpu]);
+    }
+    if available >= total.saturating_add(RESERVE_BYTES) {
+        return (0, vec![DeviceClass::Gpu]);
+    }
+    let budget = available.saturating_sub(RESERVE_BYTES);
+    if budget == 0 {
+        return (0, vec![DeviceClass::Cpu]);
+    }
+    let initializer = graph
+        .initializer
+        .iter()
+        .map(|tensor| {
+            (
+                tensor.name.clone(),
+                u64::try_from(tensor.raw_data.len()).unwrap_or(0),
+            )
+        })
+        .collect::<HashMap<_, _>>();
+    let mut cumulative = 0u64;
+    for (index, node) in graph.node.iter().enumerate() {
+        cumulative = cumulative.saturating_add(
+            node.input
+                .iter()
+                .filter_map(|name| initializer.get(name))
+                .copied()
+                .sum::<u64>(),
+        );
+        if cumulative >= budget && index + 1 < graph.node.len() {
+            return (index + 1, vec![DeviceClass::Gpu, DeviceClass::Cpu]);
+        }
+    }
+    (0, vec![DeviceClass::Gpu])
+}
+
+fn value_specs(values: &[ValueInfoProto]) -> Result<Vec<TensorSpec>> {
+    values
+        .iter()
+        .map(|value| {
+            let ty = value
+                .type_
+                .as_ref()
+                .and_then(|ty| match &ty.value {
+                    Some(onnx_protobuf::type_proto::Value::TensorType(tensor)) => Some(tensor),
+                    _ => None,
+                })
+                .ok_or_else(|| {
+                    EngineError::LoadFailed(format!("ONNX value {} is not a tensor", value.name))
+                })?;
+            let dtype = match ty.elem_type {
+                1 => TensorDtype::F32,
+                10 => TensorDtype::F16,
+                6 => TensorDtype::I32,
+                7 => TensorDtype::I64,
+                2 => TensorDtype::U8,
+                9 => TensorDtype::Bool,
+                other => {
+                    return Err(EngineError::LoadFailed(format!(
+                        "ONNX value {} has unsupported dtype {other}",
+                        value.name
+                    )));
+                }
+            };
+            let shape = ty
+                .shape
+                .as_ref()
+                .map(|shape| {
+                    shape
+                        .dim
+                        .iter()
+                        .map(|dim| match dim.value {
+                            Some(
+                                onnx_protobuf::tensor_shape_proto::dimension::Value::DimValue(
+                                    value,
+                                ),
+                            ) => usize::try_from(value).ok(),
+                            _ => None,
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+            Ok(TensorSpec {
+                name: value.name.clone(),
+                dtype,
+                shape,
+            })
+        })
         .collect()
 }
