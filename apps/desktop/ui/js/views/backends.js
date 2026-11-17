@@ -1,7 +1,7 @@
 import { h, clear } from '../dom.js';
 import { icon } from '../icons.js';
 import { formatBytes, errorMessage } from '../format.js';
-import { toast, chip, confirmDialog, openModal } from '../components/ui.js';
+import { toast, chip, confirmDialog } from '../components/ui.js';
 
 const invoke = (command, args) => window.__TAURI__?.core?.invoke(command, args);
 
@@ -32,17 +32,28 @@ export function mountBackends(root, ctx) {
   let busy = false;
 
   const content = h('div', { class: 'backend-content' });
-  const runtimeLine = h('span', { class: 'backend-runtime-line', text: '当前运行：读取中…' });
+  const runningName = h('strong', { text: '读取中…' });
+  const runningVersion = h('span', { class: 'faint', text: '' });
+  const catalogInput = h('input', {
+    class: 'input', placeholder: 'https://example.com/engines/catalog.json',
+    onInput: () => updateControls(),
+  });
+  const directoryLabel = h('code', { class: 'mono', text: '读取中…' });
   const errorBanner = h('div', { class: 'notice error', hidden: true });
   const restartBanner = h('div', { class: 'backend-restart', hidden: true });
   const refreshButton = h('button', {
-    class: 'btn sm', type: 'button',
+    class: 'btn btn-icon ghost sm', type: 'button', title: '重新读取推理引擎',
     onClick: () => void refresh(),
-  }, h('span', { html: icon('refresh', 14) }), h('span', { text: '刷新' }));
-  const sourceButton = h('button', {
-    class: 'btn sm ghost', type: 'button',
-    onClick: () => openSource(),
-  }, h('span', { html: icon('cloud', 14) }), h('span', { text: '引擎源' }));
+  }, h('span', { html: icon('refresh', 14) }));
+  const readCatalogButton = h('button', {
+    class: 'btn primary', type: 'button',
+    onClick: () => void readCatalog(),
+  }, h('span', { html: icon('cloud', 14) }), h('span', { text: '读取目录' }));
+
+  function updateControls() {
+    refreshButton.disabled = loading || busy;
+    readCatalogButton.disabled = loading || busy || !catalogInput.value.trim();
+  }
 
   function showError(message) {
     errorBanner.hidden = !message;
@@ -66,9 +77,11 @@ export function mountBackends(root, ctx) {
     try {
       const response = await ctx.api.config();
       catalogUrl = response.config?.server?.backend_catalog_url ?? '';
+      catalogInput.value = catalogUrl;
     } catch {
       catalogUrl = '';
     }
+    updateControls();
   }
 
   async function refresh({ reloadCatalog = true } = {}) {
@@ -95,39 +108,22 @@ export function mountBackends(root, ctx) {
     }
   }
 
-  function openSource() {
-    const input = h('input', {
-      class: 'input', value: catalogUrl, placeholder: 'https://example.com/engines/catalog.json',
-    });
-    openModal({
-      title: '引擎源',
-      body: h('div', { style: 'display:grid;gap:10px' },
-        h('p', { class: 'muted', text: '填写官方推理引擎目录的 JSON 地址。目录决定可安装的引擎与版本。' }),
-        h('div', { class: 'field' }, h('label', { text: '目录 URL' }), input),
-      ),
-      actions: [
-        { label: '取消', kind: 'ghost' },
-        {
-          label: '保存并读取', kind: 'primary',
-          onClick: async () => {
-            const next = input.value.trim();
-            try {
-              const current = await ctx.api.config();
-              const body = {
-                ...current.config,
-                server: { ...(current.config?.server ?? {}), backend_catalog_url: next || null },
-              };
-              await ctx.api.saveConfig(body);
-              catalogUrl = next;
-              await refresh();
-            } catch (error) {
-              toast(errorMessage(error), 'error');
-              return false;
-            }
-          },
-        },
-      ],
-    });
+  async function readCatalog() {
+    const next = catalogInput.value.trim();
+    if (!next) return;
+    try {
+      const current = await ctx.api.config();
+      const body = {
+        ...current.config,
+        server: { ...(current.config?.server ?? {}), backend_catalog_url: next },
+      };
+      await ctx.api.saveConfig(body);
+      catalogUrl = next;
+      await refresh();
+    } catch (error) {
+      showError(errorMessage(error));
+      toast(errorMessage(error), 'error');
+    }
   }
 
   async function install(variant) {
@@ -300,34 +296,28 @@ export function mountBackends(root, ctx) {
       : vendor.toLowerCase().includes('candle') ? 'sparkles' : 'box';
     return h('div', { class: 'vendor-card' },
       h('div', { class: 'vendor-brand' },
-        h('span', { class: 'vendor-mark', html: icon(iconName, 19) }),
+        h('span', { class: 'vendor-mark', html: icon(iconName, 20) }),
         h('strong', { text: vendor }),
       ),
+      entries[0]?.engine.description
+        ? h('p', { class: 'vendor-description', text: entries[0].engine.description })
+        : null,
       h('div', { class: 'engine-variant-list' }, ...entries.map(variantRow)),
     );
   }
 
   function render() {
-    refreshButton.disabled = loading || busy;
+    updateControls();
     clear(content);
     const all = variants();
     const running = state.running;
-    runtimeLine.textContent = running
-      ? `当前运行：${running.kind === 'builtin' ? '内置引擎组' : running.id}${running.version && running.kind !== 'builtin' ? ` · v${running.version}` : ''}`
-      : '当前运行：未启动';
-
-    if (!catalogUrl) {
-      content.append(h('div', { class: 'backend-source-hint' },
-        h('span', { class: 'backend-source-hint-text' },
-          h('span', { html: icon('cloud', 15) }),
-          h('span', { text: '尚未配置引擎源，当前只显示内置引擎。' }),
-        ),
-        h('button', {
-          class: 'btn sm ghost', type: 'button', text: '配置引擎源',
-          onClick: () => openSource(),
-        }),
-      ));
-    }
+    runningName.textContent = running
+      ? (running.kind === 'builtin' ? '内置引擎组' : running.id)
+      : '未启动';
+    runningVersion.textContent = running
+      ? (running.kind === 'builtin' ? `${countBuiltinEngines()} 个内置引擎` : `v${running.version}`)
+      : '';
+    directoryLabel.textContent = state.directory || '未配置';
 
     if (loading) {
       content.append(h('div', { class: 'backend-loading', text: '正在读取推理引擎…' }));
@@ -344,9 +334,11 @@ export function mountBackends(root, ctx) {
       }
       content.append(h('section', { class: 'backend-category' },
         h('div', { class: 'backend-category-head' },
-          h('h2', { text: category.title }),
-          h('p', { text: category.subtitle }),
-          h('span', { class: 'filter-count', text: `${entries.length} 个变体` }),
+          h('div', {},
+            h('h2', { text: category.title }),
+            h('p', { text: category.subtitle }),
+          ),
+          h('span', { class: 'filter-count', text: `${vendors.size} 个项目 · ${entries.length} 个变体` }),
         ),
         h('div', { class: 'vendor-grid' },
           ...[...vendors.entries()].map(([vendor, variants]) => vendorCard(vendor, variants)),
@@ -363,6 +355,12 @@ export function mountBackends(root, ctx) {
     }
   }
 
+  function countBuiltinEngines() {
+    return (state.backends ?? [])
+      .filter((backend) => backend.kind === 'builtin')
+      .reduce((sum, backend) => sum + (backend.engines?.length ?? 0), 0);
+  }
+
   function renderPage() {
     root.append(h('div', { class: 'page backend-view' },
       h('div', { class: 'backend-hero' },
@@ -370,12 +368,39 @@ export function mountBackends(root, ctx) {
           h('span', { class: 'backend-eyebrow', text: 'RUNTIME' }),
           h('h2', { text: '推理后端' }),
           h('p', { text: '安装和更新此设备上可用的推理引擎。' }),
-          runtimeLine,
         ),
-        h('div', { class: 'backend-hero-actions' }, sourceButton, refreshButton),
+        h('div', { class: 'backend-running' },
+          h('div', { class: 'backend-running-label' },
+            h('span', { class: 'status-dot' }),
+            h('span', { text: '当前运行' }),
+          ),
+          runningName,
+          runningVersion,
+        ),
       ),
       restartBanner,
       errorBanner,
+      h('section', { class: 'card backend-source' },
+        h('div', { class: 'section-title' },
+          h('div', {},
+            h('h2', { text: '引擎源' }),
+            h('p', { text: '从官方引擎目录读取可用版本和硬件变体。' }),
+          ),
+          h('span', { class: 'spacer' }),
+          refreshButton,
+        ),
+        h('div', { class: 'backend-source-row' },
+          h('div', { class: 'field backend-url-field' },
+            h('label', { text: '目录 URL' }),
+            catalogInput,
+          ),
+          readCatalogButton,
+        ),
+        h('div', { class: 'backend-path' },
+          h('span', { class: 'backend-path-label', text: '安装位置' }),
+          directoryLabel,
+        ),
+      ),
       content,
     ));
   }
