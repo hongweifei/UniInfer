@@ -561,6 +561,75 @@ mod tests {
     }
 
     #[test]
+    fn refresh_repairs_legacy_diffusion_manifest() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let models_root = temp.path().join("models");
+        let model_dir = models_root.join("legacy-diffusion");
+        for (source, target) in [
+            ("text_encoder.onnx", "text_encoder/model.onnx"),
+            ("unet.onnx", "unet/model.onnx"),
+            ("vae_decoder.onnx", "vae_decoder/model.onnx"),
+        ] {
+            let target = model_dir.join(target);
+            std::fs::create_dir_all(target.parent().unwrap()).expect("component dir");
+            std::fs::copy(
+                PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                    .join("../../models/tiny-diffusion")
+                    .join(source),
+                target,
+            )
+            .expect("copy component");
+        }
+        std::fs::write(model_dir.join("tokenizer.json"), b"{}").expect("tokenizer");
+        std::fs::create_dir_all(model_dir.join("text_encoder")).expect("config dir");
+        std::fs::write(
+            model_dir.join("text_encoder/config.json"),
+            r#"{"architectures":["CLIPTextModel"],"vocab_size":100}"#,
+        )
+        .expect("config");
+
+        let fixture = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../models/tiny-diffusion/manifest.toml");
+        let mut manifest = ModelManifest::load(&fixture).expect("manifest");
+        manifest.id = "legacy-diffusion".into();
+        manifest.implementation = "onnx.graph".into();
+        manifest.image = None;
+        manifest.files = vec![
+            uniinfer_core::ModelFile {
+                path: "text_encoder/model.onnx".into(),
+                sha256: "00".repeat(32),
+            },
+            uniinfer_core::ModelFile {
+                path: "unet/model.onnx".into(),
+                sha256: "00".repeat(32),
+            },
+            uniinfer_core::ModelFile {
+                path: "vae_decoder/model.onnx".into(),
+                sha256: "00".repeat(32),
+            },
+        ];
+        manifest.capabilities = vec![uniinfer_core::Capability {
+            name: "text_chat".into(),
+            operation: uniinfer_core::Operation::Generate,
+            required_inputs: vec![uniinfer_core::Modality::Text],
+            optional_inputs: Vec::new(),
+            outputs: vec![uniinfer_core::Modality::Text],
+            mode: uniinfer_core::Mode::Stream,
+        }];
+        manifest
+            .save(&model_dir.join("manifest.toml"))
+            .expect("save legacy manifest");
+
+        let config = ApiConfig::new(fixture).with_model_roots(vec![models_root]);
+        let state = AppState::new(&config).expect("state");
+        state.refresh_catalog().expect("refresh");
+        let entry = state.catalog_entry("legacy-diffusion").expect("repaired");
+        assert_eq!(entry.manifest.implementation, "onnx.diffusion");
+        assert!(entry.manifest.image.is_some());
+        assert_eq!(entry.manifest.capabilities[0].name, "text_to_image");
+    }
+
+    #[test]
     fn update_manifest_refreshes_catalog_without_restart() {
         let state = state(std::time::Duration::ZERO);
         let path =

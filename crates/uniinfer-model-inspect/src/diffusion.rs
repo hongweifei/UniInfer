@@ -27,10 +27,12 @@ pub(crate) fn detect(root: &Path, onnx: &[PathBuf]) -> Option<DiffusionLayout> {
     selected.extend(files_under(root, "scheduler"));
     selected.extend(files_under(root, "tokenizer"));
     selected.extend(files_under(root, "tokenizer_2"));
-    for path in onnx {
-        if is_external_data(&path.to_string_lossy()) {
-            selected.push(path.clone());
-        }
+    for directory in ["text_encoder", "unet", "vae_decoder"] {
+        selected.extend(
+            files_under(root, directory)
+                .into_iter()
+                .filter(|path| is_external_data(&path.to_string_lossy())),
+        );
     }
 
     selected.sort();
