@@ -71,8 +71,8 @@ async fn metrics(State(state): State<AppState>) -> Json<Value> {
         "loaded_sessions": state.runtime.active_sessions(),
         "loaded_models": {
             "text": state.router.slots().len(),
-            "audio": state.audio_slots.lock().map(|slots| slots.len()).unwrap_or(0),
-            "image": state.image_slots.lock().map(|slots| slots.len()).unwrap_or(0),
+            "audio": state.media_counts().0,
+            "image": state.media_counts().1,
         },
         "requests": state.router.metrics(),
         "residency": state.runtime.residency(),
@@ -117,20 +117,10 @@ fn catalog_model_json(state: &AppState, id: &str, entry: &crate::state::CatalogE
     if let Some(slot) = state.router.peek_slot(id) {
         return model_json(slot.as_ref());
     }
-    if let Some(slot) = state
-        .audio_slots
-        .lock()
-        .ok()
-        .and_then(|slots| slots.get(id).cloned())
-    {
+    if let Some(slot) = state.cached_audio(id) {
         return model_json(slot.as_ref());
     }
-    if let Some(slot) = state
-        .image_slots
-        .lock()
-        .ok()
-        .and_then(|slots| slots.get(id).cloned())
-    {
+    if let Some(slot) = state.cached_image(id) {
         return model_json(slot.as_ref());
     }
     let manifest = &entry.manifest;
@@ -173,12 +163,7 @@ fn catalog_placement_json(state: &AppState, id: &str, entry: &crate::state::Cata
     if let Some(slot) = state.router.peek_slot(id) {
         return placement_json(slot.as_ref());
     }
-    if let Some(slot) = state
-        .audio_slots
-        .lock()
-        .ok()
-        .and_then(|slots| slots.get(id).cloned())
-    {
+    if let Some(slot) = state.cached_audio(id) {
         return placement_json(slot.as_ref());
     }
     match state.runtime.probe_manifest(&entry.manifest) {

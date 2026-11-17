@@ -3,6 +3,7 @@
 mod api_config;
 mod audio;
 mod auth;
+mod cache;
 mod chat;
 mod config;
 mod error;

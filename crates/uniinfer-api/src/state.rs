@@ -1,7 +1,7 @@
-use std::collections::{HashMap, VecDeque};
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex, RwLock};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, RwLock};
 
 use tokio::sync::Mutex as AsyncMutex;
 use uniinfer_config::{ConfigHandle, ServerConfig};
@@ -9,6 +9,7 @@ use uniinfer_core::{CancelToken, CapabilityRequest, EngineError, ModelManifest, 
 use uniinfer_service::{AudioSlot, ImageSlot, ModelSlot, Runtime};
 
 use crate::api_config::ApiConfig;
+use crate::cache::MediaCache;
 
 const MAX_MEMORY_LOAD_RETRIES: usize = 8;
 
@@ -25,8 +26,7 @@ pub(crate) struct CatalogEntry {
 #[derive(Clone)]
 pub struct AppState {
     pub(crate) router: Arc<uniinfer_router::ModelRouter>,
-    pub(crate) audio_slots: Arc<Mutex<HashMap<String, Arc<AudioSlot>>>>,
-    pub(crate) image_slots: Arc<Mutex<HashMap<String, Arc<ImageSlot>>>>,
+    media: MediaCache,
     pub(crate) runtime: Arc<Runtime>,
     pub(crate) token: Option<String>,
     pub(crate) max_body_bytes: usize,
@@ -37,10 +37,6 @@ pub struct AppState {
     model_load_timeout_ms: Arc<AtomicU64>,
     pub(crate) catalog: Arc<RwLock<HashMap<String, CatalogEntry>>>,
     load_lock: Arc<AsyncMutex<()>>,
-    audio_lru: Arc<Mutex<VecDeque<String>>>,
-    image_lru: Arc<Mutex<VecDeque<String>>>,
-    memory_evictions: Arc<AtomicU64>,
-    max_loaded_models: Arc<AtomicUsize>,
 }
 
 impl AppState {
@@ -76,8 +72,7 @@ impl AppState {
                 config.queue_timeout,
                 config.max_loaded_models,
             )),
-            audio_slots: Arc::new(Mutex::new(HashMap::new())),
-            image_slots: Arc::new(Mutex::new(HashMap::new())),
+            media: MediaCache::new(config.max_loaded_models),
             runtime,
             token: config.token.clone(),
             max_body_bytes: config.max_body_bytes,
@@ -92,10 +87,6 @@ impl AppState {
             )),
             catalog: Arc::new(RwLock::new(catalog)),
             load_lock: Arc::new(AsyncMutex::new(())),
-            audio_lru: Arc::new(Mutex::new(VecDeque::new())),
-            image_lru: Arc::new(Mutex::new(VecDeque::new())),
-            memory_evictions: Arc::new(AtomicU64::new(0)),
-            max_loaded_models: Arc::new(AtomicUsize::new(config.max_loaded_models)),
         })
     }
 
@@ -119,15 +110,9 @@ impl AppState {
         ids.sort();
         let loaded = ids.iter().find(|id| {
             if audio_only {
-                self.audio_slots
-                    .lock()
-                    .ok()
-                    .is_some_and(|slots| slots.contains_key(*id))
+                self.media.contains_audio(id)
             } else if image_only {
-                self.image_slots
-                    .lock()
-                    .ok()
-                    .is_some_and(|slots| slots.contains_key(*id))
+                self.media.contains_image(id)
             } else {
                 self.router.peek_slot(id).is_some()
             }
@@ -230,12 +215,10 @@ impl AppState {
             .store(server.request_timeout_ms, Ordering::SeqCst);
         self.model_load_timeout_ms
             .store(server.model_load_timeout_ms, Ordering::SeqCst);
-        self.max_loaded_models
-            .store(server.max_loaded_models, Ordering::SeqCst);
         self.router
             .set_queue_timeout(std::time::Duration::from_millis(server.queue_timeout_ms));
         self.router.set_max_loaded(server.max_loaded_models);
-        self.evict_audio();
+        self.media.set_max_loaded(server.max_loaded_models);
     }
 
     pub(crate) fn has_model(&self, id: &str) -> bool {
@@ -260,25 +243,12 @@ impl AppState {
         drop(catalog);
 
         self.router.remove_slot(id);
-        if let Ok(mut slots) = self.audio_slots.lock() {
-            slots.remove(id);
-        }
-        if let Ok(mut slots) = self.image_slots.lock() {
-            slots.remove(id);
-        }
-        if let Ok(mut lru) = self.audio_lru.lock() {
-            lru.retain(|entry| entry != id);
-        }
+        self.media.remove(id);
         Ok(())
     }
 
     pub(crate) async fn image_slot(&self, id: &str) -> Result<Arc<ImageSlot>> {
-        if let Some(slot) = self
-            .image_slots
-            .lock()
-            .ok()
-            .and_then(|slots| slots.get(id).cloned())
-        {
+        if let Some(slot) = self.media.image(id) {
             return Ok(slot);
         }
         let entry = self
@@ -290,12 +260,7 @@ impl AppState {
             )));
         }
         let _guard = self.load_lock.lock().await;
-        if let Some(slot) = self
-            .image_slots
-            .lock()
-            .ok()
-            .and_then(|slots| slots.get(id).cloned())
-        {
+        if let Some(slot) = self.media.image(id) {
             return Ok(slot);
         }
         let runtime = Arc::clone(&self.runtime);
@@ -325,12 +290,7 @@ impl AppState {
                 Err(error) => return Err(error),
             }
         };
-        self.image_slots
-            .lock()
-            .map_err(|_| EngineError::Other("image slots lock poisoned".into()))?
-            .insert(id.to_owned(), Arc::clone(&slot));
-        self.touch_image(id);
-        self.evict_image();
+        self.media.insert_image(id, Arc::clone(&slot));
         Ok(slot)
     }
 
@@ -377,12 +337,7 @@ impl AppState {
     }
 
     pub(crate) async fn audio_slot(&self, id: &str) -> Result<Arc<AudioSlot>> {
-        if let Some(slot) = self
-            .audio_slots
-            .lock()
-            .ok()
-            .and_then(|slots| slots.get(id).cloned())
-        {
+        if let Some(slot) = self.media.audio(id) {
             return Ok(slot);
         }
         let entry = self
@@ -394,12 +349,7 @@ impl AppState {
             )));
         }
         let _guard = self.load_lock.lock().await;
-        if let Some(slot) = self
-            .audio_slots
-            .lock()
-            .ok()
-            .and_then(|slots| slots.get(id).cloned())
-        {
+        if let Some(slot) = self.media.audio(id) {
             return Ok(slot);
         }
         let runtime = Arc::clone(&self.runtime);
@@ -425,38 +375,8 @@ impl AppState {
                 Err(error) => return Err(error),
             }
         };
-        self.audio_slots
-            .lock()
-            .map_err(|_| EngineError::Other("audio catalog lock poisoned".into()))?
-            .insert(id.to_owned(), Arc::clone(&slot));
-        self.touch_audio(id);
-        self.evict_audio();
+        self.media.insert_audio(id, Arc::clone(&slot));
         Ok(slot)
-    }
-
-    fn touch_audio(&self, id: &str) {
-        if let Ok(mut lru) = self.audio_lru.lock() {
-            lru.retain(|entry| entry != id);
-            lru.push_back(id.to_owned());
-        }
-    }
-
-    fn evict_audio(&self) {
-        let max_loaded = self.max_loaded_models.load(Ordering::SeqCst);
-        if max_loaded == 0 {
-            return;
-        }
-        let Ok(mut lru) = self.audio_lru.lock() else {
-            return;
-        };
-        while lru.len() > max_loaded {
-            let Some(oldest) = lru.pop_front() else {
-                break;
-            };
-            if let Ok(mut slots) = self.audio_slots.lock() {
-                slots.remove(&oldest);
-            }
-        }
     }
 
     async fn await_load<T>(
@@ -492,80 +412,37 @@ impl AppState {
         self.router.remove_slot(id)
     }
 
+    pub(crate) fn cached_audio(&self, id: &str) -> Option<Arc<AudioSlot>> {
+        self.media.audio(id)
+    }
+
+    pub(crate) fn cached_image(&self, id: &str) -> Option<Arc<ImageSlot>> {
+        self.media.image(id)
+    }
+
+    pub(crate) fn media_counts(&self) -> (usize, usize) {
+        self.media.counts()
+    }
+
     pub(crate) fn unload_audio(&self, id: &str) -> bool {
-        let removed = self
-            .audio_slots
-            .lock()
-            .map(|mut slots| slots.remove(id).is_some())
-            .unwrap_or(false);
-        if let Ok(mut lru) = self.audio_lru.lock() {
-            lru.retain(|entry| entry != id);
-        }
-        removed
+        self.media.remove_audio(id)
     }
 
     pub(crate) fn unload_image(&self, id: &str) -> bool {
-        let removed = self
-            .image_slots
-            .lock()
-            .map(|mut slots| slots.remove(id).is_some())
-            .unwrap_or(false);
-        if let Ok(mut lru) = self.image_lru.lock() {
-            lru.retain(|entry| entry != id);
-        }
-        removed
+        self.media.remove_image(id)
     }
 
     /// Evict one cached model to make room, never evicting the model being loaded.
     pub(crate) fn evict_for_memory(&self, except: &str) -> bool {
         if self.router.evict_lru_except(Some(except)).is_some() {
-            self.memory_evictions.fetch_add(1, Ordering::Relaxed);
+            self.media.record_eviction();
             return true;
         }
-        if let Some(id) = pop_lru_except(&self.audio_lru, except) {
-            if let Ok(mut slots) = self.audio_slots.lock() {
-                slots.remove(&id);
-            }
-            self.memory_evictions.fetch_add(1, Ordering::Relaxed);
-            return true;
-        }
-        if let Some(id) = pop_lru_except(&self.image_lru, except) {
-            if let Ok(mut slots) = self.image_slots.lock() {
-                slots.remove(&id);
-            }
-            self.memory_evictions.fetch_add(1, Ordering::Relaxed);
-            return true;
-        }
-        false
+        self.media.evict_one(except)
     }
 
     pub(crate) fn memory_evictions(&self) -> u64 {
-        self.memory_evictions.load(Ordering::Relaxed)
-    }
-
-    fn touch_image(&self, id: &str) {
-        if let Ok(mut lru) = self.image_lru.lock() {
-            lru.retain(|entry| entry != id);
-            lru.push_back(id.to_owned());
-        }
-    }
-
-    fn evict_image(&self) {
-        let max_loaded = self.max_loaded_models.load(Ordering::SeqCst);
-        if max_loaded == 0 {
-            return;
-        }
-        let Ok(mut lru) = self.image_lru.lock() else {
-            return;
-        };
-        while lru.len() > max_loaded {
-            let Some(oldest) = lru.pop_front() else {
-                break;
-            };
-            if let Ok(mut slots) = self.image_slots.lock() {
-                slots.remove(&oldest);
-            }
-        }
+        self.media.evictions()
     }
 
     pub(crate) fn audio_catalog_ids(&self) -> Vec<String> {
@@ -587,16 +464,6 @@ fn is_memory_error(error: &EngineError) -> bool {
         error,
         EngineError::InsufficientVram { .. } | EngineError::InsufficientMemory { .. }
     )
-}
-
-fn pop_lru_except(lru: &Mutex<VecDeque<String>>, except: &str) -> Option<String> {
-    let mut lru = lru.lock().ok()?;
-    loop {
-        let id = lru.pop_front()?;
-        if id != except {
-            return Some(id);
-        }
-    }
 }
 
 fn collect_manifests(dir: &Path, depth: usize, out: &mut Vec<PathBuf>) {
