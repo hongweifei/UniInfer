@@ -12,7 +12,7 @@ use uniinfer_devices::DeviceInventory;
 
 mod residency;
 
-use residency::{Reservation, ResidencyLedger, estimate_residency};
+use residency::{Reservation, ResidencyLedger, effective_residency, estimate_residency};
 
 /// Engine selection and placement without loading model weights.
 #[derive(Debug, Clone)]
@@ -69,18 +69,30 @@ impl EngineRegistry {
     fn budget(&self) -> DeviceBudget {
         let (reserved_vram, reserved_host) = self.ledger.reserved();
         let reserves = self.ledger.reserves();
+        let host_available = self
+            .inventory
+            .devices()
+            .iter()
+            .find(|device| device.class == DeviceClass::Cpu)
+            .map(|device| {
+                device
+                    .available_memory_bytes
+                    .saturating_sub(reserved_host)
+                    .saturating_sub(reserves.1)
+            });
         let mut devices = self.inventory.devices().to_vec();
         for device in &mut devices {
-            let used = match device.class {
-                DeviceClass::Cpu => reserved_host.saturating_add(reserves.1),
-                DeviceClass::Gpu => reserved_vram
-                    .get(&device.id)
-                    .copied()
-                    .unwrap_or(0)
-                    .saturating_add(reserves.0),
-                DeviceClass::Npu => 0,
+            device.available_memory_bytes = match device.class {
+                // Integrated GPUs consume the same host pool as the CPU, so
+                // their live budget is the host budget, not a second reserve.
+                DeviceClass::Cpu => host_available.unwrap_or(0),
+                DeviceClass::Gpu if device.unified_memory => host_available.unwrap_or(0),
+                DeviceClass::Gpu => device
+                    .available_memory_bytes
+                    .saturating_sub(reserved_vram.get(&device.id).copied().unwrap_or(0))
+                    .saturating_sub(reserves.0),
+                DeviceClass::Npu => device.available_memory_bytes,
             };
-            device.available_memory_bytes = device.available_memory_bytes.saturating_sub(used);
         }
         DeviceBudget { devices }
     }
@@ -164,7 +176,12 @@ impl EngineRegistry {
         let engine_name = engine.engine_name().to_owned();
         let manifest = spec.manifest.clone();
         let session = engine.load_session(spec)?;
-        let residency = session.residency().or(estimated).unwrap_or_default();
+        let gpu = lease_placement
+            .devices
+            .iter()
+            .find(|device| device.class == DeviceClass::Gpu);
+        let residency =
+            effective_residency(session.residency().or(estimated).unwrap_or_default(), gpu);
         let reservation = self
             .ledger
             .reserve(&self.inventory, &lease_placement, residency)?;
@@ -385,5 +402,51 @@ impl Drop for SessionLease {
     fn drop(&mut self) {
         self.active.fetch_sub(1, Ordering::SeqCst);
         tracing::debug!(engine = %self.engine_name, "session lease released");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use uniinfer_core::Device;
+
+    #[test]
+    fn unified_gpu_budget_comes_from_host_pool() {
+        let inventory = DeviceInventory::from(vec![
+            Device {
+                id: "cpu:0".into(),
+                class: DeviceClass::Cpu,
+                backend: "cpu".into(),
+                memory_bytes: 4_000,
+                available_memory_bytes: 4_000,
+                unified_memory: false,
+            },
+            Device {
+                id: "gpu:igpu:0".into(),
+                class: DeviceClass::Gpu,
+                backend: "vulkan".into(),
+                memory_bytes: 4_000,
+                available_memory_bytes: 4_000,
+                unified_memory: true,
+            },
+        ]);
+        let registry = EngineRegistry::new(inventory);
+        registry.set_reserves(1_000, 500);
+        let budget = registry.budget();
+        let cpu = budget
+            .devices
+            .iter()
+            .find(|device| device.class == DeviceClass::Cpu)
+            .expect("cpu");
+        let gpu = budget
+            .devices
+            .iter()
+            .find(|device| device.class == DeviceClass::Gpu)
+            .expect("gpu");
+        assert_eq!(cpu.available_memory_bytes, 3_500);
+        assert_eq!(
+            gpu.available_memory_bytes, 3_500,
+            "integrated GPU must inherit the host reserve, not a second VRAM reserve"
+        );
     }
 }

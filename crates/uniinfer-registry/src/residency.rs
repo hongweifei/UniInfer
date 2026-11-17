@@ -9,7 +9,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use uniinfer_core::{
-    DeviceClass, EngineError, ModelManifest, PlacementPlan, Residency, ResidencySummary, Result,
+    Device, DeviceClass, EngineError, ModelManifest, PlacementPlan, Residency, ResidencySummary,
+    Result,
 };
 use uniinfer_devices::DeviceInventory;
 
@@ -105,34 +106,39 @@ impl ResidencyLedger {
             .inner
             .lock()
             .map_err(|_| EngineError::Other("residency ledger lock poisoned".into()))?;
-        check_limits(
-            &state,
-            inventory,
-            placement,
-            residency,
-            self.vram_reserve.load(Ordering::Relaxed),
-            self.host_reserve.load(Ordering::Relaxed),
-        )?;
         let gpu = placement
             .devices
             .iter()
             .find(|device| device.class == DeviceClass::Gpu);
-        let device = gpu.map(|device| device.id.clone());
-        if residency.vram_bytes > 0
+        let effective = effective_residency(residency, gpu);
+        check_limits(
+            &state,
+            inventory,
+            placement,
+            effective,
+            self.vram_reserve.load(Ordering::Relaxed),
+            self.host_reserve.load(Ordering::Relaxed),
+        )?;
+        let device = if effective.vram_bytes > 0 {
+            gpu.map(|device| device.id.clone())
+        } else {
+            None
+        };
+        if effective.vram_bytes > 0
             && let Some(device) = &device
         {
             let used = state.vram.entry(device.clone()).or_default();
-            *used = used.saturating_add(residency.vram_bytes);
+            *used = used.saturating_add(effective.vram_bytes);
         }
-        state.host_bytes = state.host_bytes.saturating_add(residency.host_bytes);
-        state.disk_bytes = state.disk_bytes.saturating_add(residency.disk_bytes);
+        state.host_bytes = state.host_bytes.saturating_add(effective.host_bytes);
+        state.disk_bytes = state.disk_bytes.saturating_add(effective.disk_bytes);
         state.sessions += 1;
         Ok(Reservation {
             ledger: Arc::clone(&self.inner),
             device,
-            vram_bytes: residency.vram_bytes,
-            host_bytes: residency.host_bytes,
-            disk_bytes: residency.disk_bytes,
+            vram_bytes: effective.vram_bytes,
+            host_bytes: effective.host_bytes,
+            disk_bytes: effective.disk_bytes,
         })
     }
 
@@ -149,6 +155,21 @@ impl ResidencyLedger {
     }
 }
 
+/// Unified-memory accelerators spend host RAM, not a separate VRAM tier.
+/// Move their reported VRAM bytes into host accounting before admission so
+/// hybrid CPU+GPU sessions on an iGPU cannot double-count the same pool.
+pub(super) fn effective_residency(residency: Residency, gpu: Option<&Device>) -> Residency {
+    if gpu.is_some_and(|device| device.unified_memory) {
+        Residency {
+            vram_bytes: 0,
+            host_bytes: residency.host_bytes.saturating_add(residency.vram_bytes),
+            ..residency
+        }
+    } else {
+        residency
+    }
+}
+
 fn check_limits(
     state: &LedgerState,
     inventory: &DeviceInventory,
@@ -161,6 +182,7 @@ fn check_limits(
         .devices
         .iter()
         .find(|device| device.class == DeviceClass::Gpu);
+    let residency = effective_residency(residency, gpu);
     if residency.vram_bytes > 0 {
         let Some(gpu) = gpu else {
             return Err(EngineError::InsufficientVram {

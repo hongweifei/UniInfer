@@ -78,6 +78,10 @@ impl LlamaMtmdEngine {
                     backend: device.backend.to_lowercase(),
                     memory_bytes: u64::try_from(device.memory_total).unwrap_or(0),
                     available_memory_bytes: u64::try_from(device.memory_free).unwrap_or(0),
+                    unified_memory: matches!(
+                        device.device_type,
+                        llama_cpp_2::LlamaBackendDeviceType::IntegratedGpu
+                    ),
                 })
             })
             .collect()

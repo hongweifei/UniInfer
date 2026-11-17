@@ -27,6 +27,7 @@ impl DeviceInventory {
                 backend: format!("cpu/{parallelism}t"),
                 memory_bytes: total_memory,
                 available_memory_bytes: available_memory,
+                unified_memory: false,
             }],
         }
     }
@@ -55,7 +56,12 @@ impl DeviceInventory {
     }
 
     pub(crate) fn find(&self, class: DeviceClass) -> Option<&Device> {
-        self.devices.iter().find(|device| device.class == class)
+        self.devices
+            .iter()
+            .filter(|device| device.class == class)
+            // A dedicated accelerator beats an integrated one; within the same
+            // memory architecture prefer the device with the most headroom.
+            .max_by_key(|device| (!device.unified_memory, device.available_memory_bytes))
     }
 }
 

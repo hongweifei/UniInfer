@@ -35,6 +35,11 @@ pub struct Device {
     /// Currently available memory in bytes, zero when unknown.
     #[serde(default)]
     pub available_memory_bytes: u64,
+    /// True when accelerator memory is the host's unified memory pool
+    /// (Apple silicon, integrated GPUs). Such bytes are accounted once as
+    /// host memory rather than as a separate VRAM tier.
+    #[serde(default)]
+    pub unified_memory: bool,
 }
 
 /// Resources available to a single engine load.
@@ -91,6 +96,8 @@ pub struct PlacementPlan {
 /// Bytes accounted to each residency tier for a loaded session.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Residency {
+    /// Bytes in a dedicated accelerator VRAM tier. Unified-memory GPU bytes
+    /// are normalized into `host_bytes` by the residency ledger.
     pub vram_bytes: u64,
     pub host_bytes: u64,
     /// Backing bytes mapped or read from disk.

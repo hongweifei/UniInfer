@@ -192,7 +192,7 @@ video + text -> video
 
 ## 8. 设备与放置
 
-`DeviceInventory` 探测 CPU、GPU、NPU、执行提供器、内存与带宽。`PlacementPlan` 记录阶段设备、层卸载、KV cache 位置、迁移字节与 `fallback_reason`。
+`DeviceInventory` 探测 CPU、GPU、NPU、执行提供器、内存与带宽，并标记统一内存/核显设备。`PlacementPlan` 记录阶段设备、层卸载、KV cache 位置、迁移字节与 `fallback_reason`。统一内存设备的 GPU 分配与 CPU 分配共用同一账本，混合推理按主机内存池做准入，不重复计算 VRAM。
 
 | 层级 | 机制 | 承载 |
 | :--- | :--- | :--- |

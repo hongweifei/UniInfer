@@ -61,6 +61,7 @@ fn qwen3_layered_directml_runs_gpu_and_cpu_stages() {
             backend: "cpu".into(),
             memory_bytes: 32 * 1024 * 1024 * 1024,
             available_memory_bytes: 32 * 1024 * 1024 * 1024,
+            unified_memory: false,
         },
         Device {
             id: "gpu:directml:0".into(),
@@ -68,6 +69,7 @@ fn qwen3_layered_directml_runs_gpu_and_cpu_stages() {
             backend: "directml".into(),
             memory_bytes: 8 * 1024 * 1024 * 1024,
             available_memory_bytes: 8 * 1024 * 1024 * 1024,
+            unified_memory: false,
         },
     ]);
     let placement = inventory

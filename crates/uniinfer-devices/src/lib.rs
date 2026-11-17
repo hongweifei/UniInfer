@@ -68,6 +68,7 @@ mod tests {
                 backend: "cpu".into(),
                 memory_bytes: 0,
                 available_memory_bytes: 0,
+                unified_memory: false,
             },
             Device {
                 id: "gpu:0".into(),
@@ -75,6 +76,7 @@ mod tests {
                 backend: "test".into(),
                 memory_bytes: 0,
                 available_memory_bytes: 0,
+                unified_memory: false,
             },
         ])
     }
@@ -93,6 +95,43 @@ mod tests {
     }
 
     #[test]
+    fn prefers_dedicated_gpu_over_unified_gpu() {
+        let inventory = DeviceInventory::from(vec![
+            Device {
+                id: "cpu:0".into(),
+                class: DeviceClass::Cpu,
+                backend: "cpu".into(),
+                memory_bytes: 0,
+                available_memory_bytes: 0,
+                unified_memory: false,
+            },
+            Device {
+                id: "gpu:integrated:0".into(),
+                class: DeviceClass::Gpu,
+                backend: "vulkan".into(),
+                memory_bytes: 32 * 1024 * 1024 * 1024,
+                available_memory_bytes: 24 * 1024 * 1024 * 1024,
+                unified_memory: true,
+            },
+            Device {
+                id: "gpu:dedicated:0".into(),
+                class: DeviceClass::Gpu,
+                backend: "cuda".into(),
+                memory_bytes: 8 * 1024 * 1024 * 1024,
+                available_memory_bytes: 7 * 1024 * 1024 * 1024,
+                unified_memory: false,
+            },
+        ]);
+        let plan = inventory
+            .plan(
+                &manifest(config(PlacementPolicy::Auto)),
+                &[DeviceClass::Cpu, DeviceClass::Gpu],
+            )
+            .expect("plan");
+        assert_eq!(plan.devices[0].id, "gpu:dedicated:0");
+    }
+
+    #[test]
     fn auto_prefers_npu_over_gpu() {
         let inventory = DeviceInventory::from(vec![
             Device {
@@ -101,6 +140,7 @@ mod tests {
                 backend: "cpu".into(),
                 memory_bytes: 0,
                 available_memory_bytes: 0,
+                unified_memory: false,
             },
             Device {
                 id: "gpu:0".into(),
@@ -108,6 +148,7 @@ mod tests {
                 backend: "gpu".into(),
                 memory_bytes: 0,
                 available_memory_bytes: 0,
+                unified_memory: false,
             },
             Device {
                 id: "npu:0".into(),
@@ -115,6 +156,7 @@ mod tests {
                 backend: "npu".into(),
                 memory_bytes: 0,
                 available_memory_bytes: 0,
+                unified_memory: false,
             },
         ]);
         let plan = inventory

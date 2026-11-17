@@ -120,11 +120,13 @@ flowchart TB
 
 - 设置页提供整机级「省内存 / 平衡 / 性能」预设，可调整最大驻留模型数、GPU/主机内存预留和请求超时。
 - 每个已安装模型有独立运行配置：设备策略、优先设备、CPU 回退、层卸载、KV cache 位置与上下文长度；不同大小/格式的模型分别保存。
-- 模型配置会显示模型体积与 GPU 可用内存，并给出自动层卸载、KV 放 RAM/VRAM 的建议。
+- 模型配置会显示模型体积与 GPU/统一内存可用量，并给出自动层卸载、KV 放 RAM/VRAM 的建议。
+- 统一内存与核显（Apple Silicon、Intel/AMD iGPU）按同一个主机内存池记账；CPU+GPU 混合推理不会把同一块内存重复算成 VRAM 和 RAM，GPU 预算自动继承主机预留。
 
 ### 分层驻留
 
-- 设备探测会报告 `memory_bytes` 与 `available_memory_bytes`；CPU 来自系统内存，llama.cpp GPU 来自后端空闲显存。
+- 设备探测会报告 `memory_bytes`、`available_memory_bytes` 与 `unified_memory`；CPU 来自系统内存，llama.cpp GPU 来自后端空闲显存，`IntegratedGpu` / Metal / CoreML 标记为统一内存。
+- 统一内存设备参与混合推理时，层卸载与 KV cache 都从主机内存池准入；`GPU 预留` 对纯统一内存机型不生效，由 `host_reserve_mb` 控制。
 - llama.cpp 默认使用 mmap，并在 GPU 上按空闲显存自动选择 `n_gpu_layers`；`placement.offload_layers = "auto"` 显式启用，数字值固定层数。
 - `placement.kv_cache = "ram"` 会把 llama.cpp 的 KV cache 留在主机内存。
 - `min_vram` 会在存在 GPU 空闲显存信息时参与路由；不满足则拒绝该引擎。

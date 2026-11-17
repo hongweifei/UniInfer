@@ -50,6 +50,7 @@ impl WhisperEngine {
             backend: "whisper.cpp".into(),
             memory_bytes: 0,
             available_memory_bytes: 0,
+            unified_memory: false,
         }]
     }
 }

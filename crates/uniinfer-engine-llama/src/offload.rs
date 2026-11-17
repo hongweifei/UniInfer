@@ -157,7 +157,15 @@ fn auto_layers(spec: &EngineLoadSpec, meta: &ModelMeta, offload_kqv: bool) -> Re
         .map(|device| u64::try_from(device.memory_free).unwrap_or(0))
         .max()
         .unwrap_or(0);
-    let available = if live_free > 0 {
+    let budget_gpu = spec
+        .budget
+        .devices
+        .iter()
+        .find(|device| device.class == DeviceClass::Gpu);
+    let available = if gpu.unified_memory {
+        // Integrated GPUs share the host pool, including its reserve.
+        budget_gpu.map_or(0, |device| device.available_memory_bytes)
+    } else if live_free > 0 {
         live_free
     } else {
         gpu.available_memory_bytes

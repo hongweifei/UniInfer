@@ -126,12 +126,15 @@ impl OnnxEngine {
                 if !ep_enabled(&backend) {
                     return None;
                 }
+                let unified_memory =
+                    matches!(backend.to_ascii_lowercase().as_str(), "coreml" | "metal");
                 Some(Device {
                     id: format!("{class}:{backend}:{}", hardware.id()),
                     class,
                     backend,
                     memory_bytes: 0,
                     available_memory_bytes: 0,
+                    unified_memory,
                 })
             })
             .collect()

@@ -89,6 +89,7 @@ impl LlamaEngine {
             backend: "cpu".into(),
             memory_bytes: 0,
             available_memory_bytes: 0,
+            unified_memory: false,
         }];
         let mut gpu = false;
         for device in &probed {
@@ -99,6 +100,10 @@ impl LlamaEngine {
                 _ => continue,
             };
             gpu = true;
+            let unified_memory = matches!(
+                device.device_type,
+                llama_cpp_2::LlamaBackendDeviceType::IntegratedGpu
+            );
             if !devices.contains(&class) {
                 devices.push(class);
             }
@@ -108,6 +113,7 @@ impl LlamaEngine {
                 backend: device.backend.to_lowercase(),
                 memory_bytes: u64::try_from(device.memory_total).unwrap_or(0),
                 available_memory_bytes: u64::try_from(device.memory_free).unwrap_or(0),
+                unified_memory,
             });
         }
         tracing::info!(?devices, gpu, "llama.cpp devices probed");

@@ -292,6 +292,7 @@ fn defaults_to_auto_offload_for_capable_gpu_engine() {
             backend: "cpu".into(),
             memory_bytes: 16 * 1024 * 1024 * 1024,
             available_memory_bytes: 8 * 1024 * 1024 * 1024,
+            unified_memory: false,
         },
         Device {
             id: "gpu:0".into(),
@@ -299,6 +300,7 @@ fn defaults_to_auto_offload_for_capable_gpu_engine() {
             backend: "fake".into(),
             memory_bytes: 8 * 1024 * 1024 * 1024,
             available_memory_bytes: 6 * 1024 * 1024 * 1024,
+            unified_memory: false,
         },
     ]);
     let mut registry = EngineRegistry::new(inventory);
@@ -319,6 +321,7 @@ fn rejects_min_vram_when_full_gpu_load_does_not_fit() {
             backend: "cpu".into(),
             memory_bytes: 16 * 1024 * 1024 * 1024,
             available_memory_bytes: 8 * 1024 * 1024 * 1024,
+            unified_memory: false,
         },
         Device {
             id: "gpu:0".into(),
@@ -326,6 +329,7 @@ fn rejects_min_vram_when_full_gpu_load_does_not_fit() {
             backend: "fake".into(),
             memory_bytes: 8 * 1024 * 1024 * 1024,
             available_memory_bytes: 4 * 1024 * 1024 * 1024,
+            unified_memory: false,
         },
     ]);
     let mut registry = EngineRegistry::new(inventory);
@@ -348,6 +352,7 @@ fn gpu_budget() -> DeviceInventory {
             backend: "cpu".into(),
             memory_bytes: 16 * 1024,
             available_memory_bytes: 16 * 1024,
+            unified_memory: false,
         },
         Device {
             id: "gpu:0".into(),
@@ -355,6 +360,7 @@ fn gpu_budget() -> DeviceInventory {
             backend: "fake".into(),
             memory_bytes: 1_000,
             available_memory_bytes: 1_000,
+            unified_memory: false,
         },
     ])
 }
@@ -407,4 +413,39 @@ fn reserves_reduce_admission_budget() {
     registry.set_reserves(0, 0);
     let lease = registry.load(&path).expect("load after reserve release");
     drop(lease);
+}
+
+#[test]
+fn unified_gpu_charges_host_pool_once() {
+    let inventory = DeviceInventory::from(vec![
+        Device {
+            id: "cpu:0".into(),
+            class: DeviceClass::Cpu,
+            backend: "cpu".into(),
+            memory_bytes: 1_000,
+            available_memory_bytes: 1_000,
+            unified_memory: false,
+        },
+        Device {
+            id: "gpu:igpu:0".into(),
+            class: DeviceClass::Gpu,
+            backend: "vulkan".into(),
+            memory_bytes: 1_000,
+            available_memory_bytes: 1_000,
+            unified_memory: true,
+        },
+    ]);
+    let temp = tempfile::tempdir().expect("tempdir");
+    let mut manifest = manifest();
+    manifest.implementation = "onnx.offload".into();
+    let path = write_manifest(temp.path(), &manifest);
+    let mut registry = EngineRegistry::new(inventory);
+    registry.register(std::sync::Arc::new(GpuOffloadEngine));
+    let first = registry.load(&path).expect("first unified load");
+    let summary = registry.residency();
+    assert_eq!(summary.vram_bytes, 0);
+    assert_eq!(summary.host_bytes, 610);
+    let error = registry.load(&path).err().expect("host pool must reject");
+    assert!(matches!(error, EngineError::InsufficientMemory { .. }));
+    drop(first);
 }
