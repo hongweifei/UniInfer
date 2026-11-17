@@ -31,10 +31,12 @@ pub(crate) fn split(path: &Path, placement: &PlacementPlan) -> Result<Partitione
         .map_err(|error| EngineError::LoadFailed(format!("read {}: {error}", path.display())))?;
     let model = ModelProto::parse_from_bytes(&raw)
         .map_err(|error| EngineError::LoadFailed(format!("parse ONNX: {error}")))?;
-    let graph = model
+    let mut graph = model
         .graph
-        .as_ref()
+        .clone()
+        .into_option()
         .ok_or_else(|| EngineError::ManifestInvalid("ONNX model has no graph".into()))?;
+    materialize_external(&mut graph, path.parent().unwrap_or_else(|| Path::new(".")))?;
     let layer_count = graph
         .node
         .iter()
@@ -104,7 +106,7 @@ pub(crate) fn split(path: &Path, placement: &PlacementPlan) -> Result<Partitione
         layers.push(0);
         (devices, layers, node_stage)
     } else {
-        let (split, devices) = generic_partition(graph, path, placement);
+        let (split, devices) = generic_partition(&graph, path, placement);
         let stage_count = devices.len();
         let node_stage = graph
             .node
@@ -206,7 +208,7 @@ pub(crate) fn split(path: &Path, placement: &PlacementPlan) -> Result<Partitione
         }
     }
 
-    let value_info = value_info_map(graph);
+    let value_info = value_info_map(&graph);
     let input_info = graph
         .input
         .iter()
@@ -347,6 +349,46 @@ fn value_info_map(graph: &GraphProto) -> HashMap<String, ValueInfoProto> {
         .iter()
         .map(|value| (value.name.clone(), value.clone()))
         .collect()
+}
+
+fn materialize_external(graph: &mut GraphProto, base: &Path) -> Result<()> {
+    for tensor in &mut graph.initializer {
+        if tensor.data_location
+            != protobuf::EnumOrUnknown::new(onnx_protobuf::tensor_proto::DataLocation::EXTERNAL)
+        {
+            continue;
+        }
+        let field = |name: &str| {
+            tensor
+                .external_data
+                .iter()
+                .find(|entry| entry.key == name)
+                .map(|entry| entry.value.clone())
+        };
+        let location = field("location").ok_or_else(|| {
+            EngineError::LoadFailed(format!("external tensor {} has no location", tensor.name))
+        })?;
+        let offset = field("offset")
+            .and_then(|value| value.parse::<usize>().ok())
+            .unwrap_or(0);
+        let length = field("length").and_then(|value| value.parse::<usize>().ok());
+        let bytes = std::fs::read(base.join(&location)).map_err(|error| {
+            EngineError::LoadFailed(format!("external tensor {}: {error}", tensor.name))
+        })?;
+        let end = length.map_or(bytes.len(), |length| offset.saturating_add(length));
+        if end > bytes.len() || offset > end {
+            return Err(EngineError::LoadFailed(format!(
+                "external tensor {} range {offset}..{end} exceeds {}",
+                tensor.name,
+                bytes.len()
+            )));
+        }
+        tensor.raw_data = bytes[offset..end].to_vec();
+        tensor.data_location =
+            protobuf::EnumOrUnknown::new(onnx_protobuf::tensor_proto::DataLocation::DEFAULT);
+        tensor.external_data.clear();
+    }
+    Ok(())
 }
 
 fn generic_partition(
