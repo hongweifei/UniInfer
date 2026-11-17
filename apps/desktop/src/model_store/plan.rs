@@ -137,62 +137,79 @@ pub(super) fn build_variants(
         });
     }
 
-    let mut groups: std::collections::BTreeMap<(String, String), Vec<&RemoteInfo>> =
-        std::collections::BTreeMap::new();
-    for file in files
-        .iter()
-        .filter(|file| file.path.to_ascii_lowercase().ends_with(".onnx"))
-    {
-        let dir = file
-            .path
-            .rsplit_once('/')
-            .map_or(String::new(), |(dir, _)| dir.to_string());
-        let quant = onnx_quant_suffix(&file.path);
-        groups.entry((dir, quant)).or_default().push(file);
-    }
-    if !groups.is_empty() {
-        let mut groups = groups.into_iter().collect::<Vec<_>>();
-        groups.sort_by(|a, b| {
-            let a_size = a.1.iter().map(|file| file.size).sum::<u64>();
-            let b_size = b.1.iter().map(|file| file.size).sum::<u64>();
-            a_size.cmp(&b_size).then_with(|| a.0.cmp(&b.0))
+    if is_diffusion_repo(files) {
+        let selected = files
+            .iter()
+            .filter(|file| is_diffusion_asset(&file.path))
+            .map(|file| remote_file(repo_files, file))
+            .collect::<Vec<_>>();
+        variants.push(VariantSpec {
+            key: "onnx:components".into(),
+            label: "ONNX 完整模型".into(),
+            source: "全部组件".into(),
+            format: "onnx".into(),
+            quantization: "unknown".into(),
+            files: selected,
+            recommended: false,
         });
-        for ((dir, quant), items) in groups {
-            let mut selected = items
-                .iter()
-                .map(|file| remote_file(repo_files, file))
-                .collect::<Vec<_>>();
-            for data in files
-                .iter()
-                .filter(|file| is_onnx_external_data(&file.path))
-            {
-                if items.iter().any(|graph| data.path.starts_with(&graph.path)) {
-                    selected.push(remote_file(repo_files, data));
-                }
-            }
-            selected.extend(sidecars(repo_files));
-            dedup_files(&mut selected);
-            let label = if quant.is_empty() {
-                if dir.is_empty() {
-                    "ONNX 默认".to_string()
-                } else {
-                    dir.clone()
-                }
-            } else if dir.is_empty() {
-                format!("ONNX {quant}")
-            } else {
-                format!("{dir} · {quant}")
-            };
-            let quantization = quant_label(&label);
-            variants.push(VariantSpec {
-                key: format!("onnx:{dir}:{quant}"),
-                label,
-                source: dir,
-                format: "onnx".into(),
-                quantization,
-                files: selected,
-                recommended: false,
+    } else {
+        let mut groups: std::collections::BTreeMap<(String, String), Vec<&RemoteInfo>> =
+            std::collections::BTreeMap::new();
+        for file in files
+            .iter()
+            .filter(|file| file.path.to_ascii_lowercase().ends_with(".onnx"))
+        {
+            let dir = file
+                .path
+                .rsplit_once('/')
+                .map_or(String::new(), |(dir, _)| dir.to_string());
+            let quant = onnx_quant_suffix(&file.path);
+            groups.entry((dir, quant)).or_default().push(file);
+        }
+        if !groups.is_empty() {
+            let mut groups = groups.into_iter().collect::<Vec<_>>();
+            groups.sort_by(|a, b| {
+                let a_size = a.1.iter().map(|file| file.size).sum::<u64>();
+                let b_size = b.1.iter().map(|file| file.size).sum::<u64>();
+                a_size.cmp(&b_size).then_with(|| a.0.cmp(&b.0))
             });
+            for ((dir, quant), items) in groups {
+                let mut selected = items
+                    .iter()
+                    .map(|file| remote_file(repo_files, file))
+                    .collect::<Vec<_>>();
+                for data in files
+                    .iter()
+                    .filter(|file| is_onnx_external_data(&file.path))
+                {
+                    if items.iter().any(|graph| data.path.starts_with(&graph.path)) {
+                        selected.push(remote_file(repo_files, data));
+                    }
+                }
+                selected.extend(sidecars(repo_files));
+                dedup_files(&mut selected);
+                let label = if quant.is_empty() {
+                    if dir.is_empty() {
+                        "ONNX 默认".to_string()
+                    } else {
+                        dir.clone()
+                    }
+                } else if dir.is_empty() {
+                    format!("ONNX {quant}")
+                } else {
+                    format!("{dir} · {quant}")
+                };
+                let quantization = quant_label(&label);
+                variants.push(VariantSpec {
+                    key: format!("onnx:{dir}:{quant}"),
+                    label,
+                    source: dir,
+                    format: "onnx".into(),
+                    quantization,
+                    files: selected,
+                    recommended: false,
+                });
+            }
         }
     }
 
@@ -215,6 +232,46 @@ pub(super) fn build_variants(
 pub(super) fn dedup_files(files: &mut Vec<RemoteFile>) {
     files.sort_by(|a, b| a.path.cmp(&b.path));
     files.dedup_by(|a, b| a.path == b.path);
+}
+
+const DIFFUSION_COMPONENT_ROOTS: &[&str] = &[
+    "text_encoder",
+    "text_encoder_2",
+    "unet",
+    "transformer",
+    "vae",
+    "vae_decoder",
+    "vae_encoder",
+];
+
+fn is_diffusion_repo(files: &[RemoteInfo]) -> bool {
+    let roots = files
+        .iter()
+        .filter(|file| file.path.to_ascii_lowercase().ends_with(".onnx"))
+        .filter_map(|file| {
+            file.path
+                .split_once('/')
+                .map(|(root, _)| root.to_ascii_lowercase())
+        })
+        .filter(|root| DIFFUSION_COMPONENT_ROOTS.contains(&root.as_str()))
+        .collect::<std::collections::BTreeSet<_>>();
+    roots.len() >= 2
+        && roots.iter().any(|root| {
+            matches!(
+                root.as_str(),
+                "unet" | "transformer" | "vae" | "vae_decoder" | "vae_encoder"
+            )
+        })
+}
+
+fn is_diffusion_asset(path: &str) -> bool {
+    let name = path.rsplit('/').next().unwrap_or(path).to_ascii_lowercase();
+    !name.starts_with('.')
+        && name != "readme.md"
+        && !name.starts_with("license")
+        && !path
+            .split('/')
+            .any(|segment| segment == ".git" || segment.starts_with('.'))
 }
 
 pub(super) fn is_onnx_external_data(path: &str) -> bool {

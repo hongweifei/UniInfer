@@ -394,6 +394,73 @@ mod tests {
     }
 
     #[test]
+    fn diffusion_onnx_components_are_one_complete_variant() {
+        let model = repo(
+            "amd/sd-turbo-amdnpu-onnx",
+            Source::HuggingFace,
+            &[
+                ("text_encoder/model.onnx", 100),
+                ("text_encoder/model.onnx.data", 1000),
+                ("text_encoder/config.json", 1),
+                ("unet/dd/replaced.onnx", 200),
+                ("unet/dd/dd_metastate.state", 300),
+                ("unet/dd/dd_metastate.fconst", 400),
+                ("unet/dd/cache/conv_meta.json", 1),
+                ("unet/config.json", 1),
+                ("vae_decoder/dd/replaced.onnx", 50),
+                ("vae_decoder/dd/dd_metastate.state", 60),
+                ("vae_decoder/config.json", 1),
+                ("scheduler/scheduler_config.json", 1),
+                ("tokenizer/vocab.json", 1),
+                ("README.md", 2),
+                ("LICENSE", 2),
+                (".gitattributes", 1),
+            ],
+        );
+        let variants = build_variants(&model, None).expect("variants");
+        assert_eq!(variants.len(), 1);
+        let variant = &variants[0];
+        assert_eq!(variant.key, "onnx:components");
+        assert!(variant.recommended);
+        assert!(
+            variant
+                .files
+                .iter()
+                .any(|file| file.path == "unet/dd/dd_metastate.fconst")
+        );
+        assert!(
+            variant
+                .files
+                .iter()
+                .any(|file| file.path == "text_encoder/model.onnx.data")
+        );
+        assert!(
+            variant
+                .files
+                .iter()
+                .any(|file| file.path == "scheduler/scheduler_config.json")
+        );
+        assert!(
+            variant
+                .files
+                .iter()
+                .all(|file| file.path != "README.md" && file.path != "LICENSE")
+        );
+        let plan = build_plan(&model, None).expect("plan");
+        assert_eq!(plan.format, "onnx");
+        assert!(
+            plan.files
+                .iter()
+                .any(|file| file.path == "text_encoder/model.onnx")
+        );
+        assert!(
+            plan.files
+                .iter()
+                .any(|file| file.path == "vae_decoder/dd/replaced.onnx")
+        );
+    }
+
+    #[test]
     fn safetensors_plan_keeps_shards_and_sidecars() {
         let model = repo(
             "Qwen/Qwen3-0.6B",
@@ -464,6 +531,43 @@ mod tests {
             );
             let variants = build_variants(&repo, None).expect("variants");
             assert!(variants.iter().any(|variant| variant.format == "onnx"));
+        });
+    }
+
+    #[test]
+    #[ignore = "network: probes live HF diffusion component layout"]
+    fn live_hf_diffusion_repo_is_one_complete_variant() {
+        tauri::async_runtime::block_on(async {
+            let repo = fetch_hf_repo("amd/sd-turbo-amdnpu-onnx")
+                .await
+                .expect("repo files");
+            let variants = build_variants(&repo, None).expect("variants");
+            assert_eq!(variants.len(), 1);
+            let variant = &variants[0];
+            assert_eq!(variant.key, "onnx:components");
+            assert!(
+                variant
+                    .files
+                    .iter()
+                    .any(|file| file.path == "text_encoder/model.onnx")
+            );
+            assert!(
+                variant
+                    .files
+                    .iter()
+                    .any(|file| file.path.ends_with(".fconst"))
+            );
+            assert!(
+                variant
+                    .files
+                    .iter()
+                    .any(|file| file.path.starts_with("tokenizer/"))
+            );
+            println!(
+                "{} files, {} bytes",
+                variant.files.len(),
+                variant.files.iter().map(|file| file.size).sum::<u64>()
+            );
         });
     }
 
