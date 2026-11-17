@@ -6,15 +6,14 @@ UniInfer 把内置引擎与下载后端统一管理：每个内置引擎（ONNX 
 
 桌面端「后端」页面支持：
 
-- 填写远程目录 JSON URL，读取可下载后端。
-- 下载并校验后端包，安装到 `<配置文件目录>/backends/<id>/<version>/`。
-- 导入包含 `backend.toml` 的本地后端目录。
-- 激活、删除后端；激活后重启应用生效。
+- 填写引擎目录 JSON URL，读取可下载引擎。
+- 按官方项目、版本和加速变体下载并校验，安装到 `<配置文件目录>/backends/<id>/<version>/`。
+- 激活、卸载引擎；激活后重启应用生效。
 - 选择内置引擎组作为回退。
 
-## 后端清单
+## 引擎清单
 
-`backend.toml`：
+引擎目录项在安装时生成内部 `backend.toml` 启动描述；普通用户不需要编辑或导入它。
 
 ```toml
 id = "llama-vulkan"
@@ -30,6 +29,10 @@ id = "llama-vulkan"
 name = "llama.cpp Vulkan"
 runtime = "llama"
 description = "llama.cpp GGUF inference on Vulkan"
+vendor = "llama.cpp"
+variant = "Vulkan"
+category = "language"
+homepage = "https://github.com/ggml-org/llama.cpp"
 implementations = ["llama.text"]
 formats = ["gguf"]
 modalities = ["text"]
@@ -45,7 +48,7 @@ sha256 = "..."
 - `worker` 必须是相对路径，并且位于 `files` 中。
 - 安装时校验文件大小与 SHA-256；缺少 `sha256` 的文件不会被拒绝，但生产目录应始终提供。
 - `devices` 用于放置预算，可选 `cpu`、`gpu`、`npu`。
-- `engines` 必须至少包含一项，逐项写清推理引擎 id、名称、runtime、格式、模态与设备；界面会按引擎展示，而不是笼统显示一个包。
+- `engines` 必须至少包含一项，逐项写清推理引擎 id、名称、runtime、vendor、variant、category、格式、模态与设备；界面会按官方项目和加速变体分组展示。
 - 当前 sidecar worker 实现现有 MessagePack 张量协议；加载、取消、流式扩展沿用同一 worker 生命周期。
 
 ## 远程目录
@@ -67,6 +70,10 @@ sha256 = "..."
           "name": "llama.cpp Vulkan",
           "runtime": "llama",
           "description": "llama.cpp GGUF inference on Vulkan",
+          "vendor": "llama.cpp",
+          "variant": "Vulkan",
+          "category": "language",
+          "homepage": "https://github.com/ggml-org/llama.cpp",
           "implementations": ["llama.text"],
           "formats": ["gguf"],
           "modalities": ["text"],

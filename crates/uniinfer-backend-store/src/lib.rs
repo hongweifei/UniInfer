@@ -43,6 +43,17 @@ pub struct BackendEngine {
     pub runtime: String,
     #[serde(default)]
     pub description: String,
+    /// Upstream project/vendor shown as the card title, e.g. `llama.cpp`.
+    #[serde(default)]
+    pub vendor: String,
+    /// Hardware/provider variant shown as a row, e.g. `Vulkan`, `CPU`.
+    #[serde(default)]
+    pub variant: String,
+    /// Primary UI category: `language`, `audio`, or `image`.
+    #[serde(default)]
+    pub category: String,
+    #[serde(default)]
+    pub homepage: Option<String>,
     #[serde(default)]
     pub implementations: Vec<String>,
     #[serde(default)]
@@ -453,6 +464,10 @@ mod tests {
                 name: "Test Vulkan".into(),
                 runtime: "test".into(),
                 description: "test engine".into(),
+                vendor: "Test".into(),
+                variant: "CPU".into(),
+                category: "language".into(),
+                homepage: None,
                 implementations: vec!["test.graph".into()],
                 formats: vec!["gguf".into()],
                 modalities: vec!["text".into()],

@@ -137,6 +137,10 @@ fn builtin_info(descriptor: EngineDescriptor) -> BackendInfo {
         name: name.clone(),
         runtime: format!("{:?}", descriptor.runtime).to_ascii_lowercase(),
         description: format!("内置 {name} 推理引擎"),
+        vendor: name.clone(),
+        variant: "内置".into(),
+        category: engine_category(&descriptor.name).into(),
+        homepage: None,
         implementations: descriptor.implementations,
         formats: descriptor
             .formats
@@ -151,6 +155,14 @@ fn builtin_info(descriptor: EngineDescriptor) -> BackendInfo {
         devices: descriptor.devices,
     };
     BackendInfo::builtin(env!("CARGO_PKG_VERSION"), engine)
+}
+
+fn engine_category(name: &str) -> &'static str {
+    if name == "whisper" {
+        "audio"
+    } else {
+        "language"
+    }
 }
 
 fn friendly_engine_name(name: &str) -> String {
