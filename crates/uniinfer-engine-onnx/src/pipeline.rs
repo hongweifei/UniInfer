@@ -36,6 +36,7 @@ pub(crate) fn load(
             PipelineStep::Graph {
                 name,
                 file,
+                device,
                 inputs,
                 auto,
             } => steps.push(RuntimeStep::Graph(RuntimeGraph {
@@ -44,7 +45,7 @@ pub(crate) fn load(
                 auto: auto.clone(),
                 graph: Graph::load(
                     environment,
-                    class,
+                    device.unwrap_or(class),
                     &spec.base_dir.join(file),
                     &format!("onnx-pipeline-{name}"),
                 )?,

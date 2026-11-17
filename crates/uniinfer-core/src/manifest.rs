@@ -391,6 +391,9 @@ pub enum PipelineStep {
     Graph {
         name: String,
         file: PathBuf,
+        /// Device override for this pipeline stage.
+        #[serde(default)]
+        device: Option<DeviceClass>,
         #[serde(default)]
         inputs: BTreeMap<String, String>,
         #[serde(default)]
@@ -436,6 +439,9 @@ pub struct ImageConfig {
 pub struct DiffusionComponent {
     pub path: String,
     pub output: String,
+    /// Device override for this component; falls back to the session placement.
+    #[serde(default)]
+    pub device: Option<DeviceClass>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

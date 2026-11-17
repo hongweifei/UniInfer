@@ -26,7 +26,7 @@ pub(crate) fn load(
         .ok_or_else(|| EngineError::ManifestInvalid("image.diffusion config required".into()))?;
     let load_graph = |component: &uniinfer_core::DiffusionComponent, label: &str| {
         let path = spec.base_dir.join(&component.path);
-        Graph::load(environment, class, &path, label)
+        Graph::load(environment, component.device.unwrap_or(class), &path, label)
     };
     let text = load_graph(&config.text_encoder, "diffusion text encoder")?;
     let unet = load_graph(&config.unet, "diffusion unet")?;
