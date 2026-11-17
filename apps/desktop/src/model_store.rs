@@ -518,6 +518,36 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "network: probes live ModelScope diffusion layout"]
+    fn live_modelscope_diffusion_repo_skips_directories() {
+        tauri::async_runtime::block_on(async {
+            let repo = fetch_modelscope_repo("amd/sd-turbo-amdnpu-onnx")
+                .await
+                .expect("repo files");
+            assert!(
+                repo.files
+                    .iter()
+                    .all(|file| file.path != "scheduler" && file.path != "text_encoder")
+            );
+            let variants = build_variants(&repo, None).expect("variants");
+            assert_eq!(variants.len(), 1);
+            assert_eq!(variants[0].key, "onnx:components");
+            assert!(
+                variants[0]
+                    .files
+                    .iter()
+                    .any(|file| file.path == "scheduler/scheduler_config.json")
+            );
+            assert!(
+                variants[0]
+                    .files
+                    .iter()
+                    .all(|file| file.path != "scheduler")
+            );
+        });
+    }
+
+    #[test]
     #[ignore = "network: probes live ModelScope recursive file listing"]
     fn live_modelscope_lists_nested_model_files() {
         tauri::async_runtime::block_on(async {

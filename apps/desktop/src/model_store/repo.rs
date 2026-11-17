@@ -128,24 +128,7 @@ pub(super) async fn fetch_modelscope_repo(repo: &str) -> Result<RepoFiles, Strin
         .json::<serde_json::Value>()
         .await
         .map_err(|error| format!("repo files: {error}"))?;
-    let files = value
-        .pointer("/Data/Files")
-        .and_then(serde_json::Value::as_array)
-        .into_iter()
-        .flatten()
-        .filter_map(|item| {
-            let path = item.get("Path")?.as_str()?.to_string();
-            let size = item
-                .get("Size")
-                .and_then(serde_json::Value::as_u64)
-                .unwrap_or(0);
-            let sha256 = item
-                .get("Sha256")
-                .and_then(serde_json::Value::as_str)
-                .map(str::to_string);
-            Some(RemoteInfo { path, size, sha256 })
-        })
-        .collect::<Vec<_>>();
+    let files = modelscope_files(&value);
     let detail = match client
         .get(format!("https://modelscope.cn/api/v1/models/{repo}"))
         .send()
@@ -167,6 +150,36 @@ pub(super) async fn fetch_modelscope_repo(repo: &str) -> Result<RepoFiles, Strin
     })
 }
 
+fn modelscope_files(value: &serde_json::Value) -> Vec<RemoteInfo> {
+    value
+        .pointer("/Data/Files")
+        .and_then(serde_json::Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter(|item| {
+            // Recursive listings include directory entries. They are not
+            // downloadable blobs and would otherwise produce 404 URLs such as
+            // /resolve/master/scheduler.
+            !item
+                .get("Type")
+                .and_then(serde_json::Value::as_str)
+                .is_some_and(|kind| kind.eq_ignore_ascii_case("tree"))
+        })
+        .filter_map(|item| {
+            let path = item.get("Path")?.as_str()?.to_string();
+            let size = item
+                .get("Size")
+                .and_then(serde_json::Value::as_u64)
+                .unwrap_or(0);
+            let sha256 = item
+                .get("Sha256")
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_string);
+            Some(RemoteInfo { path, size, sha256 })
+        })
+        .collect()
+}
+
 pub(super) fn file_url(source: Source, repo: &str, path: &str) -> String {
     let path = path
         .split('/')
@@ -179,5 +192,31 @@ pub(super) fn file_url(source: Source, repo: &str, path: &str) -> String {
             format!("https://modelscope.cn/models/{repo}/resolve/master/{path}")
         }
         Source::Backend => path.to_owned(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn modelscope_listing_skips_directory_entries() {
+        let value = serde_json::json!({
+            "Data": {
+                "Files": [
+                    {"Path": "scheduler", "Type": "tree", "Size": 0},
+                    {"Path": "scheduler/scheduler_config.json", "Type": "blob", "Size": 553},
+                    {"Path": "text_encoder/model.onnx", "Type": "blob", "Size": 100}
+                ]
+            }
+        });
+        let files = modelscope_files(&value);
+        assert_eq!(files.len(), 2);
+        assert!(
+            files
+                .iter()
+                .any(|file| file.path == "scheduler/scheduler_config.json")
+        );
+        assert!(files.iter().all(|file| file.path != "scheduler"));
     }
 }
