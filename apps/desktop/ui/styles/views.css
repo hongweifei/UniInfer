@@ -607,8 +607,18 @@
   background: color-mix(in srgb, var(--surface-2) 62%, transparent);
 }
 .backend-engine.with-action { grid-template-columns: minmax(0, 1fr) auto; align-items: center; }
-.backend-engine.unsupported { opacity: 0.62; }
-.backend-unsupported { color: var(--warning) !important; font-family: var(--font-ui) !important; font-size: 10.5px !important; white-space: nowrap; }
+.backend-engine.unsupported { opacity: 0.72; }
+.backend-engine-info { min-width: 0; display: grid; gap: 2px; }
+.backend-engine-main { white-space: nowrap; }
+.backend-engine-main span { overflow: hidden; text-overflow: ellipsis; }
+.backend-unsupported {
+  color: var(--warning) !important;
+  font-family: var(--font-ui) !important;
+  font-size: 10.5px !important;
+  line-height: 1.4;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
 .backend-download {
   min-width: 74px;
   border-color: color-mix(in srgb, var(--accent) 34%, var(--border));

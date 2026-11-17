@@ -20,11 +20,15 @@ assert(preferredVariant([{ class: 'gpu', backend: 'rocm' }], ['ROCm 10.0', 'CPU'
 assert(preferredVariant([{ class: 'cpu', backend: 'cpu' }], ['Vulkan', 'CPU']) === 'CPU', 'CPU device');
 assert(variantOptions(choices[1], 'CPU').join(',') === 'CPU,Vulkan,CUDA', 'configured variant remains visible');
 assert(variantSupport('CPU', [{ class: 'cpu', backend: 'cpu' }]).supported, 'CPU supported');
+assert(variantSupport('CUDA 12.4', [{ class: 'gpu', backend: 'directml' }], [{ vendor: 'NVIDIA', model: 'RTX' }]).supported, 'CUDA via NVIDIA vendor');
+assert(!variantSupport('CUDA 12.4', [{ class: 'gpu', backend: 'directml' }], [{ vendor: 'AMD', model: 'Radeon' }]).supported, 'CUDA rejected on AMD');
+assert(variantSupport('ROCm 10.0', [{ class: 'gpu', backend: 'directml' }], [{ vendor: 'AMD', model: 'Radeon' }]).supported, 'ROCm via AMD vendor');
+assert(variantSupport('SYCL', [{ class: 'gpu', backend: 'directml' }], [{ vendor: 'Intel', model: 'Arc' }]).supported, 'new variants are accepted generically');
 assert(variantSupport('CUDA 12.4', [{ class: 'gpu', backend: 'cuda' }]).supported, 'CUDA device');
-assert(!variantSupport('CUDA 12.4', [{ class: 'gpu', backend: 'vulkan' }]).supported, 'CUDA needs matching backend');
+assert(!variantSupport('CUDA 12.4', [{ class: 'gpu', backend: 'vulkan' }], [{ vendor: 'AMD' }]).supported, 'CUDA rejected on AMD');
 assert(variantSupport('ROCm 10.0', [{ class: 'gpu', backend: 'rocm' }]).supported, 'ROCm device');
 assert(variantSupport('SYCL', [{ class: 'gpu', backend: 'sycl' }]).supported, 'SYCL is discovered generically');
-assert(!variantSupport('SYCL', [{ class: 'gpu', backend: 'vulkan' }]).supported, 'unmatched variant is disabled');
+assert(variantSupport('SYCL', [{ class: 'gpu', backend: 'vulkan' }]).supported, 'new variant is allowed with a GPU');
 assert(variantSupport('Vulkan', [{ class: 'gpu', backend: 'vulkan' }]).supported, 'Vulkan device');
 assert(!variantSupport('Vulkan', []).supported, 'Vulkan needs GPU');
 console.log('model-backend tests passed');

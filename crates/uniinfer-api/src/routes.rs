@@ -216,6 +216,16 @@ async fn models(State(state): State<AppState>) -> Json<Value> {
 }
 
 async fn devices(State(state): State<AppState>) -> Json<Value> {
+    let graphics = uniinfer_devices::host_gpus()
+        .into_iter()
+        .map(|gpu| {
+            json!({
+                "vendor": gpu.vendor,
+                "model": gpu.model,
+                "memory_bytes": gpu.memory_bytes,
+            })
+        })
+        .collect::<Vec<_>>();
     let devices = state
         .runtime
         .devices()
@@ -241,7 +251,7 @@ async fn devices(State(state): State<AppState>) -> Json<Value> {
                 .collect::<Vec<_>>()
         })
         .unwrap_or_default();
-    Json(json!({"devices": devices, "models": models}))
+    Json(json!({"devices": devices, "graphics": graphics, "models": models}))
 }
 
 async fn cancel(

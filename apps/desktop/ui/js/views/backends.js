@@ -229,14 +229,16 @@ export function mountBackends(root, ctx) {
       h('div', { class: 'backend-engine-list' },
         ...packages.map((backend) => {
           const variant = backend.engines?.[0]?.variant || backend.version;
-          const support = variantSupport(variant, ctx.devices());
+          const support = variantSupport(variant, ctx.devices(), ctx.graphics());
           return h('div', {
             class: `backend-engine with-action ${support.supported ? '' : 'unsupported'}`,
             title: support.reason,
           },
-          h('div', { class: 'backend-engine-main' },
-            h('strong', { text: variant }),
-            h('span', { class: 'faint', text: `版本 ${backend.version}` }),
+          h('div', { class: 'backend-engine-info' },
+            h('div', { class: 'backend-engine-main' },
+              h('strong', { text: variant }),
+              h('span', { class: 'faint', text: `版本 ${backend.version}` }),
+            ),
             !support.supported ? h('span', { class: 'backend-unsupported', text: support.reason }) : null,
           ),
             h('button', {
@@ -269,14 +271,16 @@ export function mountBackends(root, ctx) {
         ...packages.map((packageInfo) => {
           const installed = installedKeys.has(`${packageInfo.id}@${packageInfo.version}`);
           const variant = packageInfo.engines?.[0]?.variant || packageInfo.version;
-          const support = variantSupport(variant, ctx.devices());
+          const support = variantSupport(variant, ctx.devices(), ctx.graphics());
           return h('div', {
             class: `backend-engine with-action ${support.supported ? '' : 'unsupported'}`,
             title: support.reason,
           },
-            h('div', { class: 'backend-engine-main' },
-              h('strong', { text: variant }),
-              h('span', { class: 'faint', text: `版本 ${packageInfo.version} · ${packageInfo.files?.length ?? 0} 个文件` }),
+            h('div', { class: 'backend-engine-info' },
+              h('div', { class: 'backend-engine-main' },
+                h('strong', { text: variant }),
+                h('span', { class: 'faint', text: `版本 ${packageInfo.version} · ${packageInfo.files?.length ?? 0} 个文件` }),
+              ),
               !support.supported ? h('span', { class: 'backend-unsupported', text: support.reason }) : null,
             ),
             h('button', {

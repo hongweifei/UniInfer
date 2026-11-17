@@ -32,23 +32,47 @@ export function backendChoices(backends = []) {
   return [BUILTIN, ...groups.values()];
 }
 
-export function preferredVariant(devices = [], variants = []) {
+export function preferredVariant(devices = [], variants = [], graphics = []) {
   const list = variants.filter(Boolean);
-  const supported = list.filter((variant) => variantSupport(variant, devices).supported);
-  const acceleratorBackends = devices
+  const supported = list.filter((variant) => variantSupport(variant, devices, graphics).supported);
+  const backends = devices
     .filter((device) => device.class !== 'cpu')
     .map((device) => String(device.backend ?? ''))
     .filter(Boolean);
-  for (const backend of acceleratorBackends) {
-    const match = supported.find((variant) =>
-      !tokens(variant).includes('cpu') && backendMatches(variant, backend)
+  const direct = supported.find((variant) =>
+    !tokens(variant).includes('cpu') && backends.some((backend) => backendMatches(variant, backend))
+  );
+  if (direct) return direct;
+  const hardware = hardwareText(graphics);
+  if (hardware) {
+    const vendor = supported.find((variant) =>
+      tokens(variant).some((token) =>
+        (token === 'cuda' && vendorMatches(hardware, 'nvidia'))
+        || (token === 'rocm' && vendorMatches(hardware, 'amd'))
+      )
     );
-    if (match) return match;
+    if (vendor) return vendor;
   }
-  return supported.find((variant) => tokens(variant).includes('cpu')) ?? supported[0] ?? 'auto';
+  const cpu = supported.find((variant) => tokens(variant).includes('cpu'));
+  const accelerator = supported.find((variant) => !tokens(variant).includes('cpu'));
+  return accelerator ?? cpu ?? supported[0] ?? 'auto';
 }
 
-export function variantSupport(variant, devices = []) {
+function hardwareText(graphics) {
+  return graphics
+    .map((gpu) => `${gpu.vendor ?? ''} ${gpu.model ?? ''}`)
+    .join(' ')
+    .toLowerCase();
+}
+
+function vendorMatches(hardware, vendor) {
+  if (vendor === 'amd') {
+    return hardware.includes('amd') || hardware.includes('advanced micro devices') || hardware.includes('radeon');
+  }
+  return hardware.includes(vendor);
+}
+
+export function variantSupport(variant, devices = [], graphics = []) {
   const variantTokens = tokens(variant);
   if (!variantTokens.length) return { supported: false, reason: '变体名称未知' };
   const cpu = devices.find((device) => device.class === 'cpu');
@@ -58,15 +82,25 @@ export function variantSupport(variant, devices = []) {
       : { supported: false, reason: '需要 CPU' };
   }
   const accelerators = devices.filter((device) => device.class !== 'cpu');
-  if (!accelerators.length) return { supported: false, reason: '需要加速设备' };
-  const matches = accelerators.filter((device) => backendMatches(variant, device.backend));
-  if (matches.length) {
-    return {
-      supported: true,
-      reason: `检测到 ${matches.map((device) => device.backend).filter(Boolean).join(' / ')} 设备`,
-    };
+  const backends = accelerators.map((device) => String(device.backend ?? '')).filter(Boolean);
+  if (backends.some((backend) => backendMatches(variant, backend))) {
+    return { supported: true, reason: `检测到 ${backends.join(' / ')} 后端` };
   }
-  return { supported: false, reason: `未检测到与 ${variant} 匹配的设备后端` };
+  const hardware = hardwareText(graphics);
+  const hasAccelerator = accelerators.length > 0 || graphics.length > 0;
+  if (!hasAccelerator) return { supported: false, reason: '需要 GPU/NPU' };
+
+  // Vendor-exclusive APIs. Every other variant is considered downloadable
+  // whenever an accelerator is present; no variant allowlist is maintained.
+  const vendorExclusive = variantTokens
+    .map((token) => token === 'cuda' ? 'nvidia' : token === 'rocm' ? 'amd' : null)
+    .find(Boolean);
+  if (vendorExclusive && hardware) {
+    return vendorMatches(hardware, vendorExclusive)
+      ? { supported: true, reason: `检测到 ${vendorExclusive.toUpperCase()} GPU` }
+      : { supported: false, reason: `需要 ${vendorExclusive.toUpperCase()} GPU` };
+  }
+  return { supported: true, reason: '检测到加速设备' };
 }
 
 export function variantOptions(choice, configured) {

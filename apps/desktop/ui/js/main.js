@@ -33,6 +33,7 @@ const state = loadState();
 let api = null;
 let models = [];
 let devices = [];
+let graphics = [];
 let currentCleanup = null;
 
 function applyTheme() {
@@ -289,6 +290,7 @@ function createContext() {
     api,
     models: () => models,
     devices: () => devices,
+    graphics: () => graphics,
     currentModel,
     setModel,
     navigate,
@@ -400,6 +402,7 @@ async function refreshModels({ silent = false } = {}) {
     const [modelBody, deviceBody] = await Promise.all([api.models(), api.devices()]);
     models = sortModels((modelBody.data ?? []).filter((model) => !model.id.startsWith('tiny-')));
     devices = deviceBody.devices ?? [];
+    graphics = deviceBody.graphics ?? [];
     chooseModelForView(state.view);
     if (silent) {
       renderSidebarOnly();
@@ -448,6 +451,7 @@ async function boot() {
     const [modelBody, deviceBody] = await Promise.all([api.models(), api.devices()]);
     models = sortModels((modelBody.data ?? []).filter((model) => !model.id.startsWith('tiny-')));
     devices = deviceBody.devices ?? [];
+    graphics = deviceBody.graphics ?? [];
     chooseModelForView(state.view);
     renderShell();
     renderView();

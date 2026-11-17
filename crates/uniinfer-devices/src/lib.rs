@@ -1,8 +1,10 @@
 //! Device discovery and placement planning.
 
+mod graphics;
 mod inventory;
 mod placement;
 
+pub use graphics::{HostGpu, host_gpus};
 pub use inventory::DeviceInventory;
 
 #[cfg(test)]

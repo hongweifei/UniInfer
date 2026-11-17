@@ -327,10 +327,10 @@ export function mountModels(root, ctx) {
       }
       variantSelect.disabled = false;
       const variants = variantOptions(choice, configuredBackend.variant);
-      const recommended = preferredVariant(ctx.devices(), variants);
+      const recommended = preferredVariant(ctx.devices(), variants, ctx.graphics());
       variantSelect.append(h('option', { value: 'auto', text: `自动（${recommended}）` }));
       for (const variant of variants) {
-        const support = variantSupport(variant, ctx.devices());
+        const support = variantSupport(variant, ctx.devices(), ctx.graphics());
         const option = h('option', {
           value: variant,
           text: support.supported ? variant : `${variant}（当前设备不支持）`,
@@ -344,7 +344,7 @@ export function mountModels(root, ctx) {
         : 'auto';
       const selectedSupport = variantSelect.value === 'auto'
         ? { supported: true, reason: '' }
-        : variantSupport(variantSelect.value, ctx.devices());
+        : variantSupport(variantSelect.value, ctx.devices(), ctx.graphics());
       variantHint.textContent = choice.variants.length
         ? selectedSupport.supported
           ? `自动会按当前设备优先选择 ${recommended}；可选变体来自已安装包。`
