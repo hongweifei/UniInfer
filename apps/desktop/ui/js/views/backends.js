@@ -179,7 +179,10 @@ export function mountBackends(root, ctx) {
   }
 
   function capabilityRows(engine) {
+    const variants = (engine.variants?.length ? engine.variants : [engine.variant])
+      .filter((value) => value && value !== '内置');
     const groups = [
+      ['变体', variants],
       ['格式', (engine.formats ?? []).map((value) => TAG_LABELS[value] ?? value)],
       ['内容', (engine.modalities ?? []).map((value) => MODALITY_LABELS[value] ?? value)],
       ['设备', (engine.devices ?? []).map((value) => value.toUpperCase())],

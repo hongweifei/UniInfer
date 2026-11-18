@@ -79,7 +79,7 @@ pub(super) fn catalog_from_variants(
                     runtime: spec.runtime.into(),
                     description,
                     vendor: spec.name.into(),
-                    variant: variant.label,
+                    variant: variant.label.clone(),
                     category: spec.category.into(),
                     homepage: Some(release.html_url.clone()),
                     implementations: spec
@@ -98,7 +98,7 @@ pub(super) fn catalog_from_variants(
                         .map(|value| (*value).to_owned())
                         .collect(),
                     devices: variant.devices,
-                    variants: Vec::new(),
+                    variants: vec![variant.label.clone()],
                 }],
                 files,
             }
