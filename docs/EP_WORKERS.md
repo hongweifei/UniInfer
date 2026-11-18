@@ -45,3 +45,11 @@ cargo build -p uniinfer-worker --release --features ep-xnnpack,onnx-dynamic
 - 当前 worker 协议支持文本和音频模型；图像 `ImageSlot` 需要单独扩展。
 - worker 与主程序通过 MessagePack tensor 帧通信，图像/大张量传输需要另行设计。
 - 每个 worker 包必须匹配平台、架构、ORT API 版本和 provider 版本。
+
+## 安装
+
+后端页提供“导入后端包”，选择预先构建好的 zip 即可安装，不需要 Rust/CMake 环境。
+
+本地导入要求 zip 根目录包含 `backend.toml`，并且清单中的 `worker` 文件存在。导入后会走普通 sidecar 注册流程，模型配置可以直接选择。
+
+在线附加 EP 需要发布者把 worker 包托管到可下载地址，并提供后端目录索引；当前官方目录只包含 llama/sd/whisper/ONNX Runtime 的官方 release。

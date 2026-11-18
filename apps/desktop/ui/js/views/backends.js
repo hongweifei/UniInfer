@@ -57,6 +57,10 @@ export function mountBackends(root, ctx) {
     class: 'btn btn-icon ghost sm', type: 'button', title: '重新读取后端列表',
     onClick: () => void refresh({ force: true, reloadCatalog: true }),
   }, h('span', { html: icon('refresh', 14) }));
+  const importButton = h('button', {
+    class: 'btn sm ghost', type: 'button', text: '导入后端包',
+    onClick: () => void importBackend(),
+  }, h('span', { html: icon('plus', 14) }), h('span', { text: '导入后端包' }));
 
   function showError(message) {
     if (!message) {
@@ -143,6 +147,23 @@ export function mountBackends(root, ctx) {
       catalogPromise = null;
       catalogLoading = false;
       updateError();
+      render();
+    }
+  }
+
+  async function importBackend() {
+    try {
+      const path = await invoke('pick_backend_archive');
+      if (!path) return;
+      busy = true;
+      render();
+      const result = await invoke('import_backend_archive', { path });
+      toast(`${result.id} ${result.version} 已导入`, 'success');
+      await refresh({ force: true, reloadCatalog: false });
+    } catch (error) {
+      toast(errorMessage(error), 'error');
+    } finally {
+      busy = false;
       render();
     }
   }
@@ -379,6 +400,7 @@ export function mountBackends(root, ctx) {
 
   function render() {
     refreshButton.disabled = loading || busy;
+    importButton.disabled = busy;
     clear(builtinHost);
     clear(sidecarHost);
     clear(availableHost);
@@ -446,6 +468,7 @@ export function mountBackends(root, ctx) {
           h('p', { text: '后端安装后即可被模型选用；模型各自配置后端与设备变体。' }),
         ),
         h('div', { class: 'backend-hero-side' },
+          importButton,
           refreshButton,
         ),
       ),

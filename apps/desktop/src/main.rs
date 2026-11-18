@@ -76,6 +76,20 @@ async fn pick_model_folder() -> Option<String> {
     .flatten()
 }
 
+#[tauri::command]
+async fn pick_backend_archive() -> Option<String> {
+    tauri::async_runtime::spawn_blocking(|| {
+        rfd::FileDialog::new()
+            .set_title("选择后端包 zip")
+            .add_filter("后端包", &["zip"])
+            .pick_file()
+            .map(|path| path.display().to_string())
+    })
+    .await
+    .ok()
+    .flatten()
+}
+
 fn main() {
     tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![
@@ -87,6 +101,7 @@ fn main() {
             window_close,
             set_window_theme,
             pick_model_folder,
+            pick_backend_archive,
             model_store::search_models,
             model_store::plan_model,
             model_store::download::start_download,
@@ -96,7 +111,8 @@ fn main() {
             model_store::download::remove_download,
             model_store::download::clear_downloads,
             model_store::delete_model,
-            backend_store::fetch_backend_catalog
+            backend_store::fetch_backend_catalog,
+            backend_store::import_backend_archive
         ])
         .setup(|app| {
             let startup = api_server::start();
