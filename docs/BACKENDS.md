@@ -6,7 +6,7 @@ UniInfer 把内置引擎与下载后端统一管理：每个内置引擎（ONNX 
 
 桌面端「后端」页面支持：
 
-- 自动从 `llama.cpp`、`stable-diffusion.cpp`、`whisper.cpp` 和 `ONNX Runtime` 官方 release 发现 Windows x64 变体，包括 CPU、Vulkan、CUDA、ROCm、SYCL、OpenVINO 等。
+- 自动发现 `llama.cpp`、`stable-diffusion.cpp`、`whisper.cpp` 和 `ONNX Runtime` 的 Windows x64 官方发布变体：llama.cpp/sd.cpp 包含 CPU、Vulkan、CUDA、ROCm、SYCL、OpenVINO 等，whisper.cpp 包含 CPU/BLAS/CUDA，ONNX Runtime 当前官方 ZIP 为 CPU/CUDA 12/CUDA 13。
 - 按官方项目、版本和加速变体下载并校验，安装到 `<配置文件目录>/backends/<id>/<version>/`。
 - 卸载引擎；安装后后端即存在于列表中，供模型配置选择。
 - 同一项目的全部变体按项目分组展示；每个引擎只显示一张卡片，变体是独立下载项，CUDA 等带版本号的变体会分别保留。
@@ -61,10 +61,11 @@ sha256 = "..."
 - `llama.cpp`：下载官方 release 的 `llama-server` 压缩包，设置 `launcher = "llama-server"`。UniInfer 启动官方 server，通过 `/completion` 流式协议适配。
 - `stable-diffusion.cpp`：下载官方 `sd-server` 压缩包（含 ROCm 变体），设置 `launcher = "stable-diffusion-server"`。UniInfer 启动官方 server，通过 A1111兼容的 `/sdapi/v1/txt2img` 生成图像；模型 manifest 需要提供完整 checkpoint 文件。
 - `whisper.cpp`：下载官方夜间 release 的 `whisper-server.exe` 压缩包，设置 `launcher = "whisper-server"`。UniInfer 启动官方 server，通过 `/inference` 上传 16 kHz WAV 并读取 JSON `text`。CPU、BLAS、CUDA 变体分别标注设备。
-- `ONNX Runtime`：下载官方 Windows ZIP 中的 `onnxruntime.dll`，设置 `launcher = "onnx-runtime"`。构建必须启用 `onnx-dynamic` feature；启动时由已安装的 ONNX Runtime 包选择 DLL。没有安装包时动态构建会跳过 ONNX 引擎，不能回退到内置静态 ORT。安装或切换 ONNX Runtime 包后需要重启进程，因为 ORT 的进程级环境只能初始化一次。
+- `ONNX Runtime`：下载官方 Windows ZIP 中的 `onnxruntime.dll`，设置 `launcher = "onnx-runtime"`。构建必须启用 `onnx-dynamic` feature；启动时由已安装的 ONNX Runtime 包选择 DLL。没有安装包时动态构建会跳过 ONNX 引擎，不能回退到内置静态 ORT。安装或切换 ONNX Runtime 包后需要重启进程，因为 ORT 的进程级环境只能初始化一次。官方 ZIP 没有 AMD NPU/Vitis AI provider；该能力需要 AMD 专用 ONNX Runtime 构建。
 - `Candle`：上游不提供官方二进制，只能作为内置 Rust 引擎。
 - 动态 ONNX Runtime 需要单独构建：`cargo build -p uniinfer-cli --features onnx-dynamic`。桌面端对应 feature 为 `onnx-dynamic`；默认构建仍使用静态内置 ORT。
 - 下载 ONNX Runtime 变体只提供对应版本的 DLL/EP 库；实际可用的执行提供器仍由构建 feature 决定（例如 `ep-cuda`、`ep-directml`）。没有对应 EP 的变体不会因为下载而自动启用。
+- 各平台 EP 的分发矩阵和预编译组合限制见 [DISTRIBUTION.md](DISTRIBUTION.md)。
 
 内部 `backend.toml` 只是安装后的启动描述，用户不需要编辑或手动导入。
 

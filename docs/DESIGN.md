@@ -115,7 +115,7 @@ token_layout = "smolvlm"
 
 | 引擎 | 实现 | 能力 |
 | :--- | :--- | :--- |
-| `OnnxEngine` | `onnx.graph` / `onnx.pipeline` | 文本、视觉、ASR、图像 fixture |
+| `OnnxEngine` | `onnx.graph` / `onnx.pipeline` / `onnx.diffusion` | 文本、视觉、ASR、多组件图像扩散 |
 | `CandleEngine` | text / vision family registry | GGUF/Safetensors 文本、Safetensors 视觉 |
 | `LlamaEngine` | llama.cpp | GGUF 文本 |
 | `LlamaMtmdEngine` | llama.cpp mtmd | GGUF 视觉 |

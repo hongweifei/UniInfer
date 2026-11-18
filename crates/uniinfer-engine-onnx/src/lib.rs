@@ -36,7 +36,10 @@ static DEVICES: LazyLock<Vec<DeviceClass>> = LazyLock::new(|| {
         feature = "ep-tensorrt",
         feature = "ep-rocm",
         feature = "ep-coreml",
-        feature = "ep-directml"
+        feature = "ep-directml",
+        feature = "ep-openvino",
+        feature = "ep-onednn",
+        feature = "ep-webgpu"
     )) {
         devices.push(DeviceClass::Gpu);
     }
@@ -44,8 +47,6 @@ static DEVICES: LazyLock<Vec<DeviceClass>> = LazyLock::new(|| {
         feature = "ep-nnapi",
         feature = "ep-qnn",
         feature = "ep-openvino",
-        feature = "ep-vitis",
-        feature = "ep-cann"
     )) {
         devices.push(DeviceClass::Npu);
     }
@@ -100,12 +101,24 @@ fn build_environment() -> std::result::Result<Environment, String> {
     providers.push(ort::ep::OpenVINO::default().build());
     #[cfg(feature = "ep-tensorrt")]
     providers.push(ort::ep::TensorRT::default().build());
+    #[cfg(feature = "ep-nvrtx")]
+    providers.push(ort::ep::NVRTX::default().build());
     #[cfg(feature = "ep-cuda")]
     providers.push(ort::ep::CUDA::default().build());
     #[cfg(feature = "ep-rocm")]
     providers.push(ort::ep::ROCm::default().build());
+    #[cfg(feature = "ep-migraphx")]
+    providers.push(ort::ep::MIGraphX::default().build());
     #[cfg(feature = "ep-directml")]
     providers.push(ort::ep::DirectML::default().build());
+    #[cfg(feature = "ep-webgpu")]
+    providers.push(ort::ep::WebGPU::default().build());
+    #[cfg(feature = "ep-onednn")]
+    providers.push(ort::ep::OneDNN::default().build());
+    #[cfg(feature = "ep-xnnpack")]
+    providers.push(ort::ep::XNNPACK::default().build());
+    #[cfg(feature = "ep-acl")]
+    providers.push(ort::ep::ACL::default().build());
 
     #[cfg(feature = "load-dynamic")]
     let builder = {
@@ -397,4 +410,10 @@ fn ep_enabled(ep: &str) -> bool {
         || (cfg!(feature = "ep-openvino") && ep.contains("openvino"))
         || (cfg!(feature = "ep-vitis") && ep.contains("vitis"))
         || (cfg!(feature = "ep-cann") && ep.contains("cann"))
+        || (cfg!(feature = "ep-acl") && ep.contains("acl"))
+        || (cfg!(feature = "ep-xnnpack") && ep.contains("xnnpack"))
+        || (cfg!(feature = "ep-nvrtx") && ep.contains("nvrtx"))
+        || (cfg!(feature = "ep-migraphx") && ep.contains("migraphx"))
+        || (cfg!(feature = "ep-webgpu") && ep.contains("webgpu"))
+        || (cfg!(feature = "ep-onednn") && (ep.contains("onednn") || ep.contains("dnnl")))
 }

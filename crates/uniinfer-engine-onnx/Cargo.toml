@@ -35,6 +35,12 @@ ep-openvino = ["ort/openvino"]
 ep-rocm = ["ort/rocm"]
 ep-vitis = ["ort/vitis"]
 ep-cann = ["ort/cann"]
+ep-webgpu = ["ort/webgpu"]
+ep-xnnpack = ["ort/xnnpack"]
+ep-nvrtx = ["ort/nvrtx"]
+ep-migraphx = ["ort/migraphx"]
+ep-acl = ["ort/acl"]
+ep-onednn = ["ort/onednn"]
 
 [dev-dependencies]
 uniinfer-devices.workspace = true

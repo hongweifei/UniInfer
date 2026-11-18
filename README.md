@@ -109,7 +109,7 @@ flowchart TB
 | ONNX | 文本生成 / GenAI KV cache | `onnx.graph` | 已实现 |
 | ONNX | 视觉语言 pipeline | `onnx.pipeline` + `smolvlm` profile | 已实现 |
 | ONNX | Whisper / CTC 语音转写 | `onnx.pipeline` + adapter step | 已实现 |
-| ONNX | 图像扩散 | `onnx.diffusion` + `ImageSlot` | 已实现；CLIP/UNet/VAE 组件布局，含 synthetic fixture |
+| ONNX | 图像扩散 | `onnx.diffusion` + `ImageSlot` | 已实现；支持 CLIP/UNet/VAE 多组件布局，synthetic fixture 覆盖管线 |
 | GGUF | 文本生成 | `candle.text` / `llama.text` | 已实现 |
 | GGUF | 视觉语言 | `llama.mtmd` | 已实现 |
 | Safetensors | 文本生成 | `candle.text` | 已实现 |
@@ -156,7 +156,7 @@ flowchart TB
 ### 前置条件
 
 - Rust stable。
-- ONNX Runtime 由 `ort` 的 `download-binaries` feature 提供；下载 ONNX Runtime 后端并使用官方 DLL 时，启用 `onnx-dynamic` feature。
+- ONNX Runtime 由 `ort` 的 `download-binaries` feature 提供；下载 ONNX Runtime 后端并使用官方 DLL 时，启用 `onnx-dynamic` feature。官方 Windows ZIP 只有 CPU/CUDA 12/CUDA 13，AMD NPU/Vitis AI 需要厂商专用构建。
 - 构建 `llama` / `llama-mtmd` feature 时安装 CMake、C++ 编译器和 `libclang`。
 
 ### 构建
@@ -188,7 +188,7 @@ Windows 也可以双击仓库根目录的 `desktop.cmd`。
 
 默认加速：
 
-- Windows：ONNX DirectML，自动使用 DX12 GPU，无 GPU 时回退 CPU。
+- Windows：ONNX DirectML 作为基础加速，自动使用 DX12 GPU，无 GPU 时回退 CPU；CUDA/TensorRT/OpenVINO 作为可选加速包。
 - macOS：ONNX CoreML + Candle Metal。
 - Linux：CPU。
 
