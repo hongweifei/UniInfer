@@ -8,7 +8,9 @@ function backendMatches(variant, backend) {
   const backendTokens = tokens(backend);
   return variantTokens.some((variantToken) =>
     backendTokens.some((backendToken) =>
-      backendToken.includes(variantToken) || variantToken.includes(backendToken)
+      backendToken.includes(variantToken)
+      || variantToken.includes(backendToken)
+      || (variantToken === 'directml' && backendToken.startsWith('dml'))
     )
   );
 }
@@ -116,7 +118,7 @@ export function variantSupport(variant, devices = [], graphics = []) {
 }
 
 export function variantOptions(choice, configured) {
-  if (!choice || choice.id === BUILTIN.id) return [];
+  if (!choice) return [];
   const variants = choice.variants ?? [];
   if (configured && configured !== 'auto' && !variants.includes(configured)) {
     return [configured, ...variants];
