@@ -5,13 +5,14 @@ function assert(condition, message) {
 }
 
 const backends = [
-  { kind: 'builtin', name: 'llama.cpp', engines: [{ variant: '内置' }] },
+  { kind: 'builtin', name: 'llama.cpp', engines: [{ variant: '内置', devices: ['cpu', 'gpu', 'npu'] }] },
   { kind: 'sidecar', name: 'llama.cpp', engines: [{ variant: 'Vulkan' }] },
   { kind: 'sidecar', name: 'llama.cpp', engines: [{ variant: 'CUDA' }] },
   { kind: 'sidecar', name: 'stable-diffusion.cpp', engines: [{ variant: 'CPU' }] },
 ];
 const choices = backendChoices(backends);
 assert(choices[0].id === 'builtin', 'builtin must be first');
+assert(choices[0].variants.join(',') === 'CPU,GPU,NPU', 'builtin exposes device variants');
 assert(choices.length === 3, 'sidecars group by family');
 assert(choices[1].variants.join(',') === 'Vulkan,CUDA', 'variants are unique');
 assert(preferredVariant([{ class: 'gpu', backend: 'cuda' }], ['Vulkan', 'CUDA 12.4', 'CPU']) === 'CUDA 12.4', 'CUDA device');

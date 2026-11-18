@@ -15,8 +15,17 @@ function backendMatches(variant, backend) {
 
 export function backendChoices(backends = []) {
   const groups = new Map();
+  const builtin = { ...BUILTIN, variants: [] };
   for (const backend of backends) {
-    if (backend.kind === 'builtin') continue;
+    if (backend.kind === 'builtin') {
+      for (const engine of backend.engines ?? []) {
+        for (const device of engine.devices ?? []) {
+          const variant = String(device).toUpperCase();
+          if (variant && !builtin.variants.includes(variant)) builtin.variants.push(variant);
+        }
+      }
+      continue;
+    }
     const id = String(backend.name ?? '').trim();
     if (!id) continue;
     let group = groups.get(id);
@@ -29,7 +38,7 @@ export function backendChoices(backends = []) {
       if (variant && !group.variants.includes(variant)) group.variants.push(variant);
     }
   }
-  return [BUILTIN, ...groups.values()];
+  return [builtin, ...groups.values()];
 }
 
 export function preferredVariant(devices = [], variants = [], graphics = []) {

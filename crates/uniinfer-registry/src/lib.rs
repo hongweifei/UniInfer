@@ -301,6 +301,26 @@ impl EngineRegistry {
             return Err(EngineError::Other("engine registry poisoned".into()));
         };
         let mut engines = registered.iter().collect::<Vec<_>>();
+        let variant = manifest
+            .backend
+            .as_ref()
+            .and_then(|backend| backend.variant.as_deref())
+            .map(str::trim)
+            .filter(|variant| !variant.is_empty());
+        let mut preferred_manifest = manifest.clone();
+        if manifest
+            .backend
+            .as_ref()
+            .and_then(|backend| backend.id.as_deref())
+            .is_some_and(|id| id == "builtin")
+            && let Some(class) = variant.and_then(builtin_variant_class)
+        {
+            preferred_manifest.placement.prefer = vec![class];
+            if class != DeviceClass::Cpu {
+                preferred_manifest.placement.allow_cpu_fallback = false;
+            }
+        }
+        let manifest = &preferred_manifest;
         let backend_id = manifest
             .backend
             .as_ref()
@@ -592,5 +612,14 @@ mod tests {
             gpu.available_memory_bytes, 3_500,
             "integrated GPU must inherit the host reserve, not a second VRAM reserve"
         );
+    }
+}
+
+fn builtin_variant_class(variant: &str) -> Option<DeviceClass> {
+    match variant.to_ascii_lowercase().as_str() {
+        "cpu" => Some(DeviceClass::Cpu),
+        "gpu" | "cuda" | "directml" | "rocm" | "metal" | "vulkan" => Some(DeviceClass::Gpu),
+        "npu" | "qnn" | "vitis" | "openvino" => Some(DeviceClass::Npu),
+        _ => None,
     }
 }

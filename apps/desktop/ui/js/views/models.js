@@ -312,10 +312,16 @@ export function mountModels(root, ctx) {
       const choice = choices.find((item) => item.id === backendSelect.value);
       clear(variantSelect);
       variantSelect.replaceChildren();
-      if (!choice || choice.id === 'builtin') {
+      if (!choice) {
         variantSelect.append(h('option', { value: 'auto', text: '内置' }));
         variantSelect.disabled = true;
-        variantHint.textContent = '内置引擎由模型运行时自动选择。';
+        variantHint.textContent = '没有可用的后端变体。';
+        return;
+      }
+      if (choice.id === 'builtin' && !choice.variants.length) {
+        variantSelect.append(h('option', { value: 'auto', text: '内置' }));
+        variantSelect.disabled = true;
+        variantHint.textContent = '当前构建没有可选择的设备变体。';
         return;
       }
       variantSelect.disabled = false;
@@ -338,9 +344,10 @@ export function mountModels(root, ctx) {
       const selectedSupport = variantSelect.value === 'auto'
         ? { supported: true, reason: '' }
         : variantSupport(variantSelect.value, ctx.devices(), ctx.graphics());
+      const source = choice.id === 'builtin' ? '当前构建的设备能力' : '已安装包';
       variantHint.textContent = choice.variants.length
         ? selectedSupport.supported
-          ? `自动会按当前设备优先选择 ${recommended}；可选变体来自已安装包。`
+          ? `自动会按当前设备优先选择 ${recommended}；可选变体来自${source}。`
           : `当前选择的变体不可用：${selectedSupport.reason}。`
         : '该后端尚未安装，保存后模型在该后端安装前不可用。';
     }
@@ -439,7 +446,9 @@ export function mountModels(root, ctx) {
             else delete nextPlacement.offload_layers;
             manifest.placement = nextPlacement;
             manifest.backend = backendSelect.value === 'builtin'
-              ? { id: 'builtin' }
+              ? (variantSelect.value && variantSelect.value !== 'auto'
+                ? { id: 'builtin', variant: variantSelect.value }
+                : { id: 'builtin' })
               : { id: backendSelect.value, variant: variantSelect.value || 'auto' };
             manifest.context_len = Math.max(1, Number(context.value) || 2048);
             try {
