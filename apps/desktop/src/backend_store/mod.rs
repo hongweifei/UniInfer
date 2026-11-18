@@ -24,8 +24,8 @@ pub(crate) fn import_backend_archive(path: String) -> Result<InstallResult, Stri
         let manifest_path = staging.join("backend.toml");
         let raw = std::fs::read_to_string(&manifest_path)
             .map_err(|error| format!("读取 backend.toml 失败：{error}"))?;
-        let package: BackendManifest = toml::from_str(&raw)
-            .map_err(|error| format!("解析 backend.toml 失败：{error}"))?;
+        let package: BackendManifest =
+            toml::from_str(&raw).map_err(|error| format!("解析 backend.toml 失败：{error}"))?;
         validate_manifest(&package).map_err(|error| error.to_string())?;
         if package.files.is_empty() {
             return Err("后端包没有文件清单".into());
@@ -43,7 +43,8 @@ pub(crate) fn import_backend_archive(path: String) -> Result<InstallResult, Stri
 
 fn extract_import_zip(path: &Path, staging: &Path) -> Result<(), String> {
     let file = std::fs::File::open(path).map_err(|error| format!("打开 zip 失败：{error}"))?;
-    let mut archive = zip::ZipArchive::new(file).map_err(|error| format!("解析 zip 失败：{error}"))?;
+    let mut archive =
+        zip::ZipArchive::new(file).map_err(|error| format!("解析 zip 失败：{error}"))?;
     for index in 0..archive.len() {
         let mut entry = archive
             .by_index(index)
@@ -58,8 +59,7 @@ fn extract_import_zip(path: &Path, staging: &Path) -> Result<(), String> {
             continue;
         }
         if let Some(parent) = destination.parent() {
-            std::fs::create_dir_all(parent)
-                .map_err(|error| format!("创建目录失败：{error}"))?;
+            std::fs::create_dir_all(parent).map_err(|error| format!("创建目录失败：{error}"))?;
         }
         let mut output = std::fs::File::create(&destination)
             .map_err(|error| format!("创建 {} 失败：{error}", destination.display()))?;
