@@ -18,7 +18,7 @@
 | Linux ARM | CPU + ACL + XNNPACK |
 | Android | CPU + NNAPI + XNNPACK |
 
-平台包用户不需要再下载同一 EP 的 worker。
+平台包用户不需要再下载同一 EP 的 worker。Vitis AI 例外：AMD NPU 平台包内置，也提供可选 worker 用于 Universal 包或隔离运行。
 
 ## 额外 worker
 
@@ -31,7 +31,7 @@ worker 只分发平台包没有内置的 EP，例如：
 | QNN | Qualcomm NPU |
 | ROCm | 未内置 ROCm 的平台 |
 | OpenVINO | Universal 包按需安装 |
-| Vitis AI | 非 AMD NPU 平台按需安装 |
+| Vitis AI | AMD NPU 平台包已内置；Universal 包可选 worker |
 
 同一 EP 已经由平台包内置时，不应再提供重复 worker。
 

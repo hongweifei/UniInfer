@@ -370,6 +370,15 @@ impl InferenceEngine for ProcessEngine {
                     command.env(key, joined);
                 }
             }
+            #[cfg(windows)]
+            {
+                let existing = std::env::var_os("PATH").unwrap_or_default();
+                let mut paths = vec![parent.to_path_buf()];
+                paths.extend(std::env::split_paths(&existing));
+                if let Ok(joined) = std::env::join_paths(paths) {
+                    command.env("PATH", joined);
+                }
+            }
         }
         let mut child = command
             .arg(manifest_path)
