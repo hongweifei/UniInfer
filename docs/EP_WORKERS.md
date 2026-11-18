@@ -106,13 +106,13 @@ https://github.com/hongweifei/UniInfer/releases/latest/download/ep-catalog.json
 
 ## Vitis AI 平台包
 
-Vitis AI 属于 Windows AMD Ryzen AI 平台包，内置在该安装包中，不作为额外 worker 分发。
+Vitis AI 同时支持 AMD NPU 平台包内置和独立 worker。两种形式都复用 Ryzen AI Software 自带的 Vitis-enabled ONNX Runtime（1.30.0，对应 `ort` `api-30`），不另行从源码构建 ORT。
 
-构建脚本：
+内置平台包构建脚本：
 
 ```powershell
-$env:VITIS_AI_HOME = "C:\path\to\vitis-ai"
-.\scripts\build-vitis-desktop.ps1 -OrtVersion v1.31.0
+$env:VITIS_AI_HOME = $env:RYZEN_AI_INSTALLATION_PATH
+.\scripts\build-vitis-desktop.ps1
 ```
 
 产物目录：
@@ -124,7 +124,18 @@ UniInfer-Windows-x64-AMD-NPU/
   Vitis AI provider DLLs
 ```
 
-平台包用户不需要再下载 Vitis worker。
+独立 worker 构建脚本：
+
+```powershell
+$env:VITIS_AI_HOME = $env:RYZEN_AI_INSTALLATION_PATH
+.\scripts\build-vitis-worker.ps1
+```
+
+产物：
+
+```text
+uniinfer-vitis-worker-1.0.0-windows-x64.zip
+```
 
 
 ## AMD Ryzen AI SDK 安装
@@ -136,23 +147,6 @@ UniInfer-Windows-x64-AMD-NPU/
 4. 激活安装器提供的 Python venv：
    `"C:\Program Files\RyzenAI\ryzen-ai-1.9.0\Scripts\activate.bat"`
 5. 该脚本会设置 `RYZEN_AI_INSTALLATION_PATH`。
-6. 运行 `%RYZEN_AI_INSTALLATION_PATH%\quicktest\quicktest.py` 验证 NPU。
+6. 在 UTF-8 代码页下运行 `%RYZEN_AI_INSTALLATION_PATH%\quicktest\quicktest.py` 验证 NPU：先执行 `chcp 65001`。
 7. 构建 Vitis 桌面包前设置：
    `$env:VITIS_AI_HOME = $env:RYZEN_AI_INSTALLATION_PATH`
-
-
-### 两种 Vitis 分发形式
-
-Vitis AI 同时支持：
-
-1. **AMD NPU 平台包内置**
-   - `scripts/build-vitis-desktop.ps1`
-   - 产物：`UniInfer-Windows-x64-AMD-NPU/`
-   - 主程序内置 Vitis EP，适合普通 AMD NPU 用户
-
-2. **独立 Vitis worker**
-   - `scripts/build-vitis-worker.ps1`
-   - 产物：`uniinfer-vitis-worker-<version>-windows-x64.zip`
-   - 适合 Universal 包、隔离运行或后台单独升级
-
-两者使用同一份 Vitis AI ONNX Runtime；worker 版本独立于主程序，但必须匹配 worker protocol、ORT API 和模型契约。

@@ -47,6 +47,7 @@ static DEVICES: LazyLock<Vec<DeviceClass>> = LazyLock::new(|| {
         feature = "ep-nnapi",
         feature = "ep-qnn",
         feature = "ep-openvino",
+        feature = "ep-vitis",
     )) {
         devices.push(DeviceClass::Npu);
     }
@@ -83,8 +84,8 @@ pub fn configure_dynamic_library(path: impl Into<PathBuf>) -> Result<()> {
         .map_err(|_| EngineError::LoadFailed("ONNX Runtime library already configured".into()))
 }
 
+#[allow(clippy::vec_init_then_push)]
 fn build_environment() -> std::result::Result<Environment, String> {
-    #[allow(unused_mut)]
     #[allow(unused_mut, unused_variables)]
     let mut providers: Vec<ort::ep::ExecutionProviderDispatch> = Vec::new();
     // NPU providers are registered first so ORT prefers them when available.
@@ -176,7 +177,8 @@ impl OnnxEngine {
     /// Enumerate hardware devices visible to the configured execution providers.
     #[must_use]
     pub fn probe_devices(&self) -> Vec<Device> {
-        self.environment
+        let mut devices: Vec<Device> = self
+            .environment
             .devices()
             .filter_map(|device| {
                 let hardware = device.hardware_device();
@@ -201,7 +203,25 @@ impl OnnxEngine {
                     unified_memory,
                 })
             })
-            .collect()
+            .collect();
+        // Vitis AI EP does not expose its NPU through ORT device enumeration.
+        // A build with the provider compiled in targets the local Ryzen AI NPU,
+        // so advertise it explicitly for placement.
+        #[cfg(feature = "ep-vitis")]
+        if !devices
+            .iter()
+            .any(|device| device.class == DeviceClass::Npu)
+        {
+            devices.push(Device {
+                id: "npu:vitis:0".into(),
+                class: DeviceClass::Npu,
+                backend: "vitis".into(),
+                memory_bytes: 0,
+                available_memory_bytes: 0,
+                unified_memory: false,
+            });
+        }
+        devices
     }
 }
 

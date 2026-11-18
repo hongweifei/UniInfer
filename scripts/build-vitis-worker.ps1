@@ -1,40 +1,35 @@
 ﻿param(
-    [string]$OrtVersion = "v1.31.0",
+    [string]$SdkRoot = "",
     [string]$WorkDir = "",
-    [string]$OrtSource = "",
-    [string]$OrtInstall = "",
     [string]$Version = "1.0.0"
 )
 
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot
 if (-not $WorkDir) { $WorkDir = Join-Path $root ".build\vitis-worker" }
-if (-not $OrtSource) { $OrtSource = Join-Path $WorkDir "onnxruntime" }
-if (-not $OrtInstall) { $OrtInstall = Join-Path $WorkDir "onnxruntime-install" }
 
-if (-not [Environment]::Is64BitProcess) { throw "需要 64 位 PowerShell" }
-if (-not $env:VITIS_AI_HOME -and -not $env:RYZEN_AI_HOME -and -not $env:RYZEN_AI_INSTALLATION_PATH) {
+if (-not $SdkRoot) {
+    $SdkRoot = $env:VITIS_AI_HOME
+    if (-not $SdkRoot) { $SdkRoot = $env:RYZEN_AI_HOME }
+    if (-not $SdkRoot) { $SdkRoot = $env:RYZEN_AI_INSTALLATION_PATH }
+}
+if (-not $SdkRoot) {
     throw "请先安装 AMD Ryzen AI Software，并设置 VITIS_AI_HOME、RYZEN_AI_HOME 或 RYZEN_AI_INSTALLATION_PATH"
 }
-foreach ($tool in @("git", "cmake", "python", "cargo")) {
-    if (-not (Get-Command $tool -ErrorAction SilentlyContinue)) { throw "缺少工具：$tool" }
+if (-not (Test-Path (Join-Path $SdkRoot "onnxruntime\bin\onnxruntime.dll"))) {
+    throw "SDK 中找不到 onnxruntime\bin\onnxruntime.dll：$SdkRoot"
 }
-if (-not (Test-Path (Join-Path $OrtSource "build.bat"))) {
-    New-Item -ItemType Directory -Force -Path $WorkDir | Out-Null
-    git clone --recursive https://github.com/microsoft/onnxruntime $OrtSource
-    Push-Location $OrtSource
-    git checkout $OrtVersion
-    git submodule sync --recursive
-    git submodule update --init --recursive
-    Pop-Location
+if (-not (Get-Command cl -ErrorAction SilentlyContinue)) {
+    throw "请从 Visual Studio Developer PowerShell 运行，普通 PowerShell 没有 cl"
 }
-New-Item -ItemType Directory -Force -Path $OrtInstall | Out-Null
+if (-not (Get-Command cargo -ErrorAction SilentlyContinue)) {
+    throw "缺少工具：cargo"
+}
 
-Push-Location $OrtSource
-& .\build.bat --use_vitisai --build_shared_lib --parallel --config Release `
-    --skip_tests --cmake_extra_defines "CMAKE_INSTALL_PREFIX=$OrtInstall"
-if ($LASTEXITCODE -ne 0) { throw "ONNX Runtime Vitis AI 构建失败" }
-Pop-Location
+$sdkVenv = Join-Path (Split-Path $SdkRoot) "ryzen-ai-1.9.0\Scripts"
+if (Test-Path (Join-Path $sdkVenv "python.exe")) {
+    $env:PATH = "$sdkVenv;$env:PATH"
+}
 
 Push-Location $root
 cargo build -p uniinfer-worker --release --features ep-vitis,onnx-dynamic
@@ -48,15 +43,13 @@ $worker = Join-Path $root "target\release\uniinfer-worker.exe"
 if (-not (Test-Path $worker)) { throw "找不到 worker：$worker" }
 Copy-Item $worker (Join-Path $stage "uniinfer-worker.exe")
 
-# ONNX Runtime 及 Vitis AI provider DLLs 必须和 worker 同目录。
-$ortDll = Get-ChildItem -Path $OrtInstall -Filter "onnxruntime.dll" -Recurse | Select-Object -First 1
-if (-not $ortDll) { throw "构建输出中没有 onnxruntime.dll" }
-$ortDir = $ortDll.Directory.FullName
-Get-ChildItem -Path $OrtDir -Filter "*.dll" | Copy-Item -Destination $stage
-Get-ChildItem -Path $OrtInstall -Filter "*.dll" -Recurse | ForEach-Object {
-    if (-not (Test-Path (Join-Path $stage $_.Name))) {
-        Copy-Item $_.FullName $stage
-    }
+# Use the SDK's Vitis-enabled ONNX Runtime and provider DLLs.
+$ortBin = Join-Path $SdkRoot "onnxruntime\bin"
+Get-ChildItem $ortBin -Filter "*.dll" | Copy-Item -Destination $stage -Force
+$deploy = Join-Path $SdkRoot "deployment"
+foreach ($name in @("vitis-ai-runtime.dll", "onnxruntime-genai.dll")) {
+    $src = Join-Path $deploy $name
+    if (Test-Path $src) { Copy-Item $src $stage -Force }
 }
 
 $files = Get-ChildItem -Path $stage -File | Sort-Object Name
