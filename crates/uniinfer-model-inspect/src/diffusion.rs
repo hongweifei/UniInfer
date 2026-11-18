@@ -27,13 +27,6 @@ pub(crate) fn detect(root: &Path, onnx: &[PathBuf]) -> Option<DiffusionLayout> {
     selected.extend(files_under(root, "scheduler"));
     selected.extend(files_under(root, "tokenizer"));
     selected.extend(files_under(root, "tokenizer_2"));
-    for directory in ["text_encoder", "unet", "vae_decoder"] {
-        selected.extend(
-            files_under(root, directory)
-                .into_iter()
-                .filter(|path| is_external_data(&path.to_string_lossy())),
-        );
-    }
 
     selected.sort();
     selected.dedup();
@@ -218,9 +211,4 @@ fn files_under(root: &Path, directory: &str) -> Vec<PathBuf> {
         }
     }
     files
-}
-
-fn is_external_data(path: &str) -> bool {
-    let name = path.rsplit('/').next().unwrap_or(path).to_ascii_lowercase();
-    name.contains(".onnx_data") || name.ends_with(".onnx.data")
 }

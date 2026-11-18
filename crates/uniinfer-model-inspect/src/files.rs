@@ -1,4 +1,5 @@
 use std::fs;
+use std::io::Read;
 use std::path::{Path, PathBuf};
 
 use sha2::{Digest, Sha256};
@@ -121,11 +122,21 @@ pub(crate) fn relative_string(root: &Path, path: &Path) -> String {
 }
 
 pub(crate) fn sha256(path: &Path) -> Result<String> {
-    let bytes = fs::read(path).map_err(|source| InspectError::Io {
+    let mut file = fs::File::open(path).map_err(|source| InspectError::Io {
         path: path.to_path_buf(),
         source,
     })?;
     let mut hasher = Sha256::new();
-    hasher.update(bytes);
+    let mut buffer = vec![0u8; 256 * 1024];
+    loop {
+        let read = file.read(&mut buffer).map_err(|source| InspectError::Io {
+            path: path.to_path_buf(),
+            source,
+        })?;
+        if read == 0 {
+            break;
+        }
+        hasher.update(&buffer[..read]);
+    }
     Ok(hex::encode(hasher.finalize()))
 }
