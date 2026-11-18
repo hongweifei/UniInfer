@@ -90,7 +90,6 @@ export function mountModels(root, ctx) {
   function modelCard(model) {
     const loaded = Boolean(model.loaded);
     const routeError = model.route_error;
-    const imageOnly = (model.outputs ?? []).includes('image') && !(model.outputs ?? []).includes('text');
     const unsupported = unsupportedUseReason(model);
     const useButton = h('button', {
       class: 'btn sm primary', type: 'button', disabled: Boolean(routeError) || Boolean(unsupported),
@@ -103,7 +102,7 @@ export function mountModels(root, ctx) {
       },
     }, h('span', { html: icon('play', 13) }), h('span', { text: '使用' }));
     const loadButton = h('button', {
-      class: 'btn sm', type: 'button', disabled: loaded || Boolean(routeError) || imageOnly,
+      class: 'btn sm', type: 'button', disabled: loaded || Boolean(routeError),
       onClick: async () => {
         setBusy(loadButton, true, '加载中…');
         stateChip.textContent = '加载中';
@@ -155,7 +154,7 @@ export function mountModels(root, ctx) {
       h('div', { class: 'model-actions-menu' }, configItem, unloadItem, deleteItem),
     );
     const actions = [useButton];
-    if (!loaded && !imageOnly && !routeError) actions.push(loadButton);
+    if (!loaded && !routeError) actions.push(loadButton);
     actions.push(h('span', { class: 'spacer' }), moreMenu);
 
     const stateChip = routeError

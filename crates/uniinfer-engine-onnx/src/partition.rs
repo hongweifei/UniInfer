@@ -470,6 +470,7 @@ fn value_specs(values: &[ValueInfoProto]) -> Result<Vec<TensorSpec>> {
                 })?;
             let dtype = match ty.elem_type {
                 1 => TensorDtype::F32,
+                11 => TensorDtype::F64,
                 10 => TensorDtype::F16,
                 6 => TensorDtype::I32,
                 7 => TensorDtype::I64,

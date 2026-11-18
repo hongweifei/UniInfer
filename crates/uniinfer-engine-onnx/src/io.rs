@@ -20,6 +20,7 @@ pub(crate) fn convert_spec(outlet: &Outlet, kind: &str) -> Result<TensorSpec> {
     };
     let dtype = match *ty {
         TensorElementType::Float32 => TensorDtype::F32,
+        TensorElementType::Float64 => TensorDtype::F64,
         TensorElementType::Float16 => TensorDtype::F16,
         TensorElementType::Int32 => TensorDtype::I32,
         TensorElementType::Int64 => TensorDtype::I64,
@@ -47,6 +48,9 @@ pub(crate) fn to_ort(tensor: Tensor) -> Result<DynValue> {
     let shape = tensor.shape.clone();
     let value = match tensor.data {
         TensorData::F32(values) => {
+            OrtTensor::from_array((shape, values)).map(ort::value::Value::into_dyn)
+        }
+        TensorData::F64(values) => {
             OrtTensor::from_array((shape, values)).map(ort::value::Value::into_dyn)
         }
         TensorData::F16(values) => {
@@ -77,6 +81,13 @@ pub(crate) fn from_ort(spec: &TensorSpec, value: &DynValue) -> Result<Tensor> {
                 .map_err(|error| EngineError::Other(format!("extract {}: {error}", spec.name)))?;
             let shape = shape.iter().map(|dim| *dim as usize).collect();
             Tensor::new(spec.name.clone(), shape, TensorData::F32(slice.to_vec()))
+        }
+        TensorDtype::F64 => {
+            let (shape, slice) = value
+                .try_extract_tensor::<f64>()
+                .map_err(|error| EngineError::Other(format!("extract {}: {error}", spec.name)))?;
+            let shape = shape.iter().map(|dim| *dim as usize).collect();
+            Tensor::new(spec.name.clone(), shape, TensorData::F64(slice.to_vec()))
         }
         TensorDtype::F16 => {
             let (shape, slice) = value

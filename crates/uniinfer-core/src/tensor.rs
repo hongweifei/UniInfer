@@ -8,6 +8,7 @@ use crate::error::{EngineError, Result};
 #[serde(rename_all = "lowercase")]
 pub enum TensorDtype {
     F32,
+    F64,
     F16,
     I32,
     I64,
@@ -19,6 +20,7 @@ pub enum TensorDtype {
 #[derive(Debug, Clone, PartialEq)]
 pub enum TensorData {
     F32(Vec<f32>),
+    F64(Vec<f64>),
     F16(Vec<f16>),
     I32(Vec<i32>),
     I64(Vec<i64>),
@@ -31,6 +33,7 @@ impl TensorData {
     pub fn len(&self) -> usize {
         match self {
             Self::F32(values) => values.len(),
+            Self::F64(values) => values.len(),
             Self::F16(values) => values.len(),
             Self::I32(values) => values.len(),
             Self::I64(values) => values.len(),
@@ -48,6 +51,7 @@ impl TensorData {
     pub fn dtype(&self) -> TensorDtype {
         match self {
             Self::F32(_) => TensorDtype::F32,
+            Self::F64(_) => TensorDtype::F64,
             Self::F16(_) => TensorDtype::F16,
             Self::I32(_) => TensorDtype::I32,
             Self::I64(_) => TensorDtype::I64,
@@ -97,6 +101,15 @@ pub struct TensorSpec {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn f64_tensors_report_dtype_and_length() {
+        let data = TensorData::F64(vec![0.0, 1.0]);
+        assert_eq!(data.dtype(), TensorDtype::F64);
+        assert_eq!(data.len(), 2);
+        let tensor = Tensor::new("timestep", vec![2], data).expect("f64 tensor");
+        assert_eq!(tensor.shape, vec![2]);
+    }
 
     #[test]
     fn f16_tensors_report_dtype_and_length() {

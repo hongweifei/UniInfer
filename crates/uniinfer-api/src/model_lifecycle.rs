@@ -14,7 +14,9 @@ pub(crate) async fn load(
     let entry = state.catalog_entry(&id).ok_or_else(|| {
         ApiError::not_found("model_not_found", format!("model {id} is not configured"))
     })?;
-    if entry.audio_only {
+    if entry.image_only {
+        state.image_slot(&id).await?;
+    } else if entry.audio_only {
         state.audio_slot(&id).await?;
     } else {
         state.text_slot(&id).await?;

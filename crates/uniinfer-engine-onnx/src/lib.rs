@@ -177,6 +177,7 @@ impl OnnxEngine {
     /// Enumerate hardware devices visible to the configured execution providers.
     #[must_use]
     pub fn probe_devices(&self) -> Vec<Device> {
+        #[allow(unused_mut)]
         let mut devices: Vec<Device> = self
             .environment
             .devices()
@@ -503,6 +504,41 @@ pub(crate) fn build_session(
             })?,
         None => builder,
     };
+    #[cfg(feature = "ep-vitis")]
+    {
+        // Vitis AI needs its dynamic-dispatch cache and, for graphs with
+        // weights in a sidecar file, the external-data file name.
+        if let Some(parent) = path.parent()
+            && parent
+                .file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name.eq_ignore_ascii_case("dd"))
+        {
+            let cache = parent.join("cache");
+            if cache.is_dir() {
+                builder = builder
+                    .with_config_entry("dd_cache", cache.to_string_lossy())
+                    .map_err(|error| {
+                        EngineError::LoadFailed(format!("Vitis dd_cache option: {error}"))
+                    })?;
+            }
+            builder = builder
+                .with_config_entry("onnx_custom_ops_const_key", path.to_string_lossy())
+                .map_err(|error| {
+                    EngineError::LoadFailed(format!("Vitis const key option: {error}"))
+                })?;
+        }
+        let external = path.with_extension("onnx.data");
+        if external.is_file()
+            && let Some(name) = external.file_name().and_then(|name| name.to_str())
+        {
+            builder = builder
+                .with_config_entry("external_data_file", name)
+                .map_err(|error| {
+                    EngineError::LoadFailed(format!("Vitis external data option: {error}"))
+                })?;
+        }
+    }
     builder.commit_from_file(path).map_err(|error| {
         EngineError::LoadFailed(format!("cannot load {}: {error}", path.display()))
     })

@@ -21,6 +21,7 @@ use uniinfer_core::{
 #[derive(Debug, Serialize, Deserialize)]
 pub enum WireData {
     F32(Vec<f32>),
+    F64(Vec<f64>),
     F16(Vec<u16>),
     I32(Vec<i32>),
     I64(Vec<i64>),
@@ -107,6 +108,7 @@ impl WireTensor {
     pub fn from_tensor(tensor: Tensor) -> Self {
         let data = match tensor.data {
             TensorData::F32(values) => WireData::F32(values),
+            TensorData::F64(values) => WireData::F64(values),
             TensorData::F16(values) => {
                 WireData::F16(values.into_iter().map(|v| v.to_bits()).collect())
             }
@@ -125,6 +127,7 @@ impl WireTensor {
     pub fn into_tensor(self) -> Result<Tensor> {
         let data = match self.data {
             WireData::F32(values) => TensorData::F32(values),
+            WireData::F64(values) => TensorData::F64(values),
             WireData::F16(values) => {
                 TensorData::F16(values.into_iter().map(half::f16::from_bits).collect())
             }

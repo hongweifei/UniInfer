@@ -108,6 +108,8 @@ impl EngineSession for DiffusionSession {
                 vec![1],
                 if self.config.unet_timestep_dtype.eq_ignore_ascii_case("i64") {
                     TensorData::I64(vec![timesteps[step] as i64])
+                } else if self.config.unet_timestep_dtype.eq_ignore_ascii_case("f64") {
+                    TensorData::F64(vec![f64::from(timesteps[step])])
                 } else {
                     TensorData::F32(vec![timesteps[step]])
                 },

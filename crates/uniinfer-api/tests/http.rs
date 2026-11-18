@@ -976,3 +976,46 @@ async fn tool_choice_none_keeps_plain_text_response() {
     assert_eq!(body["choices"][0]["message"]["content"], "c");
     assert!(body["choices"][0]["message"].get("tool_calls").is_none());
 }
+
+#[tokio::test]
+async fn model_lifecycle_can_preload_image_model() {
+    let manifest =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../models/tiny-onnx/manifest-image.toml");
+    let app = routes::router(AppState::new(&ApiConfig::new(manifest)).expect("state"));
+    let request = |uri: &str| {
+        Request::builder()
+            .method("POST")
+            .uri(uri)
+            .body(Body::empty())
+            .expect("request")
+    };
+
+    let response = app
+        .clone()
+        .oneshot(request("/v1/models/tiny-image-onnx/load"))
+        .await
+        .expect("load");
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let body = body_json(
+        app.clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/v1/models")
+                    .body(Body::empty())
+                    .expect("request"),
+            )
+            .await
+            .expect("models"),
+    )
+    .await;
+    assert_eq!(body["data"][0]["loaded"], true);
+
+    let response = app
+        .oneshot(request("/v1/models/tiny-image-onnx/unload"))
+        .await
+        .expect("unload");
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = body_json(response).await;
+    assert_eq!(body["unloaded"], true);
+}
