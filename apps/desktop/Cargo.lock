@@ -6302,6 +6302,7 @@ dependencies = [
  "tauri-build",
  "tempfile",
  "tokio",
+ "toml 1.2.1+spec-1.1.0",
  "uniinfer-api",
  "uniinfer-backend-store",
  "uniinfer-config",
