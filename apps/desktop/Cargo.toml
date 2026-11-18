@@ -37,6 +37,7 @@ whisper = ["uniinfer-api/whisper"]
 onnx-dynamic = ["uniinfer-api/onnx-dynamic"]
 
 [target.'cfg(windows)'.dependencies]
+# DirectML is part of every Windows package; CUDA/TensorRT/OpenVINO are additive.
 uniinfer-api = { path = "../../crates/uniinfer-api", features = ["ep-directml"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]

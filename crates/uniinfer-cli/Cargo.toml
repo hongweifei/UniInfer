@@ -31,7 +31,6 @@ whisper = ["uniinfer-api/whisper"]
 onnx-dynamic = ["uniinfer-api/onnx-dynamic"]
 
 [dependencies]
-uniinfer-api.workspace = true
 uniinfer-config.workspace = true
 uniinfer-core.workspace = true
 uniinfer-model-inspect.workspace = true
@@ -48,3 +47,10 @@ path = "src/main.rs"
 
 [lints]
 workspace = true
+
+[target.'cfg(windows)'.dependencies]
+# DirectML is the baseline accelerator for every Windows distribution.
+uniinfer-api = { workspace = true, features = ["ep-directml"] }
+
+[target.'cfg(not(windows))'.dependencies]
+uniinfer-api.workspace = true
