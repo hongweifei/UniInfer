@@ -62,6 +62,9 @@ pub struct BackendEngine {
     pub modalities: Vec<String>,
     #[serde(default)]
     pub devices: Vec<DeviceClass>,
+    /// EP/device variants exposed by an in-process engine.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub variants: Vec<String>,
 }
 
 /// Uniform description used by the API and GUI for both backend kinds.

@@ -148,6 +148,7 @@ pub(crate) fn load(
             stage.device,
             &stage.bytes,
             &stage.name,
+            crate::backend_variant(spec),
         )?));
     }
     let residency = Residency {

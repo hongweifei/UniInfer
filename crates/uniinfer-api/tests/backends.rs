@@ -42,6 +42,7 @@ fn install_fake(store: &BackendStore, id: &str, version: &str) {
             formats: vec!["gguf".into()],
             modalities: vec!["text".into()],
             devices: vec![uniinfer_core::DeviceClass::Gpu],
+            variants: Vec::new(),
         }],
         files: Vec::new(),
     };

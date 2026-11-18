@@ -48,6 +48,7 @@ pub(crate) fn load(
                     device.unwrap_or(class),
                     &spec.base_dir.join(file),
                     &format!("onnx-pipeline-{name}"),
+                    crate::backend_variant(spec),
                 )?,
             })),
             PipelineStep::Merge { source, target, .. } => {

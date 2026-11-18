@@ -43,14 +43,32 @@ pub(crate) fn load(
     let config_file = super::options::path(&spec.base_dir, &options.config_file, "config_file")?;
     spec.manifest.verify_files(&spec.base_dir)?;
 
-    let encoder = Graph::load(environment, class, &encoder, "whisper encoder")?;
-    let decoder = Graph::load(environment, class, &decoder, "whisper decoder")?;
+    let encoder = Graph::load(
+        environment,
+        class,
+        &encoder,
+        "whisper encoder",
+        crate::backend_variant(spec),
+    )?;
+    let decoder = Graph::load(
+        environment,
+        class,
+        &decoder,
+        "whisper decoder",
+        crate::backend_variant(spec),
+    )?;
     let decoder_with_past = options
         .decoder_with_past_file
         .as_ref()
         .map(|file| {
             super::options::path(&spec.base_dir, file, "decoder_with_past_file").and_then(|path| {
-                Graph::load(environment, class, &path, "whisper decoder_with_past")
+                Graph::load(
+                    environment,
+                    class,
+                    &path,
+                    "whisper decoder_with_past",
+                    crate::backend_variant(spec),
+                )
             })
         })
         .transpose()?;

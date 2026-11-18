@@ -44,8 +44,9 @@ impl Graph {
         class: DeviceClass,
         path: &Path,
         label: &str,
+        variant: Option<&str>,
     ) -> Result<Self> {
-        let session = build_session(environment, class, path)?;
+        let session = build_session(environment, class, path, variant)?;
         Self::from_session(session, label)
     }
 
@@ -54,8 +55,9 @@ impl Graph {
         class: DeviceClass,
         bytes: &[u8],
         label: &str,
+        variant: Option<&str>,
     ) -> Result<Self> {
-        let session = crate::build_session_from_memory(environment, class, bytes)?;
+        let session = crate::build_session_from_memory(environment, class, bytes, variant)?;
         Self::from_session(session, label)
     }
 

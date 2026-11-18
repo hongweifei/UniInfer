@@ -618,8 +618,10 @@ mod tests {
 fn builtin_variant_class(variant: &str) -> Option<DeviceClass> {
     match variant.to_ascii_lowercase().as_str() {
         "cpu" => Some(DeviceClass::Cpu),
-        "gpu" | "cuda" | "directml" | "rocm" | "metal" | "vulkan" => Some(DeviceClass::Gpu),
-        "npu" | "qnn" | "vitis" | "openvino" => Some(DeviceClass::Npu),
+        "gpu" | "cuda" | "tensorrt" | "nvrtx" | "directml" | "rocm" | "migraphx" | "metal"
+        | "vulkan" | "webgpu" => Some(DeviceClass::Gpu),
+        "npu" | "qnn" | "vitis" | "vitis ai" | "cann" | "nnapi" => Some(DeviceClass::Npu),
+        "onednn" | "xnnpack" | "acl" => Some(DeviceClass::Cpu),
         _ => None,
     }
 }

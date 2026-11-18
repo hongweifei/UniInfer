@@ -50,7 +50,13 @@ pub(crate) fn load(
     };
     let tokenizer_file = options::path(&spec.base_dir, &options.tokenizer_file, "tokenizer_file")?;
     spec.manifest.verify_files(&spec.base_dir)?;
-    let graph = Graph::load(environment, class, &graph, "ctc")?;
+    let graph = Graph::load(
+        environment,
+        class,
+        &graph,
+        "ctc",
+        crate::backend_variant(spec),
+    )?;
     if !graph
         .inputs()
         .iter()

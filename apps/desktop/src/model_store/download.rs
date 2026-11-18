@@ -612,6 +612,7 @@ mod tests {
                 formats: vec!["gguf".into()],
                 modalities: vec!["text".into()],
                 devices: vec![uniinfer_core::DeviceClass::Gpu],
+            variants: Vec::new(),
             }],
             files: vec![uniinfer_backend_store::BackendFile {
                 path: "llama.zip".into(),

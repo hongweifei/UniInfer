@@ -19,9 +19,12 @@ export function backendChoices(backends = []) {
   for (const backend of backends) {
     if (backend.kind === 'builtin') {
       for (const engine of backend.engines ?? []) {
-        for (const device of engine.devices ?? []) {
-          const variant = String(device).toUpperCase();
-          if (variant && !builtin.variants.includes(variant)) builtin.variants.push(variant);
+        const variants = Array.isArray(engine.variants) && engine.variants.length
+          ? engine.variants
+          : (engine.devices ?? []).map((device) => String(device).toUpperCase());
+        for (const variant of variants) {
+          const label = String(variant).trim();
+          if (label && !builtin.variants.includes(label)) builtin.variants.push(label);
         }
       }
       continue;

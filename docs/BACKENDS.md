@@ -82,6 +82,7 @@ variant = "auto"
 - `id` 是后端族，对应桌面上按项目分组的 `name`，例如 `llama.cpp`、`stable-diffusion.cpp`；`builtin` 表示只使用内置引擎。
 - `variant` 是已安装变体，例如 `CPU`、`Vulkan`、`CUDA 12.4`、`ROCm 10.0`、`SYCL`；省略或 `auto` 时用设备后端名称与变体名称做通用匹配，优先匹配的加速变体，没有匹配时回退 CPU。
 - 没有 `[backend]` 时保持默认路由：内置引擎优先，模型按 `runtime` 和 `implementation` 匹配。
+- 内置 ONNX 引擎会把当前构建支持的 EP 作为变体暴露（CPU、CUDA、DirectML、OpenVINO、WebGPU 等）；保存的 `variant` 会按模型选择对应 EP，`auto` 使用进程级默认 provider 顺序。
 - 模型运行配置界面会读取已安装后端，按项目生成后端选项，并把设备推荐变体显示在“自动”选项上。
 - 变体支持不是白名单：桌面端同时用设备后端名称、GPU 厂商/型号和变体名称做通用匹配；CUDA 在检测到 AMD 时禁用，ROCm 在检测到 NVIDIA 时禁用，其他加速变体只要有 GPU/NPU 就允许下载。
 

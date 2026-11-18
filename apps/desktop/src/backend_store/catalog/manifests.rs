@@ -98,6 +98,7 @@ pub(super) fn catalog_from_variants(
                         .map(|value| (*value).to_owned())
                         .collect(),
                     devices: variant.devices,
+                    variants: Vec::new(),
                 }],
                 files,
             }

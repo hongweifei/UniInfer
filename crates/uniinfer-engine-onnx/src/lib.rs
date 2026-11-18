@@ -85,6 +85,7 @@ pub fn configure_dynamic_library(path: impl Into<PathBuf>) -> Result<()> {
 
 fn build_environment() -> std::result::Result<Environment, String> {
     #[allow(unused_mut)]
+    #[allow(unused_mut, unused_variables)]
     let mut providers: Vec<ort::ep::ExecutionProviderDispatch> = Vec::new();
     // NPU providers are registered first so ORT prefers them when available.
     #[cfg(feature = "ep-qnn")]
@@ -310,7 +311,12 @@ impl InferenceEngine for OnnxEngine {
 
         // Encoder-decoder ASR manifests carry their own graph files. Keep the
         // dispatch here so ONNX stays the first choice for every ONNX model.
-        let session = build_session(&self.environment, class, &model_path)?;
+        let session = build_session(
+            &self.environment,
+            class,
+            &model_path,
+            backend_variant(&spec),
+        )?;
         if spec.cancel.is_cancelled() {
             return Err(EngineError::Cancelled);
         }
@@ -351,21 +357,101 @@ impl InferenceEngine for OnnxEngine {
     }
 }
 
+pub(crate) fn backend_variant(spec: &EngineLoadSpec) -> Option<&str> {
+    spec.manifest
+        .backend
+        .as_ref()
+        .and_then(|backend| backend.variant.as_deref())
+        .map(str::trim)
+        .filter(|variant| !variant.is_empty())
+}
+
+fn selected_providers(
+    variant: Option<&str>,
+) -> Result<Option<Vec<ort::ep::ExecutionProviderDispatch>>> {
+    let Some(variant) = variant else {
+        return Ok(None);
+    };
+    let variant = variant.to_ascii_lowercase();
+    if matches!(variant.as_str(), "auto" | "builtin" | "gpu" | "npu") {
+        return Ok(None);
+    }
+    if variant == "cpu" {
+        return Ok(Some(Vec::new()));
+    }
+    #[allow(unused_mut, unused_variables)]
+    let mut providers: Vec<ort::ep::ExecutionProviderDispatch> = Vec::new();
+    macro_rules! select {
+        ($name:literal, $feature:literal, $provider:expr) => {
+            #[cfg(feature = $feature)]
+            if variant == $name {
+                providers.push($provider);
+                return Ok(Some(providers));
+            }
+        };
+    }
+    select!("cuda", "ep-cuda", ort::ep::CUDA::default().build());
+    select!(
+        "tensorrt",
+        "ep-tensorrt",
+        ort::ep::TensorRT::default().build()
+    );
+    select!(
+        "directml",
+        "ep-directml",
+        ort::ep::DirectML::default().build()
+    );
+    select!(
+        "openvino",
+        "ep-openvino",
+        ort::ep::OpenVINO::default().build()
+    );
+    select!("rocm", "ep-rocm", ort::ep::ROCm::default().build());
+    select!("coreml", "ep-coreml", ort::ep::CoreML::default().build());
+    select!("qnn", "ep-qnn", ort::ep::QNN::default().build());
+    select!("nnapi", "ep-nnapi", ort::ep::NNAPI::default().build());
+    select!("cann", "ep-cann", ort::ep::CANN::default().build());
+    select!("onednn", "ep-onednn", ort::ep::OneDNN::default().build());
+    select!("xnnpack", "ep-xnnpack", ort::ep::XNNPACK::default().build());
+    select!("acl", "ep-acl", ort::ep::ACL::default().build());
+    select!(
+        "migraphx",
+        "ep-migraphx",
+        ort::ep::MIGraphX::default().build()
+    );
+    select!("nvrtx", "ep-nvrtx", ort::ep::NVRTX::default().build());
+    select!("webgpu", "ep-webgpu", ort::ep::WebGPU::default().build());
+    select!("vitis", "ep-vitis", ort::ep::Vitis::default().build());
+    select!("vitis ai", "ep-vitis", ort::ep::Vitis::default().build());
+    Err(EngineError::UnsupportedEngine(format!(
+        "ONNX execution provider {variant:?} is not compiled into this build"
+    )))
+}
+
 pub(crate) fn build_session_from_memory(
     environment: &Environment,
     class: DeviceClass,
     bytes: &[u8],
+    variant: Option<&str>,
 ) -> Result<Session> {
     let builder = Session::builder(environment)
         .map_err(|error| EngineError::LoadFailed(format!("session builder: {error}")))?;
-    let mut builder = if class == DeviceClass::Cpu {
-        builder
+    let selected = selected_providers(variant)?;
+    let mut builder = match selected {
+        Some(providers) if providers.is_empty() => builder
             .with_no_environment_execution_providers()
             .map_err(|error| {
                 EngineError::LoadFailed(format!("cpu-only session options: {error}"))
-            })?
-    } else {
-        builder
+            })?,
+        Some(providers) => builder
+            .with_execution_providers(providers)
+            .map_err(|error| EngineError::LoadFailed(format!("execution providers: {error}")))?,
+        None if class == DeviceClass::Cpu => builder
+            .with_no_environment_execution_providers()
+            .map_err(|error| {
+                EngineError::LoadFailed(format!("cpu-only session options: {error}"))
+            })?,
+        None => builder,
     };
     builder
         .commit_from_memory(bytes)
@@ -376,19 +462,26 @@ pub(crate) fn build_session(
     environment: &Environment,
     class: DeviceClass,
     path: &Path,
+    variant: Option<&str>,
 ) -> Result<Session> {
     let builder = Session::builder(environment)
         .map_err(|error| EngineError::LoadFailed(format!("session builder: {error}")))?;
-    // Honor a CPU placement even when GPU EPs are registered in the
-    // process-wide ORT environment.
-    let mut builder = if class == DeviceClass::Cpu {
-        builder
+    let selected = selected_providers(variant)?;
+    let mut builder = match selected {
+        Some(providers) if providers.is_empty() => builder
             .with_no_environment_execution_providers()
             .map_err(|error| {
                 EngineError::LoadFailed(format!("cpu-only session options: {error}"))
-            })?
-    } else {
-        builder
+            })?,
+        Some(providers) => builder
+            .with_execution_providers(providers)
+            .map_err(|error| EngineError::LoadFailed(format!("execution providers: {error}")))?,
+        None if class == DeviceClass::Cpu => builder
+            .with_no_environment_execution_providers()
+            .map_err(|error| {
+                EngineError::LoadFailed(format!("cpu-only session options: {error}"))
+            })?,
+        None => builder,
     };
     builder.commit_from_file(path).map_err(|error| {
         EngineError::LoadFailed(format!("cannot load {}: {error}", path.display()))

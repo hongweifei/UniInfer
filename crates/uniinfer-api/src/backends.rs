@@ -105,8 +105,65 @@ fn builtin_info(descriptor: EngineDescriptor) -> BackendInfo {
             .map(|modality| format!("{modality:?}").to_ascii_lowercase())
             .collect(),
         devices: descriptor.devices,
+        variants: builtin_variants(&descriptor.name),
     };
     BackendInfo::builtin(env!("CARGO_PKG_VERSION"), engine)
+}
+
+fn builtin_variants(name: &str) -> Vec<String> {
+    if name != "onnx" {
+        return Vec::new();
+    }
+    let mut variants = vec!["CPU".to_owned()];
+    if cfg!(feature = "ep-cuda") {
+        variants.push("CUDA".into());
+    }
+    if cfg!(feature = "ep-tensorrt") {
+        variants.push("TensorRT".into());
+    }
+    if cfg!(feature = "ep-directml") {
+        variants.push("DirectML".into());
+    }
+    if cfg!(feature = "ep-openvino") {
+        variants.push("OpenVINO".into());
+    }
+    if cfg!(feature = "ep-rocm") {
+        variants.push("ROCm".into());
+    }
+    if cfg!(feature = "ep-coreml") {
+        variants.push("CoreML".into());
+    }
+    if cfg!(feature = "ep-qnn") {
+        variants.push("QNN".into());
+    }
+    if cfg!(feature = "ep-nnapi") {
+        variants.push("NNAPI".into());
+    }
+    if cfg!(feature = "ep-vitis") {
+        variants.push("Vitis AI".into());
+    }
+    if cfg!(feature = "ep-cann") {
+        variants.push("CANN".into());
+    }
+    if cfg!(feature = "ep-onednn") {
+        variants.push("OneDNN".into());
+    }
+    if cfg!(feature = "ep-xnnpack") {
+        variants.push("XNNPACK".into());
+    }
+    if cfg!(feature = "ep-acl") {
+        variants.push("ACL".into());
+    }
+    if cfg!(feature = "ep-migraphx") {
+        variants.push("MIGraphX".into());
+    }
+    if cfg!(feature = "ep-nvrtx") {
+        variants.push("NVRTX".into());
+    }
+    if cfg!(feature = "ep-webgpu") {
+        variants.push("WebGPU".into());
+    }
+    variants
 }
 
 fn engine_category(name: &str) -> &'static str {
