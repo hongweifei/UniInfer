@@ -7,6 +7,11 @@ mod variants;
 
 pub(super) const GITHUB_MIRROR: &str = "https://gh-proxy.com/";
 
+/// Optional catalog for project-built EP worker packages. The asset is
+/// published alongside a UniInfer release; absent assets are ignored.
+const EXTRA_CATALOG_URL: &str =
+    "https://github.com/hongweifei/UniInfer/releases/latest/download/ep-catalog.json";
+
 #[derive(serde::Deserialize)]
 pub(super) struct GithubRelease {
     pub(super) tag_name: String,
@@ -44,6 +49,10 @@ pub(super) async fn fetch() -> Result<BackendCatalog, String> {
             Err(error) => errors.push(format!("{}: {error}", provider.name)),
         }
     }
+    match extra_catalog(&client).await {
+        Ok(extra) => catalog.backends.extend(extra),
+        Err(error) => errors.push(format!("EP worker catalog: {error}")),
+    }
     if catalog.backends.is_empty() {
         return Err(format!(
             "官方 release 没有可用的 Windows 推理引擎：{}",
@@ -55,6 +64,40 @@ pub(super) async fn fetch() -> Result<BackendCatalog, String> {
         validate_manifest(package).map_err(|error| error.to_string())?;
     }
     Ok(catalog)
+}
+
+async fn extra_catalog(
+    client: &reqwest::Client,
+) -> Result<Vec<uniinfer_backend_store::BackendManifest>, String> {
+    let mut last_error = String::new();
+    for url in [
+        EXTRA_CATALOG_URL.to_owned(),
+        format!("{GITHUB_MIRROR}{EXTRA_CATALOG_URL}"),
+    ] {
+        let response = match client.get(&url).send().await {
+            Ok(response) => response,
+            Err(error) => {
+                last_error = error.to_string();
+                continue;
+            }
+        };
+        if response.status() == reqwest::StatusCode::NOT_FOUND {
+            return Ok(Vec::new());
+        }
+        if !response.status().is_success() {
+            last_error = format!("HTTP {}", response.status());
+            continue;
+        }
+        let catalog = response
+            .json::<BackendCatalog>()
+            .await
+            .map_err(|error| format!("解析 EP worker catalog: {error}"))?;
+        for package in &catalog.backends {
+            validate_manifest(package).map_err(|error| error.to_string())?;
+        }
+        return Ok(catalog.backends);
+    }
+    Err(last_error)
 }
 
 #[cfg(test)]

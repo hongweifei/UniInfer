@@ -53,3 +53,52 @@ cargo build -p uniinfer-worker --release --features ep-xnnpack,onnx-dynamic
 本地导入要求 zip 根目录包含 `backend.toml`，并且清单中的 `worker` 文件存在。导入后会走普通 sidecar 注册流程，模型配置可以直接选择。
 
 在线附加 EP 需要发布者把 worker 包托管到可下载地址，并提供后端目录索引；当前官方目录只包含 llama/sd/whisper/ONNX Runtime 的官方 release。
+
+## 在线目录
+
+桌面端会额外读取：
+
+```text
+https://github.com/hongweifei/UniInfer/releases/latest/download/ep-catalog.json
+```
+
+该 release asset 是可选的；没有该文件时只显示官方引擎目录。
+
+格式：
+
+```json
+{
+  "backends": [
+    {
+      "id": "uniinfer-xnnpack-win-x64",
+      "name": "XNNPACK Worker",
+      "version": "1.0.0",
+      "platform": "windows-x86_64",
+      "worker": "uniinfer-worker.exe",
+      "launcher": "worker",
+      "engines": [
+        {
+          "id": "uniinfer-xnnpack-win-x64",
+          "name": "XNNPACK Worker",
+          "runtime": "onnx",
+          "category": "language",
+          "variant": "XNNPACK",
+          "implementations": ["onnx.graph"],
+          "formats": ["onnx"],
+          "modalities": ["text"],
+          "devices": ["cpu"]
+        }
+      ],
+      "files": [
+        {
+          "path": "uniinfer-xnnpack-worker.zip",
+          "url": "https://github.com/.../uniinfer-xnnpack-worker.zip",
+          "sha256": "..."
+        }
+      ]
+    }
+  ]
+}
+```
+
+发布该 asset 后，后端页会像官方后端一样显示可下载项；用户也可以继续通过“导入后端包”安装手工获取的 zip。
