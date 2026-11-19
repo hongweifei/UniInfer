@@ -285,14 +285,18 @@ fn encode_image(image: Tensor) -> Result<ModelOutput> {
             image.shape
         )));
     }
+    // SD-family VAEs return [-1, 1]; other image models commonly return
+    // [0, 1]. Detect the range instead of assuming one convention, otherwise
+    // a perfectly valid VAE output is clipped to near-black.
+    let rescale = values.iter().any(|value| *value < -0.001);
     let mut rgb = RgbImage::new(width as u32, height as u32);
     for y in 0..height {
         for x in 0..width {
             let index = y * width + x;
             let pixel = [
-                to_byte(values[index]),
-                to_byte(values[height * width + index]),
-                to_byte(values[2 * height * width + index]),
+                to_byte(values[index], rescale),
+                to_byte(values[height * width + index], rescale),
+                to_byte(values[2 * height * width + index], rescale),
             ];
             rgb.put_pixel(x as u32, y as u32, image::Rgb(pixel));
         }
@@ -308,7 +312,8 @@ fn encode_image(image: Tensor) -> Result<ModelOutput> {
     }))
 }
 
-fn to_byte(value: f32) -> u8 {
+fn to_byte(value: f32, rescale: bool) -> u8 {
+    let value = if rescale { value * 0.5 + 0.5 } else { value };
     (value.clamp(0.0, 1.0) * 255.0).round() as u8
 }
 
