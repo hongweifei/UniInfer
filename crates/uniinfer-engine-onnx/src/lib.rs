@@ -14,8 +14,10 @@ use uniinfer_core::{
     ModelFormat, Quantization, Result, Runtime,
 };
 
+mod adapter;
 mod asr;
 mod genai;
+mod generic;
 mod graph;
 mod image;
 mod io;
@@ -23,10 +25,6 @@ mod layered;
 mod partition;
 mod pipeline;
 mod session;
-
-use genai::{GenaiSpec, load_genai_config};
-use graph::Graph;
-use session::{GenaiOnnxSession, PlainOnnxSession};
 
 const FORMATS: &[ModelFormat] = &[ModelFormat::Onnx];
 static DEVICES: LazyLock<Vec<DeviceClass>> = LazyLock::new(|| {
@@ -313,68 +311,7 @@ impl InferenceEngine for OnnxEngine {
             .ok_or_else(|| EngineError::PlacementUnsatisfiable("empty placement".into()))?;
         spec.manifest.verify_files(&spec.base_dir)?;
 
-        if spec.manifest.implementation == "onnx.pipeline" {
-            return pipeline::load(&self.environment, &spec, class);
-        }
-        if spec.manifest.implementation == "onnx.diffusion" {
-            return image::load(&self.environment, &spec, class);
-        }
-        if spec.manifest.implementation == "onnx.layered" {
-            return layered::load(&self.environment, &spec, class);
-        }
-
-        let model_file = spec
-            .manifest
-            .files
-            .first()
-            .ok_or_else(|| EngineError::ManifestInvalid("files is empty".into()))?;
-        let model_path = spec.base_dir.join(&model_file.path);
-
-        // Encoder-decoder ASR manifests carry their own graph files. Keep the
-        // dispatch here so ONNX stays the first choice for every ONNX model.
-        let session = build_session(
-            &self.environment,
-            class,
-            &model_path,
-            backend_variant(&spec),
-        )?;
-        if spec.cancel.is_cancelled() {
-            return Err(EngineError::Cancelled);
-        }
-
-        let genai_config = load_genai_config(&spec.base_dir)?;
-        if let Some(config) = genai_config {
-            let graph = Graph::from_session(session, "onnx genai")?;
-            let genai = GenaiSpec::from_config(&config, &graph)?;
-            let inputs = genai.input_specs(&graph)?;
-            let outputs = genai.output_specs(&graph)?;
-            tracing::debug!(
-                model = %spec.manifest.id,
-                path = %model_path.display(),
-                inputs = inputs.len(),
-                outputs = outputs.len(),
-                genai = true,
-                "onnx genai session loaded"
-            );
-            if spec.cancel.is_cancelled() {
-                return Err(EngineError::Cancelled);
-            }
-            return Ok(Box::new(GenaiOnnxSession::new(graph, genai)?));
-        }
-
-        let graph = Graph::from_session(session, "onnx")?;
-        tracing::debug!(
-            model = %spec.manifest.id,
-            path = %model_path.display(),
-            inputs = graph.inputs().len(),
-            outputs = graph.outputs().len(),
-            genai = false,
-            "onnx session loaded"
-        );
-        if spec.cancel.is_cancelled() {
-            return Err(EngineError::Cancelled);
-        }
-        Ok(Box::new(PlainOnnxSession::new(graph)))
+        adapter::load(&self.environment, &spec, class)
     }
 }
 
