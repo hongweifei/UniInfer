@@ -63,6 +63,29 @@ impl HuggingFaceTokenizer {
             .map_err(|error| EngineError::ManifestInvalid(format!("tokenizer file: {error}")))?;
         Ok(Self { inner })
     }
+
+    /// Build a CLIP-style BPE tokenizer from the vocab/merges files that some
+    /// diffusion repositories ship instead of a `tokenizer.json`.
+    pub fn from_vocab_merges(
+        vocab_path: impl AsRef<std::path::Path>,
+        merges_path: impl AsRef<std::path::Path>,
+    ) -> Result<Self> {
+        use tokenizers::decoders::byte_level::ByteLevel as ByteLevelDecoder;
+        use tokenizers::models::bpe::BPE;
+        use tokenizers::pre_tokenizers::byte_level::ByteLevel;
+
+        let model = BPE::builder()
+            .files(
+                vocab_path.as_ref().to_string_lossy().into_owned(),
+                merges_path.as_ref().to_string_lossy().into_owned(),
+            )
+            .build()
+            .map_err(|error| EngineError::ManifestInvalid(format!("tokenizer bpe: {error}")))?;
+        let mut inner = tokenizers::Tokenizer::new(model);
+        inner.with_pre_tokenizer(Some(ByteLevel::default()));
+        inner.with_decoder(Some(ByteLevelDecoder::default()));
+        Ok(Self { inner })
+    }
 }
 
 impl Tokenizer for HuggingFaceTokenizer {

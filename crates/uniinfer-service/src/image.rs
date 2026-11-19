@@ -41,6 +41,23 @@ impl ModelView for ImageSlot {
     }
 }
 
+fn clip_tokenizer(base_dir: &std::path::Path) -> Result<Arc<dyn Tokenizer>> {
+    let json = base_dir.join("tokenizer").join("tokenizer.json");
+    if json.is_file() {
+        return Ok(Arc::new(HuggingFaceTokenizer::from_file(json)?));
+    }
+    let vocab = base_dir.join("tokenizer").join("vocab.json");
+    let merges = base_dir.join("tokenizer").join("merges.txt");
+    if vocab.is_file() && merges.is_file() {
+        return Ok(Arc::new(HuggingFaceTokenizer::from_vocab_merges(
+            vocab, merges,
+        )?));
+    }
+    Err(EngineError::ManifestInvalid(
+        "image model requires tokenizer/tokenizer.json or tokenizer/vocab.json + merges.txt".into(),
+    ))
+}
+
 impl ImageSlot {
     pub(crate) fn new(lease: Arc<SessionLease>, base_dir: &std::path::Path) -> Result<Self> {
         let manifest = lease.manifest();
@@ -54,20 +71,29 @@ impl ImageSlot {
         let tokenizer = if native_image {
             None
         } else {
-            let text = manifest.text.as_ref().ok_or_else(|| {
-                EngineError::ManifestInvalid("image model requires [text]".into())
-            })?;
-            Some(match manifest.tokenizer.as_deref().unwrap_or_default() {
-                "bytes" => Arc::new(ByteTokenizer::new(text.vocab_size)?) as Arc<dyn Tokenizer>,
-                "hf" => {
-                    let file = text.tokenizer_file.as_ref().ok_or_else(|| {
-                        EngineError::ManifestInvalid(
-                            "text.tokenizer_file is required for hf".into(),
-                        )
+            let text = manifest.text.as_ref();
+            let configured = manifest.tokenizer.as_deref().unwrap_or_default();
+            Some(match configured {
+                "bytes" => {
+                    let text = text.ok_or_else(|| {
+                        EngineError::ManifestInvalid("image model requires [text]".into())
                     })?;
-                    Arc::new(HuggingFaceTokenizer::from_file(base_dir.join(file))?)
-                        as Arc<dyn Tokenizer>
+                    Arc::new(ByteTokenizer::new(text.vocab_size)?) as Arc<dyn Tokenizer>
                 }
+                "hf" => {
+                    let file = text.and_then(|text| text.tokenizer_file.as_ref());
+                    if let Some(file) = file {
+                        Arc::new(HuggingFaceTokenizer::from_file(base_dir.join(file))?)
+                            as Arc<dyn Tokenizer>
+                    } else if diffusion.is_some() {
+                        clip_tokenizer(base_dir)?
+                    } else {
+                        return Err(EngineError::ManifestInvalid(
+                            "text.tokenizer_file is required for hf".into(),
+                        ));
+                    }
+                }
+                "" if diffusion.is_some() => clip_tokenizer(base_dir)?,
                 other => {
                     return Err(EngineError::UnsupportedEngine(format!(
                         "tokenizer {other:?}"
