@@ -107,6 +107,8 @@ fn main() {
             model_store::download::start_download,
             model_store::download::start_backend_download,
             model_store::download::list_downloads,
+            model_store::download::pause_download,
+            model_store::download::resume_download,
             model_store::download::cancel_download,
             model_store::download::remove_download,
             model_store::download::clear_downloads,

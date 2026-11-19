@@ -8,7 +8,7 @@ use uniinfer_model_inspect::{InspectOptions, inspect};
 
 use super::super::plan::{build_variants, choose_variant};
 use super::super::repo::fetch_repo_files;
-use super::super::{StagingCleanup, commit_install, models_root, temp_model_path};
+use super::super::{commit_install, models_root};
 use super::fetch::{InstallError, check_cancelled, download_file, safe_join};
 use super::{DownloadManager, DownloadStatus, DownloadTask, emit_task, set_status};
 
@@ -27,11 +27,14 @@ pub(super) async fn install_model(
         choose_variant(&variants, task.variant.as_deref()).map_err(InstallError::Message)?;
     let total = chosen.files.iter().map(|file| file.size).sum::<u64>();
     let target = models_root().join(&task.model_id);
-    let staging = temp_model_path(&models_root(), &task.model_id, "installing");
+    let staging = task
+        .staging
+        .as_deref()
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| models_root().join(format!(".{}.installing", task.model_id)));
     tokio::fs::create_dir_all(&staging)
         .await
         .map_err(|error| InstallError::Message(format!("create {}: {error}", staging.display())))?;
-    let _cleanup = StagingCleanup(staging.clone());
     if let Some(task) = manager.update(&task.id, |task| {
         task.variant_label = Some(chosen.label.clone());
         task.total = total;

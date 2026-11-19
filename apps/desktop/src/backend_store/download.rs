@@ -4,7 +4,8 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use futures_util::StreamExt;
-use reqwest::header::ACCEPT_ENCODING;
+use reqwest::header::{ACCEPT_ENCODING, RANGE};
+use tokio::io::AsyncReadExt;
 use sha2::{Digest, Sha256};
 use uniinfer_backend_store::{BackendFile, BackendManifest, BackendStore};
 
@@ -120,36 +121,71 @@ where
     P: FnMut(u64),
     C: Fn() -> bool,
 {
-    let response = client
+    let tmp = destination.with_extension("part");
+    let mut current = match tokio::fs::metadata(&tmp).await {
+        Ok(metadata) => metadata.len(),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => 0,
+        Err(error) => return Err(format!("读取 {} 失败：{error}", tmp.display())),
+    };
+    if file.size > 0 && current > file.size {
+        let _ = tokio::fs::remove_file(&tmp).await;
+        current = 0;
+    }
+    let mut request = client
         .get(&file.url)
         .header(ACCEPT_ENCODING, "identity")
-        .timeout(DOWNLOAD_TIMEOUT)
+        .timeout(DOWNLOAD_TIMEOUT);
+    if current > 0 {
+        request = request.header(RANGE, format!("bytes={current}-"));
+    }
+    let response = request
         .send()
         .await
         .map_err(|error| format!("下载 {} 失败：{error}", file.path))?;
-    if !response.status().is_success() {
-        return Err(format!(
-            "下载 {} 失败：HTTP {}",
-            file.path,
-            response.status()
-        ));
+    let status = response.status();
+    let resumed = current > 0 && status == reqwest::StatusCode::PARTIAL_CONTENT;
+    if !resumed && !status.is_success() {
+        return Err(format!("下载 {} 失败：HTTP {}", file.path, status));
     }
-    let tmp = destination.with_extension("part");
-    let mut output = tokio::fs::File::create(&tmp)
-        .await
-        .map_err(|error| format!("创建 {} 失败：{error}", tmp.display()))?;
-    let mut hasher = Sha256::new();
-    let mut total = 0_u64;
+    if !resumed {
+        current = 0;
+    }
+    let mut output = if resumed {
+        tokio::fs::OpenOptions::new()
+            .append(true)
+            .open(&tmp)
+            .await
+            .map_err(|error| format!("打开 {} 失败：{error}", tmp.display()))?
+    } else {
+        tokio::fs::File::create(&tmp)
+            .await
+            .map_err(|error| format!("创建 {} 失败：{error}", tmp.display()))?
+    };
+    let mut hasher = if file
+        .sha256
+        .as_deref()
+        .is_some_and(|value| !value.is_empty())
+    {
+        Some(if resumed {
+            hash_file(&tmp).await?
+        } else {
+            Sha256::new()
+        })
+    } else {
+        None
+    };
+    let mut total = current;
     let mut last_progress = Instant::now();
     let mut stream = response.bytes_stream();
     while let Some(chunk) = stream.next().await {
         if cancel() {
-            let _ = tokio::fs::remove_file(&tmp).await;
             return Err(CANCELLED.into());
         }
         let chunk = chunk.map_err(|error| format!("下载 {} 中断：{error}", file.path))?;
         total = total.saturating_add(u64::try_from(chunk.len()).unwrap_or(u64::MAX));
-        hasher.update(&chunk);
+        if let Some(hasher) = &mut hasher {
+            hasher.update(&chunk);
+        }
         tokio::io::AsyncWriteExt::write_all(&mut output, &chunk)
             .await
             .map_err(|error| format!("写入 {} 失败：{error}", tmp.display()))?;
@@ -170,7 +206,7 @@ where
         ));
     }
     if let Some(expected) = file.sha256.as_deref().filter(|value| !value.is_empty()) {
-        let actual = hex::encode(hasher.finalize());
+        let actual = hex::encode(hasher.take().unwrap_or_default().finalize());
         if !actual.eq_ignore_ascii_case(expected) {
             let _ = tokio::fs::remove_file(&tmp).await;
             return Err(format!(
@@ -184,4 +220,23 @@ where
         .map_err(|error| format!("安装 {} 失败：{error}", destination.display()))?;
     progress(total);
     Ok(total)
+}
+
+async fn hash_file(path: &Path) -> Result<Sha256, String> {
+    let mut file = tokio::fs::File::open(path)
+        .await
+        .map_err(|error| format!("打开 {} 失败：{error}", path.display()))?;
+    let mut hasher = Sha256::new();
+    let mut buffer = vec![0u8; 1024 * 1024];
+    loop {
+        let read = file
+            .read(&mut buffer)
+            .await
+            .map_err(|error| format!("读取 {} 失败：{error}", path.display()))?;
+        if read == 0 {
+            break;
+        }
+        hasher.update(&buffer[..read]);
+    }
+    Ok(hasher)
 }

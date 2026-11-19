@@ -267,7 +267,7 @@ pub(super) fn safe_join(root: &Path, relative: &str) -> Result<PathBuf, InstallE
 }
 
 pub(super) fn check_cancelled(manager: &DownloadManager, id: &str) -> Result<(), InstallError> {
-    if manager.is_cancelled(id) {
+    if manager.is_cancelled(id) || manager.is_paused(id) {
         Err(InstallError::Cancelled)
     } else {
         Ok(())

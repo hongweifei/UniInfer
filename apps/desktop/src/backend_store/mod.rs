@@ -99,11 +99,10 @@ where
     let staging = staging_dir(&store, &package.id, &package.version);
     let result = download_package(&store, &mut package, &staging, &mut progress, &cancel).await;
     if let Err(error) = result {
-        let _ = std::fs::remove_dir_all(&staging);
+        // Keep the staging directory so an interrupted package can be resumed.
         return Err(error);
     }
     if cancel() {
-        let _ = std::fs::remove_dir_all(&staging);
         return Err(download::CANCELLED.into());
     }
     progress(
@@ -152,12 +151,9 @@ fn finalize_package(
 }
 
 fn staging_dir(store: &BackendStore, id: &str, version: &str) -> PathBuf {
-    let nanos = SystemTime::now()
-        .duration_since(SystemTime::UNIX_EPOCH)
-        .map_or(0, |duration| duration.as_nanos());
-    store
-        .root()
-        .join(format!(".staging-{id}-{version}-{nanos}"))
+    // Keep one staging directory per package version so interrupted downloads
+    // can resume instead of starting from a new directory.
+    store.root().join(format!(".staging-{id}-{version}"))
 }
 
 fn backend_dir() -> PathBuf {

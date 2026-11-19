@@ -50,6 +50,18 @@ export async function startBackendDownload(packageInfo) {
   return task;
 }
 
+export async function pauseDownload(id) {
+  const task = await invoke('pause_download', { id });
+  upsertTask(task);
+  return task;
+}
+
+export async function resumeDownload(id) {
+  const task = await invoke('resume_download', { id });
+  upsertTask(task);
+  return task;
+}
+
 export async function cancelDownload(id) {
   const task = await invoke('cancel_download', { id });
   upsertTask(task);

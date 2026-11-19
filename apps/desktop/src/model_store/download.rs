@@ -5,7 +5,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter};
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use uniinfer_backend_store::BackendManifest;
@@ -21,7 +21,7 @@ use fetch::InstallError;
 
 const PARALLEL_DOWNLOADS: usize = 1;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum DownloadStatus {
     Queued,
@@ -30,6 +30,7 @@ pub(crate) enum DownloadStatus {
     Verifying,
     Inspecting,
     Committing,
+    Paused,
     Done,
     Failed,
     Cancelled,
@@ -41,14 +42,14 @@ impl DownloadStatus {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum DownloadKind {
     Model,
     Backend,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub(crate) struct DownloadTask {
     pub(crate) id: String,
     pub(crate) kind: DownloadKind,
@@ -65,13 +66,21 @@ pub(crate) struct DownloadTask {
     pub(crate) total: u64,
     pub(crate) message: Option<String>,
     pub(crate) path: Option<String>,
+    #[serde(default)]
+    pub(crate) staging: Option<String>,
     pub(crate) created_at: u64,
     pub(crate) updated_at: u64,
 }
 
+#[derive(Default)]
+struct DownloadControl {
+    cancelled: AtomicBool,
+    paused: AtomicBool,
+}
+
 struct ManagerState {
     tasks: Vec<DownloadTask>,
-    controls: HashMap<String, Arc<AtomicBool>>,
+    controls: HashMap<String, Arc<DownloadControl>>,
 }
 
 #[derive(Clone)]
@@ -82,12 +91,28 @@ pub(crate) struct DownloadManager {
 
 impl DownloadManager {
     pub(crate) fn new() -> Self {
-        cleanup_stale_staging();
+        let mut tasks = load_tasks();
+        for task in &mut tasks {
+            if !task.status.terminal() && task.status != DownloadStatus::Paused {
+                task.status = DownloadStatus::Paused;
+                task.message = Some("任务被中断，可继续下载".into());
+            }
+            if task.staging.is_none() && task.kind == DownloadKind::Model {
+                task.staging = Some(stable_model_staging(&task.model_id));
+            }
+        }
+        let referenced = tasks
+            .iter()
+            .filter_map(|task| task.staging.clone())
+            .collect::<Vec<_>>();
+        cleanup_stale_staging(&referenced);
+        let mut controls = HashMap::new();
+        for task in &tasks {
+            controls.insert(task.id.clone(), Arc::new(DownloadControl::default()));
+        }
+        save_tasks(&tasks);
         Self {
-            inner: Arc::new(Mutex::new(ManagerState {
-                tasks: Vec::new(),
-                controls: HashMap::new(),
-            })),
+            inner: Arc::new(Mutex::new(ManagerState { tasks, controls })),
             slots: Arc::new(Semaphore::new(PARALLEL_DOWNLOADS)),
         }
     }
@@ -111,6 +136,7 @@ impl DownloadManager {
             return Err("这个模型已经在下载队列中".into());
         }
         let now = now_ms();
+        let staging = Some(stable_model_staging(&model_id));
         let task = DownloadTask {
             id: next_task_id(),
             kind: DownloadKind::Model,
@@ -126,13 +152,15 @@ impl DownloadManager {
             total: 0,
             message: Some("等待下载".into()),
             path: None,
+            staging,
             created_at: now,
             updated_at: now,
         };
         inner
             .controls
-            .insert(task.id.clone(), Arc::new(AtomicBool::new(false)));
+            .insert(task.id.clone(), Arc::new(DownloadControl::default()));
         inner.tasks.push(task.clone());
+        save_tasks(&inner.tasks);
         Ok(task)
     }
 
@@ -169,13 +197,15 @@ impl DownloadManager {
             total,
             message: Some("等待下载".into()),
             path: None,
+            staging: None,
             created_at: now,
             updated_at: now,
         };
         inner
             .controls
-            .insert(task.id.clone(), Arc::new(AtomicBool::new(false)));
+            .insert(task.id.clone(), Arc::new(DownloadControl::default()));
         inner.tasks.push(task.clone());
+        save_tasks(&inner.tasks);
         Ok(task)
     }
 
@@ -201,22 +231,88 @@ impl DownloadManager {
         F: FnOnce(&mut DownloadTask),
     {
         let mut inner = self.inner.lock().ok()?;
-        let cancelled = inner
-            .controls
-            .get(id)
-            .is_some_and(|flag| flag.load(Ordering::Relaxed));
+        let cancelled = inner.controls.get(id).is_some_and(|control| {
+            control.cancelled.load(Ordering::Relaxed)
+                || control.paused.load(Ordering::Relaxed)
+        });
         let task = inner.tasks.iter_mut().find(|task| task.id == id)?;
         if task.status.terminal() || cancelled {
             return Some(task.clone());
         }
+        let previous = task.status;
         update(task);
         task.updated_at = now_ms();
-        Some(task.clone())
+        let task = task.clone();
+        if previous != task.status {
+            save_tasks(&inner.tasks);
+        }
+        Some(task)
+    }
+
+    fn control(&self, id: &str) -> Option<Arc<DownloadControl>> {
+        self.inner.lock().ok()?.controls.get(id).cloned()
+    }
+
+    fn is_paused(&self, id: &str) -> bool {
+        self.control(id)
+            .is_some_and(|control| control.paused.load(Ordering::Relaxed))
+    }
+
+    fn pause(&self, id: &str) -> Result<DownloadTask, String> {
+        let mut inner = self.inner.lock().map_err(|_| "下载状态锁已损坏")?;
+        let control = inner.controls.get(id).cloned();
+        let task = inner
+            .tasks
+            .iter_mut()
+            .find(|task| task.id == id)
+            .ok_or_else(|| "下载任务不存在".to_string())?;
+        if task.status.terminal() || task.status == DownloadStatus::Paused {
+            return Err("下载任务已经结束或已暂停".into());
+        }
+        if let Some(control) = control {
+            control.paused.store(true, Ordering::Relaxed);
+        }
+        task.status = DownloadStatus::Paused;
+        task.message = Some("已暂停，已下载内容会保留".into());
+        task.updated_at = now_ms();
+        let task = task.clone();
+        save_tasks(&inner.tasks);
+        Ok(task)
+    }
+
+    fn resume(&self, id: &str) -> Result<DownloadTask, String> {
+        let mut inner = self.inner.lock().map_err(|_| "下载状态锁已损坏")?;
+        inner
+            .controls
+            .entry(id.to_string())
+            .or_insert_with(|| Arc::new(DownloadControl::default()));
+        let control = inner.controls.get(id).cloned();
+        let task = inner
+            .tasks
+            .iter_mut()
+            .find(|task| task.id == id)
+            .ok_or_else(|| "下载任务不存在".to_string())?;
+        if !matches!(
+            task.status,
+            DownloadStatus::Paused | DownloadStatus::Failed | DownloadStatus::Cancelled
+        ) {
+            return Err("只有暂停、失败或取消的任务可以继续".into());
+        }
+        if let Some(control) = control {
+            control.paused.store(false, Ordering::Relaxed);
+            control.cancelled.store(false, Ordering::Relaxed);
+        }
+        task.status = DownloadStatus::Queued;
+        task.message = Some("等待继续下载".into());
+        task.updated_at = now_ms();
+        let task = task.clone();
+        save_tasks(&inner.tasks);
+        Ok(task)
     }
 
     fn cancel(&self, id: &str) -> Result<DownloadTask, String> {
         let mut inner = self.inner.lock().map_err(|_| "下载状态锁已损坏")?;
-        let cancelled = inner.controls.get(id).cloned();
+        let control = inner.controls.get(id).cloned();
         let task = inner
             .tasks
             .iter_mut()
@@ -225,13 +321,28 @@ impl DownloadManager {
         if task.status.terminal() {
             return Err("下载任务已经结束".into());
         }
-        if let Some(flag) = cancelled {
-            flag.store(true, Ordering::Relaxed);
+        if let Some(control) = control {
+            control.cancelled.store(true, Ordering::Relaxed);
         }
         task.status = DownloadStatus::Cancelled;
         task.message = Some("已取消".into());
         task.updated_at = now_ms();
-        Ok(task.clone())
+        let task = task.clone();
+        save_tasks(&inner.tasks);
+        Ok(task)
+    }
+
+    fn mark_paused(&self, id: &str) -> Option<DownloadTask> {
+        let mut inner = self.inner.lock().ok()?;
+        let task = inner.tasks.iter_mut().find(|task| task.id == id)?;
+        if !task.status.terminal() {
+            task.status = DownloadStatus::Paused;
+            task.message = Some("已暂停，已下载内容会保留".into());
+            task.updated_at = now_ms();
+        }
+        let task = task.clone();
+        save_tasks(&inner.tasks);
+        Some(task)
     }
 
     fn mark_cancelled(&self, id: &str) -> Option<DownloadTask> {
@@ -242,7 +353,9 @@ impl DownloadManager {
             task.message = Some("已取消".into());
             task.updated_at = now_ms();
         }
-        Some(task.clone())
+        let task = task.clone();
+        save_tasks(&inner.tasks);
+        Some(task)
     }
 
     fn remove(&self, id: &str) -> Result<Vec<DownloadTask>, String> {
@@ -255,9 +368,12 @@ impl DownloadManager {
         if !task.status.terminal() {
             return Err("只能移除已结束的下载任务".into());
         }
+        cleanup_task_storage(task);
         inner.controls.remove(id);
         inner.tasks.retain(|task| task.id != id);
-        Ok(inner.tasks.iter().rev().cloned().collect())
+        let tasks = inner.tasks.iter().rev().cloned().collect();
+        save_tasks(&inner.tasks);
+        Ok(tasks)
     }
 
     fn clear_finished(&self) -> Vec<DownloadTask> {
@@ -270,11 +386,22 @@ impl DownloadManager {
             .filter(|task| task.status.terminal())
             .map(|task| task.id.clone())
             .collect::<Vec<_>>();
-        for id in finished {
-            inner.controls.remove(&id);
+        for id in &finished {
+            inner.controls.remove(id);
+        }
+        let removed = inner
+            .tasks
+            .iter()
+            .filter(|task| task.status.terminal())
+            .cloned()
+            .collect::<Vec<_>>();
+        for task in &removed {
+            cleanup_task_storage(task);
         }
         inner.tasks.retain(|task| !task.status.terminal());
-        inner.tasks.iter().rev().cloned().collect()
+        let tasks = inner.tasks.iter().rev().cloned().collect();
+        save_tasks(&inner.tasks);
+        tasks
     }
 
     fn is_cancelled(&self, id: &str) -> bool {
@@ -285,7 +412,7 @@ impl DownloadManager {
                 inner
                     .controls
                     .get(id)
-                    .map(|flag| flag.load(Ordering::Relaxed))
+                    .map(|control| control.cancelled.load(Ordering::Relaxed))
             })
             .unwrap_or(false)
     }
@@ -352,6 +479,34 @@ pub(crate) fn cancel_download(
 }
 
 #[tauri::command]
+pub(crate) fn pause_download(
+    app: AppHandle,
+    manager: tauri::State<'_, DownloadManager>,
+    id: String,
+) -> Result<DownloadTask, String> {
+    let task = manager.pause(&id)?;
+    emit_task(&app, &task);
+    Ok(task)
+}
+
+#[tauri::command]
+pub(crate) async fn resume_download(
+    app: AppHandle,
+    manager: tauri::State<'_, DownloadManager>,
+    id: String,
+) -> Result<DownloadTask, String> {
+    let manager = manager.inner().clone();
+    let task = manager.resume(&id)?;
+    emit_task(&app, &task);
+    let app = app.clone();
+    let id = task.id.clone();
+    tauri::async_runtime::spawn(async move {
+        run_download(app, manager, id).await;
+    });
+    Ok(task)
+}
+
+#[tauri::command]
 pub(crate) fn remove_download(
     manager: tauri::State<'_, DownloadManager>,
     id: String,
@@ -372,6 +527,12 @@ async fn run_download(app: AppHandle, manager: DownloadManager, id: String) {
             return;
         }
     };
+    if manager.is_paused(&id) {
+        if let Some(task) = manager.mark_paused(&id) {
+            emit_task(&app, &task);
+        }
+        return;
+    }
     if manager.is_cancelled(&id) {
         if let Some(task) = manager.mark_cancelled(&id) {
             emit_task(&app, &task);
@@ -406,7 +567,12 @@ async fn run_download(app: AppHandle, manager: DownloadManager, id: String) {
                 }
             }
             Err(InstallError::Cancelled) => {
-                if let Some(task) = manager.mark_cancelled(&id) {
+                let task = if manager.is_paused(&id) {
+                    manager.mark_paused(&id)
+                } else {
+                    manager.mark_cancelled(&id)
+                };
+                if let Some(task) = task {
                     emit_task(&app, &task);
                 }
             }
@@ -462,7 +628,10 @@ async fn run_backend_download(app: &AppHandle, manager: &DownloadManager, task: 
     };
     let manager_for_cancel = manager.clone();
     let id_for_cancel = task.id.clone();
-    let cancel = move || manager_for_cancel.is_cancelled(&id_for_cancel);
+    let cancel = move || {
+        manager_for_cancel.is_cancelled(&id_for_cancel)
+            || manager_for_cancel.is_paused(&id_for_cancel)
+    };
     let result = crate::backend_store::install_package_with(package, progress, cancel).await;
     match result {
         Ok(installed) => {
@@ -477,7 +646,12 @@ async fn run_backend_download(app: &AppHandle, manager: &DownloadManager, task: 
             }
         }
         Err(error) if error == crate::backend_store::download::CANCELLED => {
-            if let Some(task) = manager.mark_cancelled(&task.id) {
+            let task = if manager.is_paused(&task.id) {
+                manager.mark_paused(&task.id)
+            } else {
+                manager.mark_cancelled(&task.id)
+            };
+            if let Some(task) = task {
                 emit_task(app, &task);
             }
         }
@@ -531,16 +705,72 @@ fn emit_task(app: &AppHandle, task: &DownloadTask) {
     let _ = app.emit("model-download", task.clone());
 }
 
-fn cleanup_stale_staging() {
+fn stable_model_staging(model_id: &str) -> String {
+    models_root()
+        .join(format!(".{model_id}.installing"))
+        .display()
+        .to_string()
+}
+
+fn downloads_path() -> std::path::PathBuf {
+    std::env::var_os("APPDATA")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(models_root)
+        .join("UniInfer")
+        .join("downloads.json")
+}
+
+fn load_tasks() -> Vec<DownloadTask> {
+    let path = downloads_path();
+    let Ok(bytes) = std::fs::read(&path) else {
+        return Vec::new();
+    };
+    serde_json::from_slice(&bytes).unwrap_or_default()
+}
+
+fn save_tasks(tasks: &[DownloadTask]) {
+    let path = downloads_path();
+    if let Some(parent) = path.parent()
+        && std::fs::create_dir_all(parent).is_err()
+    {
+        return;
+    }
+    let Ok(json) = serde_json::to_vec_pretty(tasks) else {
+        return;
+    };
+    let temporary = path.with_extension("json.tmp");
+    if std::fs::write(&temporary, json).is_ok() {
+        let _ = std::fs::rename(temporary, path);
+    }
+}
+
+fn cleanup_task_storage(task: &DownloadTask) {
+    let Some(staging) = task.staging.as_deref() else {
+        return;
+    };
+    let path = std::path::Path::new(staging);
+    if path.is_dir() {
+        let _ = std::fs::remove_dir_all(path);
+    }
+}
+
+fn cleanup_stale_staging(referenced: &[String]) {
     let root = models_root();
     let Ok(entries) = std::fs::read_dir(&root) else {
         return;
     };
+    let referenced = referenced
+        .iter()
+        .map(std::path::PathBuf::from)
+        .collect::<Vec<_>>();
     let cutoff = SystemTime::now() - Duration::from_secs(60 * 60);
     for entry in entries.flatten() {
         let name = entry.file_name();
         let name = name.to_string_lossy();
-        if !name.starts_with('.') || !name.contains(".installing-") {
+        if !name.starts_with('.') || !name.contains(".installing") {
+            continue;
+        }
+        if referenced.iter().any(|path| entry.path().starts_with(path)) {
             continue;
         }
         let Ok(metadata) = entry.metadata() else {
@@ -621,6 +851,25 @@ mod tests {
                 size: 42,
             }],
         }
+    }
+
+    #[test]
+    fn paused_tasks_can_resume_without_losing_the_task() {
+        let manager = DownloadManager::new();
+        let task = manager
+            .enqueue(
+                "pause-test/Resume-Model".into(),
+                Source::HuggingFace,
+                None,
+            )
+            .expect("task");
+        let paused = manager.pause(&task.id).expect("pause");
+        assert_eq!(paused.status, DownloadStatus::Paused);
+        assert!(!paused.status.terminal());
+        let resumed = manager.resume(&task.id).expect("resume");
+        assert_eq!(resumed.status, DownloadStatus::Queued);
+        manager.cancel(&task.id).expect("cancel");
+        manager.remove(&task.id).expect("remove");
     }
 
     #[test]

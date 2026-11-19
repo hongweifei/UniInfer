@@ -203,16 +203,6 @@ fn slug(repo: &str) -> String {
         .to_string()
 }
 
-struct StagingCleanup(PathBuf);
-
-impl Drop for StagingCleanup {
-    fn drop(&mut self) {
-        if self.0.exists() {
-            let _ = std::fs::remove_dir_all(&self.0);
-        }
-    }
-}
-
 fn models_root() -> PathBuf {
     crate::api_server::models_root()
 }

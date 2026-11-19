@@ -85,7 +85,7 @@ export function applyTask(task, button, cancelButton, bar, text) {
   button.disabled = true;
   const labels = {
     queued: '排队中', preparing: '准备中…', downloading: `下载 ${percent}%`,
-    verifying: '校验中…', inspecting: '生成配置…', committing: '安装中…',
+    paused: '已暂停', verifying: '校验中…', inspecting: '生成配置…', committing: '安装中…',
   };
   button.textContent = labels[task.status] ?? '下载中…';
   if (bar) {

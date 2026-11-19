@@ -7,9 +7,9 @@ import {
   clearFinishedDownloads,
   initDownloads,
   isTerminalStatus,
+  pauseDownload,
   removeDownload,
-  startBackendDownload,
-  startDownload,
+  resumeDownload,
   subscribeDownloads,
 } from '../downloads.js';
 
@@ -17,6 +17,7 @@ const statusLabels = {
   queued: '排队中',
   preparing: '准备中',
   downloading: '下载中',
+  paused: '已暂停',
   verifying: '校验中',
   inspecting: '生成配置',
   committing: '安装中',
@@ -143,20 +144,34 @@ export function createDownloadPopover() {
     ].filter(Boolean);
     const kind = task.status === 'done' ? 'success'
       : task.status === 'failed' ? 'error'
-        : task.status === 'cancelled' ? 'muted' : 'accent';
+        : task.status === 'cancelled' ? 'muted'
+          : task.status === 'paused' ? 'warning' : 'accent';
     const actions = h('div', { class: 'download-popover-actions' });
     if (terminal) {
       if (task.status !== 'done') {
         actions.append(h('button', {
-          class: 'btn sm ghost', type: 'button', text: '重试',
-          onClick: () => void retry(task),
+          class: 'btn sm ghost', type: 'button', text: '继续',
+          onClick: () => void resume(task),
         }));
       }
       actions.append(h('button', {
         class: 'btn sm ghost', type: 'button', text: '移除',
         onClick: () => void remove(task),
       }));
+    } else if (task.status === 'paused') {
+      actions.append(h('button', {
+        class: 'btn sm ghost', type: 'button', text: '继续',
+        onClick: () => void resume(task),
+      }));
+      actions.append(h('button', {
+        class: 'btn sm ghost', type: 'button', text: '取消',
+        onClick: () => void cancel(task),
+      }));
     } else {
+      actions.append(h('button', {
+        class: 'btn sm ghost', type: 'button', text: '暂停',
+        onClick: () => void pause(task),
+      }));
       actions.append(h('button', {
         class: 'btn sm ghost', type: 'button', text: '取消',
         onClick: () => void cancel(task),
@@ -207,6 +222,22 @@ export function createDownloadPopover() {
     }
   }
 
+  async function pause(task) {
+    try {
+      await pauseDownload(task.id);
+    } catch (error) {
+      toast(errorMessage(error), 'error');
+    }
+  }
+
+  async function resume(task) {
+    try {
+      await resumeDownload(task.id);
+    } catch (error) {
+      toast(errorMessage(error), 'error');
+    }
+  }
+
   async function cancel(task) {
     try {
       await cancelDownload(task.id);
@@ -224,19 +255,6 @@ export function createDownloadPopover() {
     }
   }
 
-  async function retry(task) {
-    try {
-      await removeDownload(task.id);
-      if (task.kind === 'backend') {
-        if (!task.backend) throw new Error('后端下载描述已丢失，请重新从「后端」页面下载');
-        await startBackendDownload(task.backend);
-      } else {
-        await startDownload({ repo: task.repo, source: task.source, variant: task.variant });
-      }
-    } catch (error) {
-      toast(errorMessage(error), 'error');
-    }
-  }
 
   const unsubscribe = subscribeDownloads((next) => {
     tasks = next;
