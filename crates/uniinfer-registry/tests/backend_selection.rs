@@ -11,6 +11,7 @@ struct FakeEngine {
     backend: &'static str,
     variant: &'static str,
     transport: bool,
+    devices: &'static [DeviceClass],
 }
 
 impl InferenceEngine for FakeEngine {
@@ -57,7 +58,7 @@ impl InferenceEngine for FakeEngine {
     }
 
     fn supported_devices(&self) -> &[DeviceClass] {
-        &[DeviceClass::Cpu, DeviceClass::Gpu]
+        self.devices
     }
 
     fn load_session(&self, _spec: EngineLoadSpec) -> Result<Box<dyn EngineSession>> {
@@ -148,18 +149,21 @@ fn registry() -> EngineRegistry {
         backend: "builtin-onnx",
         variant: "builtin",
         transport: false,
+        devices: &[DeviceClass::Cpu, DeviceClass::Gpu],
     }));
     registry.register(std::sync::Arc::new(FakeEngine {
         name: "alpha-cuda",
         backend: "alpha",
         variant: "CUDA",
         transport: true,
+        devices: &[DeviceClass::Cpu, DeviceClass::Gpu],
     }));
     registry.register(std::sync::Arc::new(FakeEngine {
         name: "alpha-vulkan",
         backend: "alpha",
         variant: "Vulkan",
         transport: true,
+        devices: &[DeviceClass::Cpu, DeviceClass::Gpu],
     }));
     registry
 }
@@ -194,6 +198,7 @@ fn sidecars_can_be_registered_and_removed_at_runtime() {
         backend: "builtin-onnx",
         variant: "builtin",
         transport: false,
+        devices: &[DeviceClass::Cpu, DeviceClass::Gpu],
     }));
     let mut manifest = manifest();
     manifest.backend = Some(BackendConfig {
@@ -207,6 +212,7 @@ fn sidecars_can_be_registered_and_removed_at_runtime() {
         backend: "alpha",
         variant: "Vulkan",
         transport: true,
+        devices: &[DeviceClass::Cpu, DeviceClass::Gpu],
     }));
     assert_eq!(
         registry.route(&manifest).expect("route").engine_name,
@@ -234,6 +240,7 @@ fn automatic_variant_prefers_a_rocm_device() {
             backend: "alpha",
             variant,
             transport: true,
+            devices: &[DeviceClass::Cpu, DeviceClass::Gpu],
         }));
     }
     let mut manifest = manifest();
@@ -260,6 +267,7 @@ fn automatic_variant_rank_accepts_new_backend_names() {
             backend: "alpha",
             variant,
             transport: true,
+            devices: &[DeviceClass::Cpu, DeviceClass::Gpu],
         }));
     }
     let mut manifest = manifest();
@@ -282,4 +290,30 @@ fn builtin_selection_rejects_transports() {
     });
     let route = registry().route(&manifest).expect("route");
     assert_eq!(route.engine_name, "builtin-onnx");
+}
+
+#[test]
+fn sidecar_variant_controls_placement_class() {
+    let inventory = DeviceInventory::from(vec![
+        device("cpu:0", DeviceClass::Cpu, "cpu"),
+        device("gpu:0", DeviceClass::Gpu, "dml"),
+        device("npu:0", DeviceClass::Npu, "vitis"),
+    ]);
+    let registry = EngineRegistry::new(inventory);
+    registry.register_sidecar(std::sync::Arc::new(FakeEngine {
+        name: "vitis-worker",
+        backend: "vitis",
+        variant: "Vitis AI",
+        transport: true,
+        devices: &[DeviceClass::Cpu, DeviceClass::Npu],
+    }));
+    let mut manifest = manifest();
+    manifest.placement.prefer = vec![DeviceClass::Gpu];
+    manifest.backend = Some(BackendConfig {
+        id: Some("vitis".into()),
+        variant: Some("Vitis AI".into()),
+    });
+    let route = registry.route(&manifest).expect("route");
+    assert_eq!(route.engine_name, "vitis-worker");
+    assert_eq!(route.placement.devices[0].class, DeviceClass::Npu);
 }

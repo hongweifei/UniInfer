@@ -421,6 +421,10 @@ export function mountModels(root, ctx) {
       variantHint,
       h('div', { class: 'field' }, h('label', { text: '设备放置策略' }), policy),
       h('div', { class: 'field' }, h('label', { text: '优先设备' }), prefRow),
+      h('div', {
+        class: 'notice faint',
+        text: '优先设备只决定放置类别。内置 ONNX 在 NPU 上只注册 Vitis AI，不会回退到 DirectML；GPU 放置只注册 GPU 执行提供程序。',
+      }),
       h('label', { class: 'row', style: 'gap:7px;font-size:13px' }, fallback, h('span', { text: '允许回退到 CPU' })),
       h('div', { class: 'field' }, h('label', { text: '层卸载（llama.cpp / onnx.layered）' }), offload),
       h('div', { class: 'field' }, h('label', { text: 'KV cache 位置' }), kv),

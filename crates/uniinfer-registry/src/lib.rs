@@ -308,13 +308,10 @@ impl EngineRegistry {
             .map(str::trim)
             .filter(|variant| !variant.is_empty());
         let mut preferred_manifest = manifest.clone();
-        if manifest
-            .backend
-            .as_ref()
-            .and_then(|backend| backend.id.as_deref())
-            .is_some_and(|id| id == "builtin")
-            && let Some(class) = variant.and_then(builtin_variant_class)
-        {
+        // The selected variant names its execution target regardless of whether
+        // it is built in or a sidecar. Do not let a stale manifest `prefer`
+        // list send a Vitis/CUDA/Vulkan worker to a different device class.
+        if let Some(class) = variant.and_then(builtin_variant_class) {
             preferred_manifest.placement.prefer = vec![class];
             if class != DeviceClass::Cpu {
                 preferred_manifest.placement.allow_cpu_fallback = false;
@@ -569,6 +566,17 @@ impl Drop for SessionLease {
     }
 }
 
+fn builtin_variant_class(variant: &str) -> Option<DeviceClass> {
+    match variant.to_ascii_lowercase().as_str() {
+        "cpu" => Some(DeviceClass::Cpu),
+        "gpu" | "cuda" | "tensorrt" | "nvrtx" | "directml" | "rocm" | "migraphx" | "metal"
+        | "vulkan" | "webgpu" => Some(DeviceClass::Gpu),
+        "npu" | "qnn" | "vitis" | "vitis ai" | "cann" | "nnapi" => Some(DeviceClass::Npu),
+        "onednn" | "xnnpack" | "acl" => Some(DeviceClass::Cpu),
+        _ => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -612,16 +620,5 @@ mod tests {
             gpu.available_memory_bytes, 3_500,
             "integrated GPU must inherit the host reserve, not a second VRAM reserve"
         );
-    }
-}
-
-fn builtin_variant_class(variant: &str) -> Option<DeviceClass> {
-    match variant.to_ascii_lowercase().as_str() {
-        "cpu" => Some(DeviceClass::Cpu),
-        "gpu" | "cuda" | "tensorrt" | "nvrtx" | "directml" | "rocm" | "migraphx" | "metal"
-        | "vulkan" | "webgpu" => Some(DeviceClass::Gpu),
-        "npu" | "qnn" | "vitis" | "vitis ai" | "cann" | "nnapi" => Some(DeviceClass::Npu),
-        "onednn" | "xnnpack" | "acl" => Some(DeviceClass::Cpu),
-        _ => None,
     }
 }

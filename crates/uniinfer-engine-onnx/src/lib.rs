@@ -326,64 +326,122 @@ pub(crate) fn backend_variant(spec: &EngineLoadSpec) -> Option<&str> {
 
 fn selected_providers(
     variant: Option<&str>,
-) -> Result<Option<Vec<ort::ep::ExecutionProviderDispatch>>> {
-    let Some(variant) = variant else {
-        return Ok(None);
-    };
-    let variant = variant.to_ascii_lowercase();
-    if matches!(variant.as_str(), "auto" | "builtin" | "gpu" | "npu") {
-        return Ok(None);
-    }
-    if variant == "cpu" {
-        return Ok(Some(Vec::new()));
-    }
-    #[allow(unused_mut, unused_variables)]
-    let mut providers: Vec<ort::ep::ExecutionProviderDispatch> = Vec::new();
-    macro_rules! select {
-        ($name:literal, $feature:literal, $provider:expr) => {
-            #[cfg(feature = $feature)]
-            if variant == $name {
-                providers.push($provider);
-                return Ok(Some(providers));
+    class: DeviceClass,
+) -> Result<Vec<ort::ep::ExecutionProviderDispatch>> {
+    let variant = variant
+        .map(str::trim)
+        .filter(|variant| !variant.is_empty())
+        .map(str::to_ascii_lowercase);
+    if let Some(variant) = variant.as_deref() {
+        match variant {
+            "cpu" => return Ok(Vec::new()),
+            "auto" | "builtin" | "gpu" | "npu" => {}
+            _ => {
+                #[allow(unused_mut, unused_variables)]
+                let mut providers: Vec<ort::ep::ExecutionProviderDispatch> = Vec::new();
+                macro_rules! select {
+                    ($name:literal, $feature:literal, $provider:expr) => {
+                        #[cfg(feature = $feature)]
+                        if variant == $name {
+                            providers.push($provider);
+                            return Ok(providers);
+                        }
+                    };
+                }
+                select!("cuda", "ep-cuda", ort::ep::CUDA::default().build());
+                select!(
+                    "tensorrt",
+                    "ep-tensorrt",
+                    ort::ep::TensorRT::default().build()
+                );
+                select!(
+                    "directml",
+                    "ep-directml",
+                    ort::ep::DirectML::default().build()
+                );
+                select!(
+                    "openvino",
+                    "ep-openvino",
+                    ort::ep::OpenVINO::default().build()
+                );
+                select!("rocm", "ep-rocm", ort::ep::ROCm::default().build());
+                select!("coreml", "ep-coreml", ort::ep::CoreML::default().build());
+                select!("qnn", "ep-qnn", ort::ep::QNN::default().build());
+                select!("nnapi", "ep-nnapi", ort::ep::NNAPI::default().build());
+                select!("cann", "ep-cann", ort::ep::CANN::default().build());
+                select!("onednn", "ep-onednn", ort::ep::OneDNN::default().build());
+                select!("xnnpack", "ep-xnnpack", ort::ep::XNNPACK::default().build());
+                select!("acl", "ep-acl", ort::ep::ACL::default().build());
+                select!(
+                    "migraphx",
+                    "ep-migraphx",
+                    ort::ep::MIGraphX::default().build()
+                );
+                select!("nvrtx", "ep-nvrtx", ort::ep::NVRTX::default().build());
+                select!("webgpu", "ep-webgpu", ort::ep::WebGPU::default().build());
+                select!("vitis", "ep-vitis", ort::ep::Vitis::default().build());
+                select!("vitis ai", "ep-vitis", ort::ep::Vitis::default().build());
+                return Err(EngineError::UnsupportedEngine(format!(
+                    "ONNX execution provider {variant:?} is not compiled into this build"
+                )));
             }
-        };
+        }
     }
-    select!("cuda", "ep-cuda", ort::ep::CUDA::default().build());
-    select!(
-        "tensorrt",
-        "ep-tensorrt",
-        ort::ep::TensorRT::default().build()
-    );
-    select!(
-        "directml",
-        "ep-directml",
-        ort::ep::DirectML::default().build()
-    );
-    select!(
-        "openvino",
-        "ep-openvino",
-        ort::ep::OpenVINO::default().build()
-    );
-    select!("rocm", "ep-rocm", ort::ep::ROCm::default().build());
-    select!("coreml", "ep-coreml", ort::ep::CoreML::default().build());
-    select!("qnn", "ep-qnn", ort::ep::QNN::default().build());
-    select!("nnapi", "ep-nnapi", ort::ep::NNAPI::default().build());
-    select!("cann", "ep-cann", ort::ep::CANN::default().build());
-    select!("onednn", "ep-onednn", ort::ep::OneDNN::default().build());
-    select!("xnnpack", "ep-xnnpack", ort::ep::XNNPACK::default().build());
-    select!("acl", "ep-acl", ort::ep::ACL::default().build());
-    select!(
-        "migraphx",
-        "ep-migraphx",
-        ort::ep::MIGraphX::default().build()
-    );
-    select!("nvrtx", "ep-nvrtx", ort::ep::NVRTX::default().build());
-    select!("webgpu", "ep-webgpu", ort::ep::WebGPU::default().build());
-    select!("vitis", "ep-vitis", ort::ep::Vitis::default().build());
-    select!("vitis ai", "ep-vitis", ort::ep::Vitis::default().build());
-    Err(EngineError::UnsupportedEngine(format!(
-        "ONNX execution provider {variant:?} is not compiled into this build"
-    )))
+
+    let providers = providers_for_class(class);
+    if providers.is_empty() && class != DeviceClass::Cpu {
+        return Err(EngineError::UnsupportedEngine(format!(
+            "no {class:?} execution provider is compiled into this build"
+        )));
+    }
+    Ok(providers)
+}
+
+/// Providers that can actually satisfy a placement class. The environment
+/// provider list deliberately contains every compiled EP so device probing can
+/// see them, but sessions must not inherit an unrelated accelerator: an NPU
+/// placement that silently falls through to DirectML or CUDA is a bug.
+#[allow(unused_mut)]
+fn providers_for_class(class: DeviceClass) -> Vec<ort::ep::ExecutionProviderDispatch> {
+    let mut providers = Vec::new();
+    match class {
+        DeviceClass::Cpu => {}
+        DeviceClass::Npu => {
+            #[cfg(feature = "ep-qnn")]
+            providers.push(ort::ep::QNN::default().build());
+            #[cfg(feature = "ep-vitis")]
+            providers.push(ort::ep::Vitis::default().build());
+            #[cfg(feature = "ep-nnapi")]
+            providers.push(ort::ep::NNAPI::default().build());
+            #[cfg(feature = "ep-cann")]
+            providers.push(ort::ep::CANN::default().build());
+            #[cfg(feature = "ep-openvino")]
+            providers.push(ort::ep::OpenVINO::default().build());
+        }
+        DeviceClass::Gpu => {
+            #[cfg(feature = "ep-coreml")]
+            providers.push(ort::ep::CoreML::default().build());
+            #[cfg(feature = "ep-openvino")]
+            providers.push(ort::ep::OpenVINO::default().build());
+            #[cfg(feature = "ep-tensorrt")]
+            providers.push(ort::ep::TensorRT::default().build());
+            #[cfg(feature = "ep-nvrtx")]
+            providers.push(ort::ep::NVRTX::default().build());
+            #[cfg(feature = "ep-cuda")]
+            providers.push(ort::ep::CUDA::default().build());
+            #[cfg(feature = "ep-rocm")]
+            providers.push(ort::ep::ROCm::default().build());
+            #[cfg(feature = "ep-migraphx")]
+            providers.push(ort::ep::MIGraphX::default().build());
+            #[cfg(feature = "ep-directml")]
+            providers.push(ort::ep::DirectML::default().build());
+            #[cfg(feature = "ep-webgpu")]
+            providers.push(ort::ep::WebGPU::default().build());
+            #[cfg(feature = "ep-onednn")]
+            providers.push(ort::ep::OneDNN::default().build());
+        }
+    }
+    providers
 }
 
 pub(crate) fn build_session_from_memory(
@@ -394,29 +452,28 @@ pub(crate) fn build_session_from_memory(
 ) -> Result<Session> {
     let builder = Session::builder(environment)
         .map_err(|error| EngineError::LoadFailed(format!("session builder: {error}")))?;
-    let selected = selected_providers(variant)?;
-    let mut builder = match selected {
-        Some(providers) if providers.is_empty() => builder
+    let providers = selected_providers(variant, class)?;
+    let mut builder = if providers.is_empty() {
+        builder
             .with_no_environment_execution_providers()
             .map_err(|error| {
                 EngineError::LoadFailed(format!("cpu-only session options: {error}"))
-            })?,
-        Some(providers) => {
-            let builder = builder
-                .with_no_environment_execution_providers()
-                .map_err(|error| {
-                    EngineError::LoadFailed(format!("execution provider options: {error}"))
-                })?;
-            builder
-                .with_execution_providers(providers)
-                .map_err(|error| EngineError::LoadFailed(format!("execution providers: {error}")))?
-        }
-        None if class == DeviceClass::Cpu => builder
+            })?
+    } else {
+        let names = providers
+            .iter()
+            .map(|provider| provider.name())
+            .collect::<Vec<_>>()
+            .join(", ");
+        tracing::debug!(class = ?class, variant = variant.unwrap_or("auto"), %names, "onnx session providers");
+        let builder = builder
             .with_no_environment_execution_providers()
             .map_err(|error| {
-                EngineError::LoadFailed(format!("cpu-only session options: {error}"))
-            })?,
-        None => builder,
+                EngineError::LoadFailed(format!("execution provider options: {error}"))
+            })?;
+        builder
+            .with_execution_providers(providers)
+            .map_err(|error| EngineError::LoadFailed(format!("execution providers: {error}")))?
     };
     builder
         .commit_from_memory(bytes)
@@ -431,29 +488,28 @@ pub(crate) fn build_session(
 ) -> Result<Session> {
     let builder = Session::builder(environment)
         .map_err(|error| EngineError::LoadFailed(format!("session builder: {error}")))?;
-    let selected = selected_providers(variant)?;
-    let mut builder = match selected {
-        Some(providers) if providers.is_empty() => builder
+    let providers = selected_providers(variant, class)?;
+    let mut builder = if providers.is_empty() {
+        builder
             .with_no_environment_execution_providers()
             .map_err(|error| {
                 EngineError::LoadFailed(format!("cpu-only session options: {error}"))
-            })?,
-        Some(providers) => {
-            let builder = builder
-                .with_no_environment_execution_providers()
-                .map_err(|error| {
-                    EngineError::LoadFailed(format!("execution provider options: {error}"))
-                })?;
-            builder
-                .with_execution_providers(providers)
-                .map_err(|error| EngineError::LoadFailed(format!("execution providers: {error}")))?
-        }
-        None if class == DeviceClass::Cpu => builder
+            })?
+    } else {
+        let names = providers
+            .iter()
+            .map(|provider| provider.name())
+            .collect::<Vec<_>>()
+            .join(", ");
+        tracing::debug!(class = ?class, variant = variant.unwrap_or("auto"), %names, "onnx session providers");
+        let builder = builder
             .with_no_environment_execution_providers()
             .map_err(|error| {
-                EngineError::LoadFailed(format!("cpu-only session options: {error}"))
-            })?,
-        None => builder,
+                EngineError::LoadFailed(format!("execution provider options: {error}"))
+            })?;
+        builder
+            .with_execution_providers(providers)
+            .map_err(|error| EngineError::LoadFailed(format!("execution providers: {error}")))?
     };
     #[cfg(feature = "ep-vitis")]
     {
@@ -516,4 +572,45 @@ fn ep_enabled(ep: &str) -> bool {
         || (cfg!(feature = "ep-migraphx") && ep.contains("migraphx"))
         || (cfg!(feature = "ep-webgpu") && ep.contains("webgpu"))
         || (cfg!(feature = "ep-onednn") && (ep.contains("onednn") || ep.contains("dnnl")))
+}
+
+#[cfg(test)]
+mod provider_tests {
+    use super::*;
+
+    #[test]
+    fn cpu_selection_has_no_accelerator_provider() {
+        let selected = selected_providers(Some("cpu"), DeviceClass::Cpu).expect("cpu selection");
+        assert!(selected.is_empty());
+    }
+
+    #[cfg(feature = "ep-vitis")]
+    #[test]
+    fn npu_class_selects_only_npu_providers() {
+        let providers = providers_for_class(DeviceClass::Npu);
+        assert!(
+            providers
+                .iter()
+                .any(|provider| provider.name().contains("Vitis"))
+        );
+        assert!(
+            !providers
+                .iter()
+                .any(|provider| provider.name().contains("Dml"))
+        );
+        assert!(
+            !providers
+                .iter()
+                .any(|provider| provider.name().contains("CUDA"))
+        );
+    }
+
+    #[test]
+    fn unknown_named_provider_is_rejected() {
+        let error = match selected_providers(Some("not-a-provider"), DeviceClass::Cpu) {
+            Err(error) => error,
+            Ok(_) => panic!("unknown provider must not fall back"),
+        };
+        assert!(error.to_string().contains("not-a-provider"));
+    }
 }
