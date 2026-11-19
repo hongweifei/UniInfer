@@ -13,6 +13,13 @@ export function mountChat(root, ctx) {
   const conversation = ensureConversation(state, ctx.currentModel()?.id);
   const attachments = [];
   let controller = null;
+  let draftText = state.ui.chatDrafts?.[conversation.id] ?? state.ui.chatDraft ?? '';
+  if (draftText && !state.ui.chatDrafts?.[conversation.id]) {
+    state.ui.chatDrafts ??= {};
+    state.ui.chatDrafts[conversation.id] = draftText;
+    state.ui.chatDraft = '';
+    ctx.persistSoon?.();
+  }
 
   const scroller = h('div', { class: 'chat-scroll' });
   const thread = h('div', { class: 'chat-content' });
@@ -34,6 +41,7 @@ export function mountChat(root, ctx) {
   const audioModels = ctx.models().filter((model) => isAudioModel(model) && !model.route_error);
   const textarea = h('textarea', {
     rows: 1,
+    value: draftText,
     placeholder: '输入消息，Enter 发送，Shift+Enter 换行',
     attrs: { 'aria-label': '消息输入框' },
   });
@@ -57,8 +65,16 @@ export function mountChat(root, ctx) {
   for (const model of ctx.models().filter((item) => isChatModel(item) && !item.route_error)) {
     modelSelect.append(h('option', { value: model.id, text: model.id }));
   }
+  const conversationModel = ctx.models().find((model) => model.id === conversation.model && isChatModel(model) && !model.route_error);
+  if (conversationModel && ctx.currentModel()?.id !== conversationModel.id) {
+    ctx.setModel(conversationModel.id);
+  }
   if (ctx.currentModel()) modelSelect.value = ctx.currentModel().id;
-  modelSelect.addEventListener('change', () => ctx.setModel(modelSelect.value));
+  modelSelect.addEventListener('change', () => {
+    ctx.setModel(modelSelect.value);
+    conversation.model = modelSelect.value;
+    ctx.persistSoon?.();
+  });
   const thinkingToggle = h('button', {
     class: 'btn sm ghost composer-thinking',
     type: 'button',
@@ -87,6 +103,7 @@ export function mountChat(root, ctx) {
   );
   const composerWrap = h('div', { class: 'composer-wrap' }, form);
   root.append(h('div', { class: 'chat-view' }, scroller, composerWrap));
+  const grow = autoGrow(textarea);
 
   async function transcribeAudio(file) {
     if (!audioModels.length) {
@@ -111,7 +128,10 @@ export function mountChat(root, ctx) {
       textarea.value = textarea.value.trim()
         ? `${textarea.value.trimEnd()}\n${transcript}`
         : transcript;
-      autoGrow(textarea);
+      state.ui.chatDrafts[conversation.id] = textarea.value;
+      state.ui.chatDraft = '';
+      ctx.persistSoon?.();
+      grow();
       updateHint();
       toast('音频已转写为文字', 'success');
     } catch (error) {
@@ -332,7 +352,10 @@ export function mountChat(root, ctx) {
     attachments.length = 0;
     renderAttachments();
     textarea.value = '';
-    autoGrow(textarea);
+    delete state.ui.chatDrafts[conversation.id];
+    state.ui.chatDraft = '';
+    ctx.persistSoon?.();
+    grow();
     renderHistory();
     scroller.scrollTop = scroller.scrollHeight;
 
@@ -428,7 +451,13 @@ export function mountChat(root, ctx) {
     }
   }
 
-  textarea.addEventListener('input', () => { autoGrow(textarea); updateHint(); });
+  textarea.addEventListener('input', () => {
+    if (textarea.value) state.ui.chatDrafts[conversation.id] = textarea.value;
+    else delete state.ui.chatDrafts[conversation.id];
+    state.ui.chatDraft = '';
+    updateHint();
+    ctx.persistSoon?.();
+  });
   textarea.addEventListener('keydown', (event) => {
     if (event.key === 'Enter' && !event.shiftKey) {
       event.preventDefault();
@@ -450,10 +479,18 @@ export function mountChat(root, ctx) {
   updateThinkingToggle();
   renderHistory();
   updateHint();
+  grow();
   void hydrateConversationMedia();
-  requestAnimationFrame(() => textarea.focus());
+  requestAnimationFrame(() => {
+    grow();
+    textarea.focus();
+    textarea.setSelectionRange(textarea.value.length, textarea.value.length);
+  });
 
   const onModel = () => updateHint();
   document.addEventListener('uniinfer:model', onModel);
-  return () => document.removeEventListener('uniinfer:model', onModel);
+  return () => {
+    document.removeEventListener('uniinfer:model', onModel);
+    controller?.abort();
+  };
 }

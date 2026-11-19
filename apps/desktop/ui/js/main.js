@@ -35,8 +35,11 @@ let api = null;
 let models = [];
 let devices = [];
 let graphics = [];
-let currentCleanup = null;
+let mainEl = null;
+let workspaceEl = null;
 let downloadPopover = null;
+let persistTimer = null;
+const viewCache = new Map();
 
 function applyTheme() {
   if (state.theme === 'system') delete document.documentElement.dataset.theme;
@@ -45,15 +48,42 @@ function applyTheme() {
 }
 
 function persist() {
+  if (persistTimer) {
+    clearTimeout(persistTimer);
+    persistTimer = null;
+  }
   saveState(state);
+}
+
+function persistSoon() {
+  if (persistTimer) return;
+  persistTimer = setTimeout(() => {
+    persistTimer = null;
+    saveState(state);
+  }, 250);
 }
 
 function modelById(id) {
   return models.find((model) => model.id === id) ?? null;
 }
 
-function currentModel() {
-  return modelById(state.selectedModel);
+function scopeForView(view = state.view) {
+  if (view === 'chat') return 'chat';
+  if (view === 'media') return mediaTab();
+  return null;
+}
+
+function currentModel(scope = scopeForView()) {
+  if (!scope) return modelById(state.selectedModel);
+  return modelById(state.modelSelection?.[scope] ?? null);
+}
+
+function modelScope(model) {
+  if (!model) return null;
+  if (isImageModel(model)) return 'images';
+  if (isAudioModel(model)) return 'transcribe';
+  if (isChatModel(model)) return 'chat';
+  return null;
 }
 
 function modelRank(model) {
@@ -77,25 +107,29 @@ function mediaTab() {
   return ['transcribe', 'images', 'tts', 'video'].includes(state.mediaTab) ? state.mediaTab : 'transcribe';
 }
 
-function modelsForView(view) {
+function modelsForScope(scope) {
   let list = models;
-  if (view === 'chat') {
-    list = list.filter(isChatModel);
-  } else if (view === 'media') {
-    const tab = mediaTab();
-    if (tab === 'transcribe') list = list.filter(isAudioModel);
-    else if (tab === 'images') list = list.filter(isImageModel);
-    else return [];
-  }
+  if (scope === 'chat') list = list.filter(isChatModel);
+  else if (scope === 'transcribe') list = list.filter(isAudioModel);
+  else if (scope === 'images') list = list.filter(isImageModel);
+  else return [];
   return list.filter((model) => !model.route_error);
 }
 
 function chooseModelForView(view) {
-  const candidates = modelsForView(view);
+  const scope = scopeForView(view);
+  if (!scope) return;
+  const candidates = modelsForScope(scope);
   if (!candidates.length) return;
-  if (candidates.some((model) => model.id === state.selectedModel)) return;
+  const remembered = state.modelSelection?.[scope];
+  if (candidates.some((model) => model.id === remembered)) return;
+  state.modelSelection[scope] = candidates[0].id;
   state.selectedModel = candidates[0].id;
   persist();
+}
+
+function routeKey() {
+  return state.view === 'media' ? `media:${mediaTab()}` : state.view;
 }
 
 function sidebar() {
@@ -103,7 +137,14 @@ function sidebar() {
   if (state.view === 'chat') {
     context.push(h('button', {
       class: 'btn primary', type: 'button',
-      onClick: () => { newConversation(state, currentModel()?.id); state.view = 'chat'; persist(); renderShell(); renderView(); },
+      onClick: () => {
+        invalidateView('chat');
+        newConversation(state, currentModel('chat')?.id);
+        state.view = 'chat';
+        persist();
+        renderShell();
+        renderView();
+      },
     }, h('span', { html: icon('plus', 15) }), h('span', { text: '新对话' })));
     const recent = h('div', { class: 'recent-list' });
     const conversations = recentConversations(state, 8);
@@ -113,6 +154,7 @@ function sidebar() {
           class: `recent-item ${conversation.id === state.activeId ? 'active' : ''}`,
           type: 'button', title: conversation.title,
           onClick: () => {
+            if (state.activeId !== conversation.id) invalidateView('chat');
             state.activeId = conversation.id;
             state.view = 'chat';
             persist();
@@ -137,7 +179,11 @@ function sidebar() {
             if (!state.activeId && state.conversations.length) {
               state.activeId = recentConversations(state, 1)[0]?.id ?? null;
             }
-            if (wasActive) { renderShell(); renderView(); } else { renderSidebarOnly(); }
+            if (wasActive) {
+              invalidateView('chat');
+              renderShell();
+              renderView();
+            } else { renderSidebarOnly(); }
             toast('会话已删除', 'success', 1400);
           },
         }),
@@ -260,35 +306,59 @@ function themeLabel(theme) {
   return theme === 'light' ? '浅色' : theme === 'dark' ? '深色' : '跟随系统';
 }
 
+function ensureWorkspace() {
+  if (!mainEl) {
+    mainEl = h('main', { class: 'main', id: 'view' });
+    workspaceEl = h('div', { class: 'workspace' }, mainEl);
+  }
+  return workspaceEl;
+}
+
 function renderShell() {
   chooseModelForView(state.view);
   app.dataset.view = state.view;
-  const main = h('main', { class: 'main', id: 'view' });
-  app.replaceChildren(titlebar(), sidebar(), h('div', { class: 'workspace' }, main));
+  app.replaceChildren(titlebar(), sidebar(), ensureWorkspace());
   if (downloadPopover) app.querySelector('.download-slot')?.append(downloadPopover.element);
 }
 
 function renderView() {
-  currentCleanup?.();
-  currentCleanup = null;
-  const host = document.getElementById('view');
-  if (!host) return;
   chooseModelForView(state.view);
+  const key = routeKey();
   const meta = views[state.view];
-  const ctx = createContext();
-  currentCleanup = meta.mount(host, ctx) ?? null;
+  let entry = viewCache.get(key);
+  if (!entry) {
+    const host = h('div', { class: 'view', attrs: { 'data-route': key } });
+    mainEl.append(host);
+    entry = { host, cleanup: null };
+    viewCache.set(key, entry);
+    entry.cleanup = meta.mount(host, createContext(key)) ?? null;
+  }
+  for (const [cachedKey, cached] of viewCache) {
+    cached.host.hidden = cachedKey !== key;
+  }
+  document.dispatchEvent(new CustomEvent('uniinfer:show', { detail: { key } }));
   document.dispatchEvent(new CustomEvent('uniinfer:model'));
 }
 
-function createContext() {
+function invalidateView(key) {
+  const entry = viewCache.get(key);
+  if (!entry) return;
+  try { entry.cleanup?.(); } catch { /* a broken view must not block navigation */ }
+  entry.host.remove();
+  viewCache.delete(key);
+}
+
+function createContext(key = routeKey()) {
+  const scope = key === 'chat' ? 'chat' : key.startsWith('media:') ? key.slice(6) : null;
   return {
     state,
     api,
+    scope,
     models: () => models,
     devices: () => devices,
     graphics: () => graphics,
-    currentModel,
-    setModel,
+    currentModel: () => currentModel(scope),
+    setModel: (id) => setModel(id, scope),
     navigate,
     mediaTab,
     setMediaTab: (tab) => openMedia(tab),
@@ -296,13 +366,17 @@ function createContext() {
     subview: () => state.subview,
     setSubview,
     refreshModels,
+    reload: () => { invalidateView(key); renderShell(); renderView(); },
     persist,
+    persistSoon,
     setTheme,
     restart: () => window.__TAURI__?.core?.invoke('restart_app'),
     clearHistory: () => {
       state.conversations = [];
       state.activeId = null;
       persist();
+      invalidateView('chat');
+      invalidateView('settings');
       renderShell();
       renderView();
     },
@@ -325,12 +399,16 @@ function openMedia(tab) {
   renderView();
 }
 
-function setModel(id) {
+function setModel(id, scope = null) {
+  const target = scope ?? modelScope(modelById(id));
+  if (target) state.modelSelection[target] = id;
   state.selectedModel = id;
   persist();
-  const select = app.querySelector('.model-select');
-  if (select) select.value = id;
+  for (const select of app.querySelectorAll('.model-select')) {
+    if ([...select.options].some((option) => option.value === id)) select.value = id;
+  }
   document.dispatchEvent(new CustomEvent('uniinfer:model'));
+  document.dispatchEvent(new CustomEvent('uniinfer:selection', { detail: { scope: target, id } }));
 }
 
 function setTheme(theme) {
@@ -342,6 +420,7 @@ function setTheme(theme) {
     button.innerHTML = icon(themeIcon(state.theme), 17);
     button.title = `主题：${themeLabel(state.theme)}`;
   }
+  document.dispatchEvent(new CustomEvent('uniinfer:theme', { detail: { theme } }));
 }
 
 function cycleTheme() {
@@ -363,6 +442,7 @@ function navigate(view) {
 function setSubview(subview) {
   state.subview = subview;
   persist();
+  invalidateView('models');
   renderShell();
   renderView();
 }
@@ -397,9 +477,10 @@ async function refreshModels({ silent = false } = {}) {
     devices = deviceBody.devices ?? [];
     graphics = deviceBody.graphics ?? [];
     chooseModelForView(state.view);
+    document.dispatchEvent(new CustomEvent('uniinfer:model'));
+    document.dispatchEvent(new CustomEvent('uniinfer:models'));
     if (silent) {
       renderSidebarOnly();
-      document.dispatchEvent(new CustomEvent('uniinfer:model'));
     } else {
       renderShell();
       renderView();
@@ -458,7 +539,8 @@ document.addEventListener('keydown', (event) => {
   const mod = event.ctrlKey || event.metaKey;
   if (mod && event.key.toLowerCase() === 'k') {
     event.preventDefault();
-    newConversation(state, currentModel()?.id);
+    invalidateView('chat');
+    newConversation(state, currentModel('chat')?.id);
     state.view = 'chat';
     persist();
     renderShell();
@@ -472,6 +554,7 @@ document.addEventListener('keydown', (event) => {
 window.addEventListener('unhandledrejection', (event) => {
   toast(errorMessage(event.reason), 'error');
 });
+window.addEventListener('beforeunload', persist);
 document.addEventListener('dragover', (event) => event.preventDefault());
 document.addEventListener('drop', (event) => event.preventDefault());
 

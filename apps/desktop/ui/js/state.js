@@ -3,6 +3,25 @@ import { clampText } from './dom.js';
 
 const STORAGE_KEY = 'uniinfer.workspace.v1';
 const defaultOptions = { maxTokens: 512, temperature: 0.7, thinking: true };
+export const modelScopes = ['chat', 'transcribe', 'images', 'tts', 'video'];
+
+function freshUi() {
+  return {
+    chatDraft: '',
+    chatDrafts: {},
+    models: { filter: 'all', tagFilter: 'all', query: '', formatFilter: 'all', loadFilter: 'all' },
+    images: {
+      prompt: '',
+      negative: '',
+      size: '512x512',
+      steps: 20,
+      guidance: 7,
+      seed: '',
+      last: null,
+    },
+    transcribe: { result: null },
+  };
+}
 
 function freshState() {
   return {
@@ -11,9 +30,25 @@ function freshState() {
     mediaTab: 'transcribe',
     theme: 'system',
     selectedModel: null,
+    modelSelection: Object.fromEntries(modelScopes.map((scope) => [scope, null])),
     conversations: [],
     activeId: null,
     chatOptions: { ...defaultOptions },
+    ui: freshUi(),
+  };
+}
+
+function mergeUi(saved) {
+  const base = freshUi();
+  const ui = saved?.ui ?? {};
+  return {
+    ...base,
+    ...ui,
+    chatDraft: typeof ui.chatDraft === 'string' ? ui.chatDraft : base.chatDraft,
+    chatDrafts: ui.chatDrafts && typeof ui.chatDrafts === 'object' ? { ...ui.chatDrafts } : {},
+    models: { ...base.models, ...(ui.models ?? {}) },
+    images: { ...base.images, ...(ui.images ?? {}) },
+    transcribe: { ...base.transcribe, ...(ui.transcribe ?? {}) },
   };
 }
 
@@ -26,7 +61,12 @@ export function loadState() {
     const merged = {
       ...base,
       ...saved,
+      modelSelection: {
+        ...base.modelSelection,
+        ...(saved.modelSelection ?? {}),
+      },
       chatOptions: { ...defaultOptions, ...(saved.chatOptions ?? {}) },
+      ui: mergeUi(saved),
       conversations: Array.isArray(saved.conversations)
         ? saved.conversations.map((conversation) => ({
             ...conversation,
@@ -56,9 +96,16 @@ export function loadState() {
 
 export function saveState(state) {
   try {
+    const conversations = state.conversations.slice(0, 40);
+    const conversationIds = new Set(conversations.map((conversation) => conversation.id));
+    const chatDrafts = Object.fromEntries(
+      Object.entries(state.ui?.chatDrafts ?? {})
+        .filter(([id, text]) => conversationIds.has(id) && typeof text === 'string' && text.trim())
+    );
     const compact = {
       ...state,
-      conversations: state.conversations.slice(0, 40).map((conversation) => ({
+      ui: { ...state.ui, chatDrafts },
+      conversations: conversations.map((conversation) => ({
         ...conversation,
         messages: conversation.messages.slice(-80).map((message) => ({
           ...message,

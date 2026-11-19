@@ -280,3 +280,9 @@
   .tab { padding: 7px; }
   .window-btn { width: 32px; height: 28px; }
 }
+
+/* Views stay mounted so drafts, scroll positions and running jobs survive
+   navigation; only the active one is displayed. */
+.main > .view[hidden] {
+  display: none;
+}

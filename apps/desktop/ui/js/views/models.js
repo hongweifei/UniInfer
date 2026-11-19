@@ -8,19 +8,25 @@ import { mountCatalog } from '../components/catalog.js';
 import { backendChoices, preferredVariant, variantOptions, variantSupport } from '../model-backend.js';
 
 export function mountModels(root, ctx) {
-  let filter = 'all';
-  let tagFilter = 'all';
-  let query = '';
-  let formatFilter = 'all';
-  let loadFilter = 'all';
+  const savedFilters = ctx.state.ui.models;
+  let filter = savedFilters.filter ?? 'all';
+  let tagFilter = savedFilters.tagFilter ?? 'all';
+  let query = savedFilters.query ?? '';
+  let formatFilter = savedFilters.formatFilter ?? 'all';
+  let loadFilter = savedFilters.loadFilter ?? 'all';
   let inspection = null;
   let importing = false;
+
+  function persistFilters() {
+    Object.assign(ctx.state.ui.models, { filter, tagFilter, query, formatFilter, loadFilter });
+    ctx.persistSoon?.();
+  }
 
   const list = h('div', { class: 'model-grid' });
   const count = h('span', { class: 'faint' });
   const search = h('input', {
-    class: 'input', type: 'search', placeholder: '搜索模型、格式、能力或标签',
-    onInput: (event) => { query = event.target.value.trim().toLowerCase(); renderList(); },
+    class: 'input', type: 'search', value: query, placeholder: '搜索模型、格式、能力或标签',
+    onInput: (event) => { query = event.target.value.trim().toLowerCase(); persistFilters(); renderList(); },
   });
   const formatSelect = h('select', { class: 'select filter-select', attrs: { 'aria-label': '按格式筛选' } },
     h('option', { value: 'all', text: '全部格式' }),
@@ -29,16 +35,18 @@ export function mountModels(root, ctx) {
     h('option', { value: 'safetensors', text: 'Safetensors' }),
     h('option', { value: 'ggml', text: 'GGML' }),
   );
-  formatSelect.addEventListener('change', () => { formatFilter = formatSelect.value; renderList(); });
+  formatSelect.value = formatFilter;
+  formatSelect.addEventListener('change', () => { formatFilter = formatSelect.value; persistFilters(); renderList(); });
   const loadSelect = h('select', { class: 'select filter-select', attrs: { 'aria-label': '按加载状态筛选' } },
     h('option', { value: 'all', text: '全部状态' }),
     h('option', { value: 'loaded', text: '已加载' }),
     h('option', { value: 'idle', text: '未加载' }),
     h('option', { value: 'error', text: '不可用' }),
   );
-  loadSelect.addEventListener('change', () => { loadFilter = loadSelect.value; renderList(); });
+  loadSelect.value = loadFilter;
+  loadSelect.addEventListener('change', () => { loadFilter = loadSelect.value; persistFilters(); renderList(); });
   const tagSelect = h('select', { class: 'select filter-select', attrs: { 'aria-label': '按标签筛选' } });
-  tagSelect.addEventListener('change', () => { tagFilter = tagSelect.value; renderList(); });
+  tagSelect.addEventListener('change', () => { tagFilter = tagSelect.value; persistFilters(); renderList(); });
   const tabs = h('div', { class: 'filter-chips' });
   const deviceList = h('div', { class: 'device-list' });
   const importPath = h('input', { class: 'input', placeholder: '模型目录或 manifest.toml 路径' });
@@ -64,7 +72,7 @@ export function mountModels(root, ctx) {
     const all = h('button', {
       class: `btn sm ${filter === 'all' ? '' : 'ghost'}`,
       type: 'button',
-      onClick: () => { filter = 'all'; renderTabs(); renderList(); },
+      onClick: () => { filter = 'all'; persistFilters(); renderTabs(); renderList(); },
     }, h('span', { text: '全部' }), h('span', { class: 'filter-count', text: String(models.length) }));
     tabs.append(all);
     for (const category of MODEL_CATEGORIES) {
@@ -73,7 +81,7 @@ export function mountModels(root, ctx) {
       tabs.append(h('button', {
         class: `btn sm ${filter === category.id ? '' : 'ghost'}`,
         type: 'button',
-        onClick: () => { filter = category.id; renderTabs(); renderList(); },
+        onClick: () => { filter = category.id; persistFilters(); renderTabs(); renderList(); },
       }, h('span', { text: category.label }), h('span', { class: 'filter-count', text: String(count) })));
     }
   }

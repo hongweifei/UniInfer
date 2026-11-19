@@ -1,34 +1,59 @@
-import { h } from '../dom.js';
+import { h, clear } from '../dom.js';
 import { icon } from '../icons.js';
 import { errorMessage, isImageModel, downloadDataURL } from '../format.js';
 import { toast } from '../components/ui.js';
+import { getMedia, putMedia } from '../media-store.js';
 
 export function mountImages(root, ctx) {
-  const imageModels = ctx.models().filter((model) => isImageModel(model) && !model.route_error);
   const state = ctx.state;
-  const modelSelect = h('select', {
-    class: 'select',
-    disabled: !imageModels.length,
-  });
-  if (!imageModels.length) {
-    modelSelect.append(h('option', { value: '', text: '选择模型' }));
-  }
-  for (const model of imageModels) modelSelect.append(h('option', { value: model.id, text: model.id }));
-  const preferred = imageModels.find((model) => model.id === state.selectedModel) ?? imageModels[0];
-  if (preferred) modelSelect.value = preferred.id;
-
+  const draft = state.ui.images;
+  const modelSelect = h('select', { class: 'select', attrs: { 'aria-label': '图像生成模型' } });
   const prompt = h('textarea', {
-    class: 'textarea', rows: 4,
+    class: 'textarea', rows: 4, value: draft.prompt ?? '',
     placeholder: '描述你想生成的画面，例如：清晨的海边，薄雾，电影感光线',
   });
-  const negative = h('input', { class: 'input', placeholder: '可选：不希望出现的元素' });
+  const negative = h('input', { class: 'input', value: draft.negative ?? '', placeholder: '可选：不希望出现的元素' });
   const size = h('select', { class: 'select' },
     ['512x512', '768x768', '1024x1024', '64x64'].map((value) => h('option', { value, text: value })),
   );
-  size.value = '512x512';
-  const steps = h('input', { class: 'input', type: 'number', min: '1', max: '100', value: '20' });
-  const guidance = h('input', { class: 'input', type: 'number', min: '0', max: '30', step: '0.5', value: '7' });
-  const seed = h('input', { class: 'input', type: 'number', min: '0', placeholder: '随机' });
+  size.value = ['512x512', '768x768', '1024x1024', '64x64'].includes(draft.size) ? draft.size : '512x512';
+  const steps = h('input', { class: 'input', type: 'number', min: '1', max: '100', value: String(draft.steps ?? 20) });
+  const guidance = h('input', { class: 'input', type: 'number', min: '0', max: '30', step: '0.5', value: String(draft.guidance ?? 7) });
+  const seed = h('input', { class: 'input', type: 'number', min: '0', value: draft.seed ?? '', placeholder: '随机' });
+
+  function syncModels() {
+    const list = ctx.models().filter((model) => isImageModel(model) && !model.route_error);
+    const current = ctx.currentModel()?.id ?? modelSelect.value;
+    clear(modelSelect);
+    modelSelect.disabled = !list.length;
+    if (!list.length) {
+      modelSelect.append(h('option', { value: '', text: '选择模型' }));
+      return;
+    }
+    for (const model of list) modelSelect.append(h('option', { value: model.id, text: model.id }));
+    const preferred = list.find((model) => model.id === current)
+      ?? list.find((model) => model.id === draft.last?.model)
+      ?? list[0];
+    modelSelect.value = preferred.id;
+  }
+  syncModels();
+  modelSelect.addEventListener('change', () => {
+    ctx.setModel(modelSelect.value);
+  });
+
+  function rememberDraft() {
+    Object.assign(draft, {
+      prompt: prompt.value,
+      negative: negative.value,
+      size: size.value,
+      steps: Number(steps.value) || 1,
+      guidance: Number(guidance.value) || 0,
+      seed: seed.value,
+    });
+    ctx.persistSoon?.();
+  }
+  for (const field of [prompt, negative, steps, guidance, seed]) field.addEventListener('input', rememberDraft);
+  size.addEventListener('change', rememberDraft);
   const generateLabel = h('span', { text: '生成图片' });
   const generate = h('button', { class: 'btn primary lg', type: 'button', onClick: () => void run() },
     h('span', { html: icon('sparkles', 16) }), generateLabel);
@@ -36,6 +61,29 @@ export function mountImages(root, ctx) {
   const preview = h('div', { class: 'preview' });
   const resultMeta = h('div', { class: 'row faint' });
   let current = null;
+
+  function showImage(url, meta = {}) {
+    current = { url, mime: meta.mime ?? 'image/png' };
+    preview.replaceChildren(h('img', { src: url, alt: meta.alt ?? '生成的图片' }));
+    const chips = [];
+    if (meta.model) chips.push(h('span', { class: 'chip', text: meta.model }));
+    if (meta.width) chips.push(h('span', { class: 'chip', text: `${meta.width} × ${meta.height}` }));
+    if (meta.label) chips.push(h('span', { class: 'chip', text: meta.label }));
+    resultMeta.replaceChildren(...chips);
+    download.disabled = false;
+  }
+
+  async function restoreLast() {
+    if (!draft.last) { showEmpty(); return; }
+    try {
+      const url = await getMedia('images:last');
+      if (!url) { showEmpty(); return; }
+      showImage(url, { ...draft.last, alt: draft.last.prompt ?? '上次生成的图片' });
+      status.textContent = '已恢复上次结果';
+    } catch {
+      showEmpty();
+    }
+  }
 
   function showEmpty() {
     preview.replaceChildren(h('div', { class: 'empty-state' },
@@ -47,6 +95,7 @@ export function mountImages(root, ctx) {
 
   async function run() {
     const model = modelSelect.value;
+    rememberDraft();
     const text = prompt.value.trim();
     if (!model) { toast('当前没有可用的图像模型', 'error'); return; }
     if (!text) { toast('请先输入提示词', 'error'); prompt.focus(); return; }
@@ -72,22 +121,26 @@ export function mountImages(root, ctx) {
             return;
           }
           if (event.type !== 'preview' || !event.image?.b64_json) return;
-          preview.replaceChildren(h('img', {
-            src: `data:${event.image.mime_type ?? 'image/png'};base64,${event.image.b64_json}`,
-            alt: `第 ${event.step} 步预览`,
-          }));
+          const url = `data:${event.image.mime_type ?? 'image/png'};base64,${event.image.b64_json}`;
+          preview.replaceChildren(h('img', { src: url, alt: `第 ${event.step} 步预览` }));
           resultMeta.replaceChildren(h('span', { class: 'chip', text: `第 ${event.step}/${event.total} 步` }));
           status.textContent = `生成中… ${event.step}/${event.total}`;
         },
       });
       const image = response.data?.[0];
       if (!image?.b64_json) throw new Error('响应中没有图片');
-      current = image;
-      preview.replaceChildren(h('img', { src: `data:${image.mime_type ?? 'image/png'};base64,${image.b64_json}`, alt: text }));
-      resultMeta.replaceChildren(
-        h('span', { class: 'chip', text: model }),
-        h('span', { class: 'chip', text: `${image.width} × ${image.height}` }),
-      );
+      const mime = image.mime_type ?? 'image/png';
+      const url = `data:${mime};base64,${image.b64_json}`;
+      draft.last = {
+        model,
+        prompt: text,
+        width: image.width,
+        height: image.height,
+        mime,
+      };
+      ctx.persist();
+      void putMedia('images:last', url).catch(() => {});
+      showImage(url, { model, width: image.width, height: image.height, alt: text });
       status.textContent = '完成';
       toast('图片已生成', 'success');
     } catch (error) {
@@ -103,11 +156,13 @@ export function mountImages(root, ctx) {
 
   const download = h('button', {
     class: 'btn sm', type: 'button', disabled: true,
-    onClick: () => current && downloadDataURL('uniinfer-image.png', `data:${current.mime_type ?? 'image/png'};base64,${current.b64_json}`),
+    onClick: () => current && downloadDataURL('uniinfer-image.png', current.url),
   }, h('span', { html: icon('download', 14) }), h('span', { text: '下载 PNG' }));
 
   const observer = new MutationObserver(() => { download.disabled = !current; });
   observer.observe(preview, { childList: true });
+  const onModels = () => syncModels();
+  document.addEventListener('uniinfer:model', onModels);
 
   root.append(h('div', { class: 'images-view' }, h('div', { class: 'page' },
     h('div', { class: 'page-head' },
@@ -132,6 +187,9 @@ export function mountImages(root, ctx) {
       ),
     ),
   )));
-  showEmpty();
-  return () => observer.disconnect();
+  void restoreLast();
+  return () => {
+    observer.disconnect();
+    document.removeEventListener('uniinfer:model', onModels);
+  };
 }

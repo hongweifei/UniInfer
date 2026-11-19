@@ -252,5 +252,7 @@ export function mountSettings(root, ctx) {
     ),
   )));
 
-  return () => {};
+  const onTheme = () => renderTheme();
+  document.addEventListener('uniinfer:theme', onTheme);
+  return () => document.removeEventListener('uniinfer:theme', onTheme);
 }

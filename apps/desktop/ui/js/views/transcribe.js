@@ -1,21 +1,32 @@
-import { h } from '../dom.js';
+import { h, clear } from '../dom.js';
 import { icon } from '../icons.js';
 import { errorMessage, formatBytes, isAudioModel, downloadText } from '../format.js';
 import { toast, emptyState, copyText } from '../components/ui.js';
 
 export function mountTranscribe(root, ctx) {
-  const audioModels = ctx.models().filter((model) => isAudioModel(model) && !model.route_error);
   const state = ctx.state;
+  const saved = state.ui.transcribe.result;
   let file = null;
   let busy = false;
-  let result = null;
+  let result = saved ? { text: saved.text, duration: saved.duration } : null;
 
   const modelSelect = h('select', { class: 'select', attrs: { 'aria-label': '转写模型' } });
-  for (const model of audioModels) {
-    modelSelect.append(h('option', { value: model.id, text: model.id }));
+  function syncModels() {
+    const list = ctx.models().filter((model) => isAudioModel(model) && !model.route_error);
+    const current = ctx.currentModel()?.id ?? modelSelect.value;
+    clear(modelSelect);
+    for (const model of list) modelSelect.append(h('option', { value: model.id, text: model.id }));
+    if (!list.length) return;
+    const preferred = list.find((model) => model.id === current)
+      ?? list.find((model) => model.id === saved?.model)
+      ?? list[0];
+    modelSelect.value = preferred.id;
   }
-  const preferred = audioModels.find((model) => model.id === state.selectedModel) ?? audioModels[0];
-  if (preferred) modelSelect.value = preferred.id;
+  syncModels();
+  modelSelect.addEventListener('change', () => {
+    ctx.setModel(modelSelect.value);
+    ctx.persistSoon?.();
+  });
 
   const fileInput = h('input', {
     type: 'file', accept: '.wav,audio/wav,audio/x-wav', class: 'visually-hidden',
@@ -30,7 +41,7 @@ export function mountTranscribe(root, ctx) {
   const transcribeButton = h('button', { class: 'btn primary lg', type: 'button', disabled: true, onClick: () => void run() },
     h('span', { html: icon('play', 15) }), h('span', { text: '开始转写' }));
   const status = h('span', { class: 'faint' });
-  const resultText = h('div', { class: 'result-box', text: '转写结果会显示在这里。' });
+  const resultText = h('div', { class: 'result-box', text: saved?.text || '转写结果会显示在这里。' });
   const meta = h('div', { class: 'row faint result-meta' });
   const output = h('div', { class: 'card result-card' },
     h('div', { class: 'section-title' }, h('h2', { text: '结果' }), h('span', { class: 'spacer' }),
@@ -41,6 +52,31 @@ export function mountTranscribe(root, ctx) {
   );
   const copyButton = output.querySelectorAll('button')[0];
   const downloadButton = output.querySelectorAll('button')[1];
+
+  function renderResult(metaItems = []) {
+    if (!result?.text) {
+      resultText.className = 'result-box';
+      resultText.textContent = '转写结果会显示在这里。';
+      meta.replaceChildren();
+      copyButton.disabled = true;
+      downloadButton.disabled = true;
+      return;
+    }
+    resultText.className = 'result-box';
+    resultText.textContent = result.text;
+    meta.replaceChildren(...metaItems);
+    copyButton.disabled = false;
+    downloadButton.disabled = false;
+  }
+
+  function restoreResult() {
+    if (!saved?.text) return;
+    const metaItems = [];
+    if (saved.model) metaItems.push(h('span', { class: 'chip', text: saved.model }));
+    if (saved.duration) metaItems.push(h('span', { class: 'chip', text: `音频 ${Number(saved.duration).toFixed(1)} 秒` }));
+    if (saved.fileName) metaItems.push(h('span', { class: 'chip', text: saved.fileName }));
+    renderResult(metaItems);
+  }
 
   function setFile(next) {
     if (!next) return;
@@ -77,16 +113,19 @@ export function mountTranscribe(root, ctx) {
     status.textContent = '正在加载模型并识别音频…';
     try {
       result = await ctx.api.transcribe(file, model);
-      resultText.className = 'result-box';
-      resultText.textContent = result.text || '（空结果）';
       const duration = Number(result.duration ?? 0);
-      meta.replaceChildren(
+      state.ui.transcribe.result = {
+        text: result.text || '（空结果）',
+        duration,
+        model,
+        fileName: file.name,
+      };
+      ctx.persist();
+      renderResult([
         h('span', { class: 'chip', text: model }),
         duration ? h('span', { class: 'chip', text: `音频 ${duration.toFixed(1)} 秒` }) : null,
         h('span', { class: 'chip', text: 'WAV' }),
-      );
-      copyButton.disabled = false;
-      downloadButton.disabled = false;
+      ]);
       status.textContent = '完成';
       toast('转写完成', 'success');
     } catch (error) {
@@ -114,7 +153,7 @@ export function mountTranscribe(root, ctx) {
     setFile(event.dataTransfer.files?.[0] ?? null);
   });
 
-  if (!audioModels.length) {
+  if (!modelSelect.options.length) {
     root.append(h('div', { class: 'page' },
       emptyState({
         iconName: 'wave',
@@ -123,9 +162,16 @@ export function mountTranscribe(root, ctx) {
         action: h('button', { class: 'btn', type: 'button', text: '打开模型页', onClick: () => ctx.navigate('models') }),
       }),
     ));
-    return () => {};
+    const reloadWhenReady = () => {
+      if (ctx.models().some(isAudioModel)) ctx.reload?.();
+    };
+    document.addEventListener('uniinfer:model', reloadWhenReady);
+    return () => document.removeEventListener('uniinfer:model', reloadWhenReady);
   }
 
+  restoreResult();
+  const onModels = () => syncModels();
+  document.addEventListener('uniinfer:model', onModels);
   root.append(h('div', { class: 'transcribe-view' }, h('div', { class: 'page' },
     h('div', { class: 'page-head' },
       h('h2', { text: '语音转写' }),
@@ -142,5 +188,5 @@ export function mountTranscribe(root, ctx) {
       output,
     ),
   )));
-  return () => {};
+  return () => document.removeEventListener('uniinfer:model', onModels);
 }
