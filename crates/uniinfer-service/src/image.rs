@@ -168,6 +168,14 @@ impl ImageSlot {
             let negative = spec.negative_prompt.as_deref().unwrap_or("");
             let prompt_ids = self.padded(prompt, diffusion.max_length, diffusion.pad_token)?;
             let negative_ids = self.padded(negative, diffusion.max_length, diffusion.pad_token)?;
+            let mut progress = |step, total, preview: Option<Tensor>| {
+                on_event(ModelEvent::Progress { step, total });
+                if let Some(tensor) = preview
+                    && let Ok(ModelOutput::Image(image)) = encode_image(tensor)
+                {
+                    on_event(ModelEvent::Preview { step, total, image });
+                }
+            };
             let mut request = ImageGenerationRequest {
                 prompt_ids: &prompt_ids,
                 negative_ids: &negative_ids,
@@ -181,7 +189,8 @@ impl ImageSlot {
                 guidance: spec.guidance,
                 seed: spec.seed,
                 cancel,
-                progress: &mut |step, total| on_event(ModelEvent::Progress { step, total }),
+                preview: spec.preview,
+                progress: &mut progress,
             };
             let image = self.session().generate_image(&mut request)?;
             return encode_image(image);

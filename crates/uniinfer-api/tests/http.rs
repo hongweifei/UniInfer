@@ -1019,3 +1019,33 @@ async fn model_lifecycle_can_preload_image_model() {
     let body = body_json(response).await;
     assert_eq!(body["unloaded"], true);
 }
+
+#[tokio::test]
+async fn image_generation_stream_emits_step_previews() {
+    let manifest =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../models/tiny-diffusion/manifest.toml");
+    let app = routes::router(AppState::new(&ApiConfig::new(manifest)).expect("state"));
+    let body = json!({
+        "model": "tiny-diffusion-onnx",
+        "prompt": "red cube",
+        "size": "64x64",
+        "steps": 1,
+        "stream": true
+    })
+    .to_string();
+    let response = app
+        .oneshot(post("/v1/images/generations", &body))
+        .await
+        .expect("image stream");
+    assert_eq!(response.status(), StatusCode::OK);
+    let bytes = response
+        .into_body()
+        .collect()
+        .await
+        .expect("body")
+        .to_bytes();
+    let text = String::from_utf8_lossy(&bytes);
+    assert!(text.contains("event: preview"), "{text}");
+    assert!(text.contains("\"type\":\"preview\""), "{text}");
+    assert!(text.contains("event: done"), "{text}");
+}

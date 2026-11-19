@@ -63,7 +63,9 @@ pub struct ImageGenerationRequest<'a> {
     pub guidance: f32,
     pub seed: Option<u64>,
     pub cancel: &'a CancelToken,
-    pub progress: &'a mut dyn FnMut(usize, usize),
+    /// Emit decoded preview images after each diffusion step.
+    pub preview: bool,
+    pub progress: &'a mut dyn FnMut(usize, usize, Option<Tensor>),
 }
 
 /// Bytes and accounting returned by native text generation.

@@ -77,6 +77,53 @@ export class ApiClient {
     return this.request('/v1/images/generations', { method: 'POST', body: payload });
   }
 
+  async generateImageStream(payload, { onEvent, signal } = {}) {
+    const response = await fetch(`${this.base}/v1/images/generations`, {
+      method: 'POST',
+      headers: this.headers({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify({ ...payload, stream: true }),
+      signal,
+    });
+    if (!response.ok) {
+      const text = await response.text();
+      let body = {};
+      try { body = JSON.parse(text); } catch { body = { message: text }; }
+      throw new ApiError(
+        body.message ?? body.error?.message ?? `HTTP ${response.status}`,
+        body.code ?? 'http_error',
+        response.status,
+      );
+    }
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let final = null;
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true }).replace(/\r\n/g, '\n');
+      let index;
+      while ((index = buffer.indexOf('\n\n')) >= 0) {
+        const frame = buffer.slice(0, index);
+        buffer = buffer.slice(index + 2);
+        for (const line of frame.split('\n')) {
+          if (!line.startsWith('data:')) continue;
+          const data = line.slice(5).trim();
+          if (!data || data === '[DONE]') continue;
+          let event;
+          try { event = JSON.parse(data); } catch { continue; }
+          if (event.type === 'error') {
+            throw new ApiError(event.message ?? '生成失败', event.code ?? 'stream_error');
+          }
+          onEvent?.(event);
+          if (event.type === 'done') final = event;
+        }
+      }
+    }
+    if (!final) throw new ApiError('图像生成流意外结束', 'stream_incomplete');
+    return final;
+  }
+
   async streamChat({ model, messages, maxTokens, temperature, enableThinking, signal, onDelta, onReasoning }) {
     const response = await fetch(`${this.base}/v1/chat/completions`, {
       method: 'POST',

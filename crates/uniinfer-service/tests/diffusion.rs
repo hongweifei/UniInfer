@@ -23,6 +23,7 @@ fn diffusion_slot_returns_png() {
                     steps: 1,
                     guidance: 1.0,
                     seed: Some(7),
+                    preview: false,
                 },
             },
             &CancelToken::new(),

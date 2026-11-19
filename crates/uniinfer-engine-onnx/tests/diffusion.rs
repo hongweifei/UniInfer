@@ -37,7 +37,8 @@ fn tiny_diffusion_generates_an_image() {
             guidance: 1.0,
             seed: Some(7),
             cancel: &CancelToken::new(),
-            progress: &mut |_, _| {},
+            preview: false,
+            progress: &mut |_, _, _| {},
         })
         .expect("generate");
     assert_eq!(image.shape, vec![1, 3, 64, 64]);

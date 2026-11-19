@@ -90,6 +90,12 @@ pub enum ModelEvent {
         step: usize,
         total: usize,
     },
+    /// A decoded preview of the current image-generation step.
+    Preview {
+        step: usize,
+        total: usize,
+        image: ImageOutput,
+    },
 }
 
 #[cfg(test)]

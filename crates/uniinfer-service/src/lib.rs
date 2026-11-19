@@ -60,6 +60,8 @@ pub struct ImageGenerationSpec {
     pub steps: usize,
     pub guidance: f32,
     pub seed: Option<u64>,
+    /// Decode and emit intermediate images while the diffusion loop runs.
+    pub preview: bool,
 }
 
 /// Common execution contract for every loaded model slot.

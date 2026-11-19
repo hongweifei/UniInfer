@@ -99,6 +99,7 @@ impl EngineSession for DiffusionSession {
         for value in &mut sample {
             *value *= sigmas[0];
         }
+        let mut last_preview = None;
         for step in 0..steps {
             self.check_cancelled()?;
             let sigma = sigmas[step];
@@ -128,14 +129,34 @@ impl EngineSession for DiffusionSession {
                 conditional
             };
             apply_euler(&mut sample, &predicted, next_sigma - sigma)?;
-            (request.progress)(step + 1, steps);
+            let preview = if request.preview {
+                match self.decode_latent(&sample, latent_h, latent_w) {
+                    Ok(image) => {
+                        last_preview = Some(image.clone());
+                        Some(image)
+                    }
+                    Err(_) => None,
+                }
+            } else {
+                None
+            };
+            (request.progress)(step + 1, steps, preview);
         }
+        if let Some(image) = last_preview {
+            return Ok(image);
+        }
+        self.decode_latent(&sample, latent_h, latent_w)
+    }
+}
+
+impl DiffusionSession {
+    fn decode_latent(&self, sample: &[f32], latent_h: usize, latent_w: usize) -> Result<Tensor> {
         let latent = Tensor::new(
             self.config.vae_input.clone(),
             vec![1, self.config.latent_channels, latent_h, latent_w],
             TensorData::F32(
                 sample
-                    .into_iter()
+                    .iter()
                     .map(|value| value / self.config.vae_scale)
                     .collect(),
             ),
@@ -150,9 +171,7 @@ impl EngineSession for DiffusionSession {
             .find(|tensor| tensor.name == self.config.vae_decoder.output)
             .ok_or_else(|| EngineError::Other("diffusion VAE output missing".into()))
     }
-}
 
-impl DiffusionSession {
     fn check_cancelled(&self) -> Result<()> {
         if self.cancelled.load(Ordering::SeqCst) {
             Err(EngineError::Cancelled)

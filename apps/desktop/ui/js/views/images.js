@@ -65,7 +65,21 @@ export function mountImages(root, ctx) {
       };
       if (negative.value.trim()) body.negative_prompt = negative.value.trim();
       if (seed.value !== '') body.seed = Number(seed.value);
-      const response = await ctx.api.generateImage(body);
+      const response = await ctx.api.generateImageStream(body, {
+        onEvent: (event) => {
+          if (event.type === 'progress') {
+            status.textContent = `生成中… ${event.step}/${event.total}`;
+            return;
+          }
+          if (event.type !== 'preview' || !event.image?.b64_json) return;
+          preview.replaceChildren(h('img', {
+            src: `data:${event.image.mime_type ?? 'image/png'};base64,${event.image.b64_json}`,
+            alt: `第 ${event.step} 步预览`,
+          }));
+          resultMeta.replaceChildren(h('span', { class: 'chip', text: `第 ${event.step}/${event.total} 步` }));
+          status.textContent = `生成中… ${event.step}/${event.total}`;
+        },
+      });
       const image = response.data?.[0];
       if (!image?.b64_json) throw new Error('响应中没有图片');
       current = image;
