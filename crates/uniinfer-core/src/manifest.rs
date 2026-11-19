@@ -453,9 +453,19 @@ pub struct DiffusionComponent {
     pub device: Option<DeviceClass>,
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DiffusionSchedulerKind {
+    #[default]
+    Euler,
+    FlowMatch,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct DiffusionScheduler {
+    #[serde(default)]
+    pub kind: DiffusionSchedulerKind,
     #[serde(default = "default_diffusion_train_steps")]
     pub num_train_timesteps: u32,
     #[serde(default = "default_diffusion_beta_start")]
@@ -467,6 +477,7 @@ pub struct DiffusionScheduler {
 impl Default for DiffusionScheduler {
     fn default() -> Self {
         Self {
+            kind: DiffusionSchedulerKind::Euler,
             num_train_timesteps: default_diffusion_train_steps(),
             beta_start: default_diffusion_beta_start(),
             beta_end: default_diffusion_beta_end(),
@@ -474,10 +485,24 @@ impl Default for DiffusionScheduler {
     }
 }
 
-/// Standard diffusers component layout used by `onnx.diffusion`.
+/// Image architecture selected by the image engine adapter registry.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ImageArchitecture {
+    #[default]
+    Sd,
+    Flux,
+    QwenImage,
+    ZImage,
+    Generic,
+}
+
+/// Component layout used by `onnx.diffusion`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct DiffusionConfig {
+    #[serde(default)]
+    pub architecture: ImageArchitecture,
     pub text_encoder: DiffusionComponent,
     pub unet: DiffusionComponent,
     pub vae_decoder: DiffusionComponent,

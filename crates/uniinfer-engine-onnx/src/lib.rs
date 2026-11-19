@@ -15,9 +15,9 @@ use uniinfer_core::{
 };
 
 mod asr;
-mod diffusion;
 mod genai;
 mod graph;
+mod image;
 mod io;
 mod layered;
 mod partition;
@@ -317,7 +317,7 @@ impl InferenceEngine for OnnxEngine {
             return pipeline::load(&self.environment, &spec, class);
         }
         if spec.manifest.implementation == "onnx.diffusion" {
-            return diffusion::load(&self.environment, &spec, class);
+            return image::load(&self.environment, &spec, class);
         }
         if spec.manifest.implementation == "onnx.layered" {
             return layered::load(&self.environment, &spec, class);

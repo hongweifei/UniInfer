@@ -2,7 +2,9 @@
 
 use std::path::{Path, PathBuf};
 
-use uniinfer_core::{DiffusionComponent, DiffusionConfig, DiffusionScheduler, ImageConfig};
+use uniinfer_core::{
+    DiffusionComponent, DiffusionConfig, DiffusionScheduler, ImageArchitecture, ImageConfig,
+};
 
 use crate::files::{file_name, relative_string};
 use crate::onnx_graph::{GraphInfo, read};
@@ -40,6 +42,7 @@ pub(crate) fn detect(root: &Path, onnx: &[PathBuf]) -> Option<DiffusionLayout> {
         width,
         height,
         diffusion: Some(DiffusionConfig {
+            architecture: architecture(onnx, root),
             text_encoder: DiffusionComponent {
                 path: relative_string(root, &text_encoder),
                 output: output_name(text_info.as_ref(), "last_hidden_state"),
@@ -71,6 +74,18 @@ pub(crate) fn detect(root: &Path, onnx: &[PathBuf]) -> Option<DiffusionLayout> {
         }),
     };
     Some(DiffusionLayout { image, selected })
+}
+
+fn architecture(onnx: &[PathBuf], root: &Path) -> ImageArchitecture {
+    let has = |needle: &str| {
+        onnx.iter()
+            .any(|path| relative_string(root, path).contains(needle))
+    };
+    if has("transformer") && has("text_encoder_2") {
+        ImageArchitecture::Flux
+    } else {
+        ImageArchitecture::Sd
+    }
 }
 
 fn input_name(graph: Option<&GraphInfo>, fallback: &str) -> String {

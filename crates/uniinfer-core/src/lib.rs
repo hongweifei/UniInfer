@@ -22,7 +22,8 @@ pub use error::{EngineError, Result};
 pub use image_batch::{ImageBatch, MAX_IMAGES};
 pub use manifest::{
     AudioConfig, BackendConfig, Capability, CapabilityRequest, DiffusionComponent, DiffusionConfig,
-    DiffusionScheduler, ImageConfig, Modality, Mode, ModelFile, ModelFormat, ModelManifest,
-    Operation, PipelineConfig, PipelineStep, PlacementConfig, Quantization, Runtime, TextConfig,
+    DiffusionScheduler, DiffusionSchedulerKind, ImageArchitecture, ImageConfig, Modality, Mode,
+    ModelFile, ModelFormat, ModelManifest, Operation, PipelineConfig, PipelineStep,
+    PlacementConfig, Quantization, Runtime, TextConfig,
 };
 pub use tensor::{Tensor, TensorData, TensorDtype, TensorSpec};
