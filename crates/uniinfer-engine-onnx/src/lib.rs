@@ -464,9 +464,16 @@ pub(crate) fn build_session_from_memory(
             .map_err(|error| {
                 EngineError::LoadFailed(format!("cpu-only session options: {error}"))
             })?,
-        Some(providers) => builder
-            .with_execution_providers(providers)
-            .map_err(|error| EngineError::LoadFailed(format!("execution providers: {error}")))?,
+        Some(providers) => {
+            let builder = builder
+                .with_no_environment_execution_providers()
+                .map_err(|error| {
+                    EngineError::LoadFailed(format!("execution provider options: {error}"))
+                })?;
+            builder
+                .with_execution_providers(providers)
+                .map_err(|error| EngineError::LoadFailed(format!("execution providers: {error}")))?
+        }
         None if class == DeviceClass::Cpu => builder
             .with_no_environment_execution_providers()
             .map_err(|error| {
@@ -494,9 +501,16 @@ pub(crate) fn build_session(
             .map_err(|error| {
                 EngineError::LoadFailed(format!("cpu-only session options: {error}"))
             })?,
-        Some(providers) => builder
-            .with_execution_providers(providers)
-            .map_err(|error| EngineError::LoadFailed(format!("execution providers: {error}")))?,
+        Some(providers) => {
+            let builder = builder
+                .with_no_environment_execution_providers()
+                .map_err(|error| {
+                    EngineError::LoadFailed(format!("execution provider options: {error}"))
+                })?;
+            builder
+                .with_execution_providers(providers)
+                .map_err(|error| EngineError::LoadFailed(format!("execution providers: {error}")))?
+        }
         None if class == DeviceClass::Cpu => builder
             .with_no_environment_execution_providers()
             .map_err(|error| {
