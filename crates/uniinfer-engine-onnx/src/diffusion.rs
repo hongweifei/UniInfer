@@ -6,7 +6,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use ort::environment::Environment;
 use uniinfer_core::{
     CancelToken, DiffusionConfig, EngineError, EngineLoadSpec, EngineSession,
-    ImageGenerationRequest, Result, Tensor, TensorData, TensorSpec,
+    ImageGenerationRequest, Result, Tensor, TensorData, TensorDtype, TensorSpec,
 };
 
 use crate::graph::Graph;
@@ -187,10 +187,31 @@ impl DiffusionSession {
             .text
             .lock()
             .map_err(|_| EngineError::Other("diffusion text encoder lock poisoned".into()))?;
+        let dtype = text
+            .inputs()
+            .iter()
+            .find(|spec| spec.name == self.config.text_encoder_input)
+            .map_or(TensorDtype::I64, |spec| spec.dtype);
+        let data = match dtype {
+            TensorDtype::I32 => TensorData::I32(
+                ids.iter()
+                    .map(|id| i32::try_from(*id))
+                    .collect::<std::result::Result<Vec<_>, _>>()
+                    .map_err(|_| {
+                        EngineError::Other("diffusion token id does not fit in i32".into())
+                    })?,
+            ),
+            TensorDtype::I64 => TensorData::I64(ids.to_vec()),
+            other => {
+                return Err(EngineError::Other(format!(
+                    "diffusion text encoder input_ids has unsupported dtype {other:?}"
+                )));
+            }
+        };
         let input = Tensor::new(
             self.config.text_encoder_input.clone(),
             vec![1, ids.len()],
-            TensorData::I64(ids.to_vec()),
+            data,
         )?;
         let mut encoder = text
             .run(vec![input])?
