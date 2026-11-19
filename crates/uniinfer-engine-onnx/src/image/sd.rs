@@ -6,7 +6,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use ort::environment::Environment;
 use uniinfer_core::{
     CancelToken, DiffusionConfig, EngineError, EngineLoadSpec, EngineSession,
-    ImageGenerationRequest, Result, Tensor, TensorData, TensorDtype, TensorSpec,
+    ImageGenerationRequest, Result, Tensor, TensorData, TensorDtype, TensorSpec, random_seed,
 };
 
 use super::scheduler;
@@ -90,6 +90,7 @@ impl EngineSession for DiffusionSession {
         let latent_h = height.div_ceil(LATENT_SCALE) as usize;
         let latent_w = width.div_ceil(LATENT_SCALE) as usize;
         let steps = request.steps.clamp(1, 100);
+        let seed = request.seed.unwrap_or_else(random_seed);
         let kind = self.config.scheduler.kind;
         let use_ddim = kind == uniinfer_core::DiffusionSchedulerKind::Ddim;
         let use_ddpm = kind == uniinfer_core::DiffusionSchedulerKind::Ddpm;
@@ -105,19 +106,9 @@ impl EngineSession for DiffusionSession {
             (sigmas, timesteps, Vec::new(), Vec::new())
         };
         let mut sample = if use_ddim || use_ddpm {
-            normal_latent(
-                self.config.latent_channels,
-                latent_h,
-                latent_w,
-                request.seed,
-            )
+            normal_latent(self.config.latent_channels, latent_h, latent_w, seed)
         } else {
-            let mut sample = random_latent(
-                self.config.latent_channels,
-                latent_h,
-                latent_w,
-                request.seed,
-            );
+            let mut sample = random_latent(self.config.latent_channels, latent_h, latent_w, seed);
             for value in &mut sample {
                 *value *= sigmas[0];
             }
@@ -211,7 +202,7 @@ impl EngineSession for DiffusionSession {
                     self.config.latent_channels,
                     latent_h,
                     latent_w,
-                    request.seed.map(|seed| seed.wrapping_add(step as u64 + 1)),
+                    seed.wrapping_add(step as u64 + 1),
                 );
                 sample = mean
                     .iter()
@@ -228,7 +219,7 @@ impl EngineSession for DiffusionSession {
                     self.config.latent_channels,
                     latent_h,
                     latent_w,
-                    request.seed.map(|seed| seed.wrapping_add(step as u64 + 1)),
+                    seed.wrapping_add(step as u64 + 1),
                 );
                 for (value, noise) in sample.iter_mut().zip(noise) {
                     *value += sigma_up * noise;
@@ -355,8 +346,8 @@ fn check_cancel(cancel: &CancelToken) -> Result<()> {
     }
 }
 
-fn normal_latent(channels: usize, height: usize, width: usize, seed: Option<u64>) -> Vec<f32> {
-    let mut state = seed.unwrap_or(0x5eed_1234_abcd_ef01) | 1;
+fn normal_latent(channels: usize, height: usize, width: usize, seed: u64) -> Vec<f32> {
+    let mut state = seed | 1;
     let mut next = || {
         state ^= state << 13;
         state ^= state >> 7;
@@ -377,8 +368,8 @@ fn normal_latent(channels: usize, height: usize, width: usize, seed: Option<u64>
     values
 }
 
-fn random_latent(channels: usize, height: usize, width: usize, seed: Option<u64>) -> Vec<f32> {
-    let mut state = seed.unwrap_or(0x5eed_1234_abcd_ef01) | 1;
+fn random_latent(channels: usize, height: usize, width: usize, seed: u64) -> Vec<f32> {
+    let mut state = seed | 1;
     let count = channels * height * width;
     let mut values = Vec::with_capacity(count);
     for _ in 0..count {

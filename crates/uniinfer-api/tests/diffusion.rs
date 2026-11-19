@@ -39,6 +39,7 @@ async fn diffusion_image_endpoint_returns_png() {
         .expect("body")
         .to_bytes();
     let value: serde_json::Value = serde_json::from_slice(&bytes).expect("json");
+    assert!(value["data"][0]["seed"].as_u64().is_some(), "seed");
     let encoded = value["data"][0]["b64_json"].as_str().expect("b64_json");
     use base64::Engine as _;
     let png = base64::engine::general_purpose::STANDARD

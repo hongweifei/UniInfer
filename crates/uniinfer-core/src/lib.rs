@@ -6,6 +6,7 @@ pub mod engine;
 pub mod error;
 pub mod image_batch;
 pub mod manifest;
+pub mod seed;
 pub mod tensor;
 
 pub use cancel::CancelToken;
@@ -26,4 +27,5 @@ pub use manifest::{
     ModelFile, ModelFormat, ModelManifest, Operation, PipelineConfig, PipelineStep,
     PlacementConfig, Quantization, Runtime, TextConfig,
 };
+pub use seed::random_seed;
 pub use tensor::{Tensor, TensorData, TensorDtype, TensorSpec};

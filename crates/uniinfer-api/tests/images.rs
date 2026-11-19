@@ -41,6 +41,7 @@ async fn images_generations_returns_png() {
         .expect("body")
         .to_bytes();
     let body: serde_json::Value = serde_json::from_slice(&bytes).expect("json");
+    assert!(body["data"][0]["seed"].as_u64().is_some(), "seed");
     let encoded = body["data"][0]["b64_json"].as_str().expect("b64_json");
     let png = base64::engine::general_purpose::STANDARD
         .decode(encoded)

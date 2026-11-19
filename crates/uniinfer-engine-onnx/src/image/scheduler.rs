@@ -78,32 +78,6 @@ pub(crate) fn ddim(steps: usize, config: &DiffusionScheduler) -> (Vec<f32>, Vec<
     (schedule_alphas, timesteps)
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use uniinfer_core::{DiffusionScheduler, DiffusionSchedulerKind};
-
-    #[test]
-    fn flow_match_has_monotonic_sigmas() {
-        let mut config = DiffusionScheduler::default();
-        config.kind = DiffusionSchedulerKind::FlowMatch;
-        let (sigmas, timesteps) = schedule(4, &config);
-        assert_eq!(sigmas.len(), 5);
-        assert_eq!(timesteps.len(), 4);
-        assert!(sigmas.windows(2).all(|pair| pair[0] >= pair[1]));
-        assert_eq!(sigmas.last(), Some(&0.0));
-    }
-
-    #[test]
-    fn euler_schedule_ends_at_zero() {
-        let mut config = DiffusionScheduler::default();
-        config.kind = DiffusionSchedulerKind::Euler;
-        let (sigmas, _) = schedule(3, &config);
-        assert_eq!(sigmas.len(), 4);
-        assert_eq!(sigmas.last(), Some(&0.0));
-    }
-}
-
 pub(crate) fn ddpm(steps: usize, config: &DiffusionScheduler) -> (Vec<f32>, Vec<f32>) {
     let train = config.num_train_timesteps.max(1) as usize;
     let beta_start = config.beta_start.max(0.0).sqrt();
@@ -123,4 +97,34 @@ pub(crate) fn ddpm(steps: usize, config: &DiffusionScheduler) -> (Vec<f32>, Vec<
         .collect::<Vec<_>>();
     let schedule_alphas = timesteps.iter().map(|t| alpha_at(*t)).collect::<Vec<_>>();
     (schedule_alphas, timesteps)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use uniinfer_core::{DiffusionScheduler, DiffusionSchedulerKind};
+
+    #[test]
+    fn flow_match_has_monotonic_sigmas() {
+        let config = DiffusionScheduler {
+            kind: DiffusionSchedulerKind::FlowMatch,
+            ..Default::default()
+        };
+        let (sigmas, timesteps) = schedule(4, &config);
+        assert_eq!(sigmas.len(), 5);
+        assert_eq!(timesteps.len(), 4);
+        assert!(sigmas.windows(2).all(|pair| pair[0] >= pair[1]));
+        assert_eq!(sigmas.last(), Some(&0.0));
+    }
+
+    #[test]
+    fn euler_schedule_ends_at_zero() {
+        let config = DiffusionScheduler {
+            kind: DiffusionSchedulerKind::Euler,
+            ..Default::default()
+        };
+        let (sigmas, _) = schedule(3, &config);
+        assert_eq!(sigmas.len(), 4);
+        assert_eq!(sigmas.last(), Some(&0.0));
+    }
 }

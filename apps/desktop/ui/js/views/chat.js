@@ -194,9 +194,10 @@ export function mountChat(root, ctx) {
               const image = response.data?.[0];
               if (!image?.b64_json) throw new Error('响应中没有图片');
               const url = `data:${image.mime_type ?? 'image/png'};base64,${image.b64_json}`;
+              const seed = image.seed !== undefined ? `（种子 ${image.seed}）` : '';
               const generated = appendMessage(state, conversation, {
                 role: 'assistant',
-                content: `生成图片：${text}`,
+                content: `生成图片：${text}${seed}`,
                 images: [url],
                 generated: true,
               });

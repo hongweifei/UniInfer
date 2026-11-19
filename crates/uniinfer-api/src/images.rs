@@ -14,7 +14,7 @@ use tokio::sync::{OwnedSemaphorePermit, mpsc};
 use tokio_stream::StreamExt;
 use tokio_stream::wrappers::ReceiverStream;
 use uniinfer_backends::{ImageOutput, ModelEvent, ModelOutput};
-use uniinfer_core::{CancelToken, CapabilityRequest, Modality, Mode, Operation};
+use uniinfer_core::{CancelToken, CapabilityRequest, Modality, Mode, Operation, random_seed};
 use uniinfer_service::{ImageGenerationSpec, ImageSlot, ModelExecutor, ModelRequest};
 
 use crate::error::ApiError;
@@ -109,6 +109,7 @@ pub(crate) async fn generate(
         .unwrap_or((0, 0));
     let slot = state.image_slot(&model).await.map_err(ApiError::from)?;
     let defaults = slot.image_config();
+    let seed = request.seed.unwrap_or_else(random_seed);
     let spec = ImageGenerationSpec {
         prompt: request.prompt,
         negative_prompt: request.negative_prompt,
@@ -126,7 +127,7 @@ pub(crate) async fn generate(
                 .as_ref()
                 .map_or(0.0, |diffusion| diffusion.guidance)
         }),
-        seed: request.seed,
+        seed: Some(seed),
         preview: request.stream,
     };
     let permit = slot
@@ -155,7 +156,7 @@ pub(crate) async fn generate(
             _ => None,
         })
         .ok_or_else(|| ApiError::internal("image generation returned no image"))?;
-    Ok(Json(image_json(image)).into_response())
+    Ok(Json(image_json(image, seed)).into_response())
 }
 
 enum ImageStreamEvent {
@@ -177,6 +178,7 @@ fn stream_response(
     spec: ImageGenerationSpec,
     permit: OwnedSemaphorePermit,
 ) -> Result<Response, ApiError> {
+    let seed = spec.seed.unwrap_or_else(random_seed);
     let (tx, rx) = mpsc::channel::<ImageStreamEvent>(8);
     tokio::task::spawn_blocking(move || {
         let _permit = permit;
@@ -216,7 +218,7 @@ fn stream_response(
         }
     });
 
-    let stream = ReceiverStream::new(rx).map(|event| {
+    let stream = ReceiverStream::new(rx).map(move |event| {
         Ok::<_, Infallible>(match event {
             ImageStreamEvent::Progress { step, total } => Event::default().event("progress").data(
                 serde_json::json!({"type": "progress", "step": step, "total": total}).to_string(),
@@ -227,13 +229,14 @@ fn stream_response(
                         "type": "preview",
                         "step": step,
                         "total": total,
-                        "image": image_payload(&image),
+                        "image": image_payload(&image, seed),
                     })
                     .to_string(),
                 )
             }
             ImageStreamEvent::Done(image) => Event::default().event("done").data(
-                serde_json::json!({"type": "done", "data": [image_payload(&image)]}).to_string(),
+                serde_json::json!({"type": "done", "data": [image_payload(&image, seed)]})
+                    .to_string(),
             ),
             ImageStreamEvent::Error(error) => Event::default().event("error").data(
                 serde_json::json!({
@@ -254,20 +257,21 @@ fn stream_response(
     Ok(response)
 }
 
-fn image_payload(image: &ImageOutput) -> serde_json::Value {
+fn image_payload(image: &ImageOutput, seed: u64) -> serde_json::Value {
     let b64 = base64::engine::general_purpose::STANDARD.encode(&image.bytes);
     serde_json::json!({
         "b64_json": b64,
         "mime_type": image.mime,
         "width": image.width,
-        "height": image.height
+        "height": image.height,
+        "seed": seed,
     })
 }
 
-fn image_json(image: ImageOutput) -> serde_json::Value {
+fn image_json(image: ImageOutput, seed: u64) -> serde_json::Value {
     serde_json::json!({
         "created": crate::chat::unix_seconds(),
-        "data": [image_payload(&image)]
+        "data": [image_payload(&image, seed)]
     })
 }
 

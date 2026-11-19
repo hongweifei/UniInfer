@@ -68,6 +68,7 @@ export function mountImages(root, ctx) {
     const chips = [];
     if (meta.model) chips.push(h('span', { class: 'chip', text: meta.model }));
     if (meta.width) chips.push(h('span', { class: 'chip', text: `${meta.width} × ${meta.height}` }));
+    if (meta.seed !== undefined && meta.seed !== null) chips.push(h('span', { class: 'chip', text: `种子 ${meta.seed}` }));
     if (meta.label) chips.push(h('span', { class: 'chip', text: meta.label }));
     resultMeta.replaceChildren(...chips);
     download.disabled = false;
@@ -137,10 +138,17 @@ export function mountImages(root, ctx) {
         width: image.width,
         height: image.height,
         mime,
+        seed: image.seed,
       };
       ctx.persist();
       void putMedia('images:last', url).catch(() => {});
-      showImage(url, { model, width: image.width, height: image.height, alt: text });
+      showImage(url, {
+        model,
+        width: image.width,
+        height: image.height,
+        seed: image.seed,
+        alt: text,
+      });
       status.textContent = '完成';
       toast('图片已生成', 'success');
     } catch (error) {
