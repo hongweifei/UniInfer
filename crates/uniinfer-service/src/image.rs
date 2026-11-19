@@ -247,10 +247,12 @@ impl ImageSlot {
     }
 
     fn padded(&self, prompt: &str, max_length: usize, pad: u32) -> Result<Vec<i64>> {
-        let mut ids = self
+        let tokenizer = self
             .tokenizer
             .as_ref()
-            .ok_or_else(|| EngineError::Other("image tokenizer unavailable".into()))?
+            .ok_or_else(|| EngineError::Other("image tokenizer unavailable".into()))?;
+        let pad = tokenizer.padding_token().unwrap_or(pad);
+        let mut ids = tokenizer
             .encode(prompt)?
             .into_iter()
             .map(i64::from)
@@ -288,7 +290,8 @@ fn encode_image(image: Tensor) -> Result<ModelOutput> {
     // SD-family VAEs return [-1, 1]; other image models commonly return
     // [0, 1]. Detect the range instead of assuming one convention, otherwise
     // a perfectly valid VAE output is clipped to near-black.
-    let rescale = values.iter().any(|value| *value < -0.001);
+    let min = values.iter().copied().fold(f32::INFINITY, f32::min);
+    let rescale = min < -0.001;
     let mut rgb = RgbImage::new(width as u32, height as u32);
     for y in 0..height {
         for x in 0..width {

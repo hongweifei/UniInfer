@@ -7,6 +7,10 @@ pub trait Tokenizer: Send + Sync {
     fn encode(&self, text: &str) -> Result<Vec<u32>>;
     fn decode(&self, token: u32) -> Result<Vec<u8>>;
     fn vocab_size(&self) -> usize;
+    /// Padding token when the tokenizer owns a fixed convention (CLIP).
+    fn padding_token(&self) -> Option<u32> {
+        None
+    }
 }
 
 /// Byte tokenizer used by the tiny fixture.
@@ -55,13 +59,17 @@ impl Tokenizer for ByteTokenizer {
 
 pub struct HuggingFaceTokenizer {
     inner: tokenizers::Tokenizer,
+    clip_special: Option<(u32, u32)>,
 }
 
 impl HuggingFaceTokenizer {
     pub fn from_file(path: impl AsRef<std::path::Path>) -> Result<Self> {
         let inner = tokenizers::Tokenizer::from_file(path)
             .map_err(|error| EngineError::ManifestInvalid(format!("tokenizer file: {error}")))?;
-        Ok(Self { inner })
+        Ok(Self {
+            inner,
+            clip_special: None,
+        })
     }
 
     /// Build a CLIP-style BPE tokenizer from the vocab/merges files that some
@@ -79,21 +87,44 @@ impl HuggingFaceTokenizer {
                 vocab_path.as_ref().to_string_lossy().into_owned(),
                 merges_path.as_ref().to_string_lossy().into_owned(),
             )
+            .end_of_word_suffix("</w>".to_owned())
             .build()
             .map_err(|error| EngineError::ManifestInvalid(format!("tokenizer bpe: {error}")))?;
         let mut inner = tokenizers::Tokenizer::new(model);
-        inner.with_pre_tokenizer(Some(ByteLevel::default()));
+        let mut pre_tokenizer = ByteLevel::default();
+        pre_tokenizer.add_prefix_space = false;
+        inner.with_pre_tokenizer(Some(pre_tokenizer));
         inner.with_decoder(Some(ByteLevelDecoder::default()));
-        Ok(Self { inner })
+        let special = match (
+            inner.token_to_id("<|startoftext|>"),
+            inner.token_to_id("<|endoftext|>"),
+        ) {
+            (Some(start), Some(end)) => Some((start, end)),
+            _ => None,
+        };
+        Ok(Self {
+            inner,
+            clip_special: special,
+        })
     }
 }
 
 impl Tokenizer for HuggingFaceTokenizer {
     fn encode(&self, text: &str) -> Result<Vec<u32>> {
-        self.inner
+        let mut ids = self
+            .inner
             .encode(text, true)
             .map(|encoding| encoding.get_ids().to_vec())
-            .map_err(|error| EngineError::Other(format!("tokenize: {error}")))
+            .map_err(|error| EngineError::Other(format!("tokenize: {error}")))?;
+        if let Some((start, end)) = self.clip_special {
+            ids.insert(0, start);
+            ids.push(end);
+        }
+        Ok(ids)
+    }
+
+    fn padding_token(&self) -> Option<u32> {
+        self.clip_special.map(|(_, end)| end)
     }
 
     fn decode(&self, token: u32) -> Result<Vec<u8>> {

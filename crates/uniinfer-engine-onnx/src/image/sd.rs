@@ -90,21 +90,38 @@ impl EngineSession for DiffusionSession {
         let latent_h = height.div_ceil(LATENT_SCALE) as usize;
         let latent_w = width.div_ceil(LATENT_SCALE) as usize;
         let steps = request.steps.clamp(1, 100);
-        let (sigmas, timesteps) = scheduler::schedule(steps, &self.config.scheduler);
-        let mut sample = random_latent(
-            self.config.latent_channels,
-            latent_h,
-            latent_w,
-            request.seed,
-        );
-        for value in &mut sample {
-            *value *= sigmas[0];
-        }
+        let use_ddim = self.config.scheduler.kind == uniinfer_core::DiffusionSchedulerKind::Ddim;
+        let (sigmas, timesteps, ddim_alphas) = if use_ddim {
+            let (alphas, timesteps) = scheduler::ddim(steps, &self.config.scheduler);
+            (Vec::new(), timesteps, alphas)
+        } else {
+            let (sigmas, timesteps) = scheduler::schedule(steps, &self.config.scheduler);
+            (sigmas, timesteps, Vec::new())
+        };
+        let mut sample = if use_ddim {
+            normal_latent(
+                self.config.latent_channels,
+                latent_h,
+                latent_w,
+                request.seed,
+            )
+        } else {
+            let mut sample = random_latent(
+                self.config.latent_channels,
+                latent_h,
+                latent_w,
+                request.seed,
+            );
+            for value in &mut sample {
+                *value *= sigmas[0];
+            }
+            sample
+        };
         let mut last_preview = None;
         for step in 0..steps {
             self.check_cancelled()?;
-            let sigma = sigmas[step];
-            let next_sigma = sigmas[step + 1];
+            let sigma = if use_ddim { 1.0 } else { sigmas[step] };
+            let next_sigma = if use_ddim { 1.0 } else { sigmas[step + 1] };
             let timestep = Tensor::new(
                 self.config.unet_timestep_input.clone(),
                 vec![1],
@@ -116,10 +133,17 @@ impl EngineSession for DiffusionSession {
                     TensorData::F32(vec![timesteps[step]])
                 },
             )?;
+            let input_scale = if !use_ddim
+                && self.config.scheduler.kind == uniinfer_core::DiffusionSchedulerKind::Euler
+            {
+                (sigma * sigma + 1.0).sqrt()
+            } else {
+                1.0
+            };
             let sample_tensor = Tensor::new(
                 self.config.unet_sample_input.clone(),
                 vec![1, self.config.latent_channels, latent_h, latent_w],
-                TensorData::F32(sample.clone()),
+                TensorData::F32(sample.iter().map(|value| value / input_scale).collect()),
             )?;
             let encoder_tensor = encoder.clone();
             let conditional = self.unet(&sample_tensor, &timestep, &encoder_tensor)?;
@@ -129,7 +153,25 @@ impl EngineSession for DiffusionSession {
             } else {
                 conditional
             };
-            apply_euler(&mut sample, &predicted, next_sigma - sigma)?;
+            if use_ddim {
+                let TensorData::F32(eps) = &predicted.data else {
+                    return Err(EngineError::Other("DDIM output is not f32".into()));
+                };
+                let alpha = ddim_alphas[step];
+                let alpha_next = ddim_alphas[step + 1];
+                let pred_x0 = sample
+                    .iter()
+                    .zip(eps)
+                    .map(|(sample, eps)| (sample - (1.0 - alpha).sqrt() * eps) / alpha.sqrt())
+                    .collect::<Vec<_>>();
+                sample = pred_x0
+                    .iter()
+                    .zip(eps)
+                    .map(|(x0, eps)| alpha_next.sqrt() * x0 + (1.0 - alpha_next).sqrt() * eps)
+                    .collect();
+            } else {
+                apply_euler(&mut sample, &predicted, next_sigma - sigma)?;
+            }
             let preview = if request.preview {
                 match self.decode_latent(&sample, latent_h, latent_w) {
                     Ok(image) => {
@@ -220,6 +262,12 @@ impl DiffusionSession {
             .find(|tensor| tensor.name == self.config.text_encoder.output)
             .ok_or_else(|| EngineError::Other("diffusion text encoder output missing".into()))?;
         encoder.name = self.config.unet_encoder_input.clone();
+        if let TensorData::F32(values) = &encoder.data {
+            let min = values.iter().copied().fold(f32::INFINITY, f32::min);
+            let max = values.iter().copied().fold(f32::NEG_INFINITY, f32::max);
+            let mean = values.iter().copied().sum::<f32>() / values.len().max(1) as f32;
+            tracing::debug!(min, max, mean, shape = ?encoder.shape, "text encoder output");
+        }
         Ok(encoder)
     }
 
@@ -241,6 +289,28 @@ fn check_cancel(cancel: &CancelToken) -> Result<()> {
     } else {
         Ok(())
     }
+}
+
+fn normal_latent(channels: usize, height: usize, width: usize, seed: Option<u64>) -> Vec<f32> {
+    let mut state = seed.unwrap_or(0x5eed_1234_abcd_ef01) | 1;
+    let mut next = || {
+        state ^= state << 13;
+        state ^= state >> 7;
+        state ^= state << 17;
+        (state >> 11) as f32 / (1u64 << 53) as f32
+    };
+    let count = channels * height * width;
+    let mut values = Vec::with_capacity(count);
+    while values.len() < count {
+        let u1 = next().max(f32::MIN_POSITIVE);
+        let u2 = next();
+        let radius = (-2.0 * u1.ln()).sqrt();
+        values.push(radius * (std::f32::consts::TAU * u2).cos());
+        if values.len() < count {
+            values.push(radius * (std::f32::consts::TAU * u2).sin());
+        }
+    }
+    values
 }
 
 fn random_latent(channels: usize, height: usize, width: usize, seed: Option<u64>) -> Vec<f32> {

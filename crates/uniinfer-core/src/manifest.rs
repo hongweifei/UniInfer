@@ -456,9 +456,10 @@ pub struct DiffusionComponent {
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum DiffusionSchedulerKind {
-    #[default]
     Euler,
     FlowMatch,
+    #[default]
+    Ddim,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

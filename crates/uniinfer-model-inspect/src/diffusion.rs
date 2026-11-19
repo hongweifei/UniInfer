@@ -156,6 +156,8 @@ fn image_size(vae: Option<&GraphInfo>, unet: Option<&GraphInfo>) -> (u32, u32) {
 fn scheduler_config(root: &Path) -> DiffusionScheduler {
     #[derive(Default, serde::Deserialize)]
     struct Raw {
+        #[serde(rename = "_class_name")]
+        class_name: Option<String>,
         num_train_timesteps: Option<u32>,
         beta_start: Option<f32>,
         beta_end: Option<f32>,
@@ -168,8 +170,13 @@ fn scheduler_config(root: &Path) -> DiffusionScheduler {
     let Ok(raw) = serde_json::from_str::<Raw>(&raw) else {
         return DiffusionScheduler::default();
     };
+    let kind = match raw.class_name.as_deref() {
+        Some(name) if name.contains("Euler") => uniinfer_core::DiffusionSchedulerKind::Euler,
+        Some(name) if name.contains("Flow") => uniinfer_core::DiffusionSchedulerKind::FlowMatch,
+        _ => uniinfer_core::DiffusionSchedulerKind::Ddim,
+    };
     DiffusionScheduler {
-        kind: uniinfer_core::DiffusionSchedulerKind::Euler,
+        kind,
         num_train_timesteps: raw.num_train_timesteps.unwrap_or(1000),
         beta_start: raw.beta_start.unwrap_or(0.00085),
         beta_end: raw.beta_end.unwrap_or(0.012),

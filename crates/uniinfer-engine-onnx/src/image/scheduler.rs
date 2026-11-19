@@ -7,6 +7,7 @@ pub(crate) fn schedule(steps: usize, config: &DiffusionScheduler) -> (Vec<f32>, 
     match config.kind {
         DiffusionSchedulerKind::Euler => euler_schedule(steps, config),
         DiffusionSchedulerKind::FlowMatch => flow_schedule(steps),
+        DiffusionSchedulerKind::Ddim => euler_schedule(steps, config),
     }
 }
 
@@ -14,9 +15,14 @@ fn euler_schedule(steps: usize, config: &DiffusionScheduler) -> (Vec<f32>, Vec<f
     let train = config.num_train_timesteps.max(1) as usize;
     let mut alpha_cumprod = 1.0f32;
     let mut train_sigmas = Vec::with_capacity(train);
+    // Stable Diffusion uses scaled_linear betas: interpolate the square roots
+    // of beta_start/beta_end and square the result.
+    let beta_start = config.beta_start.max(0.0).sqrt();
+    let beta_end = config.beta_end.max(0.0).sqrt();
     for index in 0..train {
         let ratio = index as f32 / (train.saturating_sub(1)).max(1) as f32;
-        let beta = config.beta_start + (config.beta_end - config.beta_start) * ratio;
+        let beta = beta_start + (beta_end - beta_start) * ratio;
+        let beta = beta * beta;
         alpha_cumprod *= 1.0 - beta;
         train_sigmas.push(((1.0 - alpha_cumprod) / alpha_cumprod).sqrt());
     }
@@ -45,6 +51,31 @@ fn flow_schedule(steps: usize) -> (Vec<f32>, Vec<f32>) {
     (sigmas, timesteps)
 }
 
+pub(crate) fn ddim(steps: usize, config: &DiffusionScheduler) -> (Vec<f32>, Vec<f32>) {
+    let train = config.num_train_timesteps.max(1) as usize;
+    let beta_start = config.beta_start.max(0.0).sqrt();
+    let beta_end = config.beta_end.max(0.0).sqrt();
+    let mut alpha_cumprod = 1.0f32;
+    let mut alphas = Vec::with_capacity(train);
+    for index in 0..train {
+        let ratio = index as f32 / (train.saturating_sub(1)).max(1) as f32;
+        let beta = beta_start + (beta_end - beta_start) * ratio;
+        alpha_cumprod *= 1.0 - beta * beta;
+        alphas.push(alpha_cumprod);
+    }
+    let steps = steps.max(1);
+    let timesteps = (0..steps)
+        .map(|step| (train - 1) as f32 * (steps - step) as f32 / steps as f32)
+        .collect::<Vec<_>>();
+    let alpha_at = |timestep: f32| alphas[timestep.round() as usize % train];
+    let mut schedule_alphas = timesteps
+        .iter()
+        .map(|timestep| alpha_at(*timestep))
+        .collect::<Vec<_>>();
+    schedule_alphas.push(1.0);
+    (schedule_alphas, timesteps)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -63,7 +94,8 @@ mod tests {
 
     #[test]
     fn euler_schedule_ends_at_zero() {
-        let config = DiffusionScheduler::default();
+        let mut config = DiffusionScheduler::default();
+        config.kind = DiffusionSchedulerKind::Euler;
         let (sigmas, _) = schedule(3, &config);
         assert_eq!(sigmas.len(), 4);
         assert_eq!(sigmas.last(), Some(&0.0));
