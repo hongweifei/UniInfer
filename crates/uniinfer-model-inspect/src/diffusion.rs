@@ -169,6 +169,7 @@ fn scheduler_config(root: &Path) -> DiffusionScheduler {
         return DiffusionScheduler::default();
     };
     DiffusionScheduler {
+        kind: uniinfer_core::DiffusionSchedulerKind::Euler,
         num_train_timesteps: raw.num_train_timesteps.unwrap_or(1000),
         beta_start: raw.beta_start.unwrap_or(0.00085),
         beta_end: raw.beta_end.unwrap_or(0.012),
