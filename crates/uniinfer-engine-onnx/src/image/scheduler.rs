@@ -8,6 +8,8 @@ pub(crate) fn schedule(steps: usize, config: &DiffusionScheduler) -> (Vec<f32>, 
         DiffusionSchedulerKind::Euler => euler_schedule(steps, config),
         DiffusionSchedulerKind::FlowMatch => flow_schedule(steps),
         DiffusionSchedulerKind::Ddim => euler_schedule(steps, config),
+        DiffusionSchedulerKind::EulerAncestral => euler_schedule(steps, config),
+        DiffusionSchedulerKind::Ddpm => euler_schedule(steps, config),
     }
 }
 
@@ -100,4 +102,25 @@ mod tests {
         assert_eq!(sigmas.len(), 4);
         assert_eq!(sigmas.last(), Some(&0.0));
     }
+}
+
+pub(crate) fn ddpm(steps: usize, config: &DiffusionScheduler) -> (Vec<f32>, Vec<f32>) {
+    let train = config.num_train_timesteps.max(1) as usize;
+    let beta_start = config.beta_start.max(0.0).sqrt();
+    let beta_end = config.beta_end.max(0.0).sqrt();
+    let mut alpha_cumprod = 1.0f32;
+    let mut alphas = Vec::with_capacity(train);
+    for index in 0..train {
+        let ratio = index as f32 / (train.saturating_sub(1)).max(1) as f32;
+        let beta = beta_start + (beta_end - beta_start) * ratio;
+        alpha_cumprod *= 1.0 - beta * beta;
+        alphas.push(alpha_cumprod);
+    }
+    let alpha_at = |timestep: f32| alphas[timestep.round() as usize % train];
+    let steps = steps.max(1);
+    let timesteps = (0..steps)
+        .map(|step| (train - 1) as f32 * (steps - step) as f32 / steps as f32)
+        .collect::<Vec<_>>();
+    let schedule_alphas = timesteps.iter().map(|t| alpha_at(*t)).collect::<Vec<_>>();
+    (schedule_alphas, timesteps)
 }

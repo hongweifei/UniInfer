@@ -90,15 +90,21 @@ impl EngineSession for DiffusionSession {
         let latent_h = height.div_ceil(LATENT_SCALE) as usize;
         let latent_w = width.div_ceil(LATENT_SCALE) as usize;
         let steps = request.steps.clamp(1, 100);
-        let use_ddim = self.config.scheduler.kind == uniinfer_core::DiffusionSchedulerKind::Ddim;
-        let (sigmas, timesteps, ddim_alphas) = if use_ddim {
+        let kind = self.config.scheduler.kind;
+        let use_ddim = kind == uniinfer_core::DiffusionSchedulerKind::Ddim;
+        let use_ddpm = kind == uniinfer_core::DiffusionSchedulerKind::Ddpm;
+        let use_ancestral = kind == uniinfer_core::DiffusionSchedulerKind::EulerAncestral;
+        let (sigmas, timesteps, ddim_alphas, ddpm_alphas) = if use_ddim {
             let (alphas, timesteps) = scheduler::ddim(steps, &self.config.scheduler);
-            (Vec::new(), timesteps, alphas)
+            (Vec::new(), timesteps, alphas, Vec::new())
+        } else if use_ddpm {
+            let (alphas, timesteps) = scheduler::ddpm(steps, &self.config.scheduler);
+            (Vec::new(), timesteps, Vec::new(), alphas)
         } else {
             let (sigmas, timesteps) = scheduler::schedule(steps, &self.config.scheduler);
-            (sigmas, timesteps, Vec::new())
+            (sigmas, timesteps, Vec::new(), Vec::new())
         };
-        let mut sample = if use_ddim {
+        let mut sample = if use_ddim || use_ddpm {
             normal_latent(
                 self.config.latent_channels,
                 latent_h,
@@ -120,8 +126,16 @@ impl EngineSession for DiffusionSession {
         let mut last_preview = None;
         for step in 0..steps {
             self.check_cancelled()?;
-            let sigma = if use_ddim { 1.0 } else { sigmas[step] };
-            let next_sigma = if use_ddim { 1.0 } else { sigmas[step + 1] };
+            let sigma = if use_ddim || use_ddpm {
+                1.0
+            } else {
+                sigmas[step]
+            };
+            let next_sigma = if use_ddim || use_ddpm {
+                1.0
+            } else {
+                sigmas[step + 1]
+            };
             let timestep = Tensor::new(
                 self.config.unet_timestep_input.clone(),
                 vec![1],
@@ -133,9 +147,11 @@ impl EngineSession for DiffusionSession {
                     TensorData::F32(vec![timesteps[step]])
                 },
             )?;
-            let input_scale = if !use_ddim
-                && self.config.scheduler.kind == uniinfer_core::DiffusionSchedulerKind::Euler
-            {
+            let input_scale = if matches!(
+                self.config.scheduler.kind,
+                uniinfer_core::DiffusionSchedulerKind::Euler
+                    | uniinfer_core::DiffusionSchedulerKind::EulerAncestral
+            ) {
                 (sigma * sigma + 1.0).sqrt()
             } else {
                 1.0
@@ -169,6 +185,54 @@ impl EngineSession for DiffusionSession {
                     .zip(eps)
                     .map(|(x0, eps)| alpha_next.sqrt() * x0 + (1.0 - alpha_next).sqrt() * eps)
                     .collect();
+            } else if use_ddpm {
+                let TensorData::F32(eps) = &predicted.data else {
+                    return Err(EngineError::Other("DDPM output is not f32".into()));
+                };
+                let alpha = ddpm_alphas[step];
+                let alpha_prev = ddpm_alphas.get(step + 1).copied().unwrap_or(1.0);
+                let beta = 1.0 - alpha / alpha_prev;
+                let pred_x0 = sample
+                    .iter()
+                    .zip(eps)
+                    .map(|(sample, eps)| (sample - (1.0 - alpha).sqrt() * eps) / alpha.sqrt())
+                    .collect::<Vec<_>>();
+                let denom = (1.0 - alpha).max(f32::MIN_POSITIVE);
+                let mean = pred_x0
+                    .iter()
+                    .zip(sample.iter())
+                    .map(|(x0, sample)| {
+                        alpha_prev.sqrt() * beta / denom * x0
+                            + alpha.sqrt() * (1.0 - alpha_prev) / denom * sample
+                    })
+                    .collect::<Vec<_>>();
+                let variance = ((1.0 - alpha_prev) / denom * beta).max(0.0);
+                let noise = normal_latent(
+                    self.config.latent_channels,
+                    latent_h,
+                    latent_w,
+                    request.seed.map(|seed| seed.wrapping_add(step as u64 + 1)),
+                );
+                sample = mean
+                    .iter()
+                    .zip(noise)
+                    .map(|(mean, noise)| mean + variance.sqrt() * noise)
+                    .collect();
+            } else if use_ancestral && sigma > 0.0 {
+                let sigma_sq = sigma * sigma;
+                let next_sq = next_sigma * next_sigma;
+                let sigma_up = (next_sq * (sigma_sq - next_sq) / sigma_sq).max(0.0).sqrt();
+                let sigma_down = (next_sq - sigma_up * sigma_up).max(0.0).sqrt();
+                apply_euler(&mut sample, &predicted, sigma_down - sigma)?;
+                let noise = normal_latent(
+                    self.config.latent_channels,
+                    latent_h,
+                    latent_w,
+                    request.seed.map(|seed| seed.wrapping_add(step as u64 + 1)),
+                );
+                for (value, noise) in sample.iter_mut().zip(noise) {
+                    *value += sigma_up * noise;
+                }
             } else {
                 apply_euler(&mut sample, &predicted, next_sigma - sigma)?;
             }

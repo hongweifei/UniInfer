@@ -171,7 +171,11 @@ fn scheduler_config(root: &Path) -> DiffusionScheduler {
         return DiffusionScheduler::default();
     };
     let kind = match raw.class_name.as_deref() {
+        Some(name) if name.contains("EulerAncestral") => {
+            uniinfer_core::DiffusionSchedulerKind::EulerAncestral
+        }
         Some(name) if name.contains("Euler") => uniinfer_core::DiffusionSchedulerKind::Euler,
+        Some(name) if name.contains("DDPM") => uniinfer_core::DiffusionSchedulerKind::Ddpm,
         Some(name) if name.contains("Flow") => uniinfer_core::DiffusionSchedulerKind::FlowMatch,
         _ => uniinfer_core::DiffusionSchedulerKind::Ddim,
     };
